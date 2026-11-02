@@ -24,6 +24,16 @@ pnpm tauri dev
 
 `tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dockmoss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
 
+## Accessibility access
+
+DockMoss needs the Accessibility grant to read the Dock. macOS gives the grant to the *responsible process*, so which app needs it depends on how DockMoss starts:
+
+- `pnpm tauri dev` uses the grant of the terminal you start it from. If your terminal is in System Settings → Privacy & Security → Accessibility, DockMoss runs trusted and the tray shows only Quit DockMoss.
+- An app bundle launched from Finder or with `open` is its own responsible process. Build one with `pnpm tauri build --debug --bundles app` and run `open src-tauri/target/debug/bundle/macos/DockMoss.app`. Without a grant, macOS shows its Accessibility dialog once at launch, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list. macOS 27 titles that list "Device Control and Data Access".
+- Local bundles are ad-hoc signed, so each rebuild has a new signature and macOS treats it as a different app: a grant does not carry over. Signing with a stable identity is milestone 7.
+
+While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
+
 ## Commands
 
 | Command | What it runs |

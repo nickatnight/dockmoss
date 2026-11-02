@@ -9,4 +9,12 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    // Safari 18 is the WebKit of macOS 15, the bundle's minimumSystemVersion.
+    target: "safari18",
+    modulePreload: { polyfill: false },
+    rolldownOptions: {
+      input: { overlay: "overlay.html" },
+    },
+  },
 });

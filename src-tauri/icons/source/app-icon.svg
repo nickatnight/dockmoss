@@ -1,0 +1,145 @@
+<!-- Dock Moss app icon master: a stone app tile on the macOS icon grid (824 px tile, radius 185, on a 1024 canvas) with moss creeping up from the bottom edge and lower corners.
+     Regenerate the bundle icons with: pnpm tauri icon src-tauri/icons/source/app-icon.svg (then delete the non-macOS outputs). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="stone" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C8994"/>
+      <stop offset="1" stop-color="#5B6873"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="330" cy="170" r="620" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mossBack" x1="0" y1="360" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D7A30"/>
+      <stop offset="1" stop-color="#1C3F1C"/>
+    </linearGradient>
+    <linearGradient id="mossFront" x1="0" y1="470" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8DC24B"/>
+      <stop offset="0.45" stop-color="#5A9734"/>
+      <stop offset="1" stop-color="#2D6225"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D9774C"/>
+      <stop offset="1" stop-color="#9E4A2B"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+    <path id="mossBackEdge" d="M70 404 A23 23 0 0 1 92 442 A24 24 0 0 1 116 481 A12 12 0 0 1 129 500 A28 28 0 0 1 161 545 A16 16 0 0 1 180 569 A18 18 0 0 1 203 595 A27 27 0 0 1 240 632 A11 11 0 0 1 257 646 A25 25 0 0 1 296 675 A21 21 0 0 1 331 696 A14 14 0 0 1 354 707 A29 29 0 0 1 408 725 A14 14 0 0 1 434 730 A21 21 0 0 1 475 734 A26 26 0 0 1 526 735 A12 12 0 0 1 548 734 A28 28 0 0 1 603 730 A18 18 0 0 1 638 724 A16 16 0 0 1 669 716 A30 30 0 0 1 724 696 A12 12 0 0 1 745 685 A25 25 0 0 1 787 661 A24 24 0 0 1 826 634 A13 13 0 0 1 845 618 A30 30 0 0 1 889 578 A16 16 0 0 1 910 556 A20 20 0 0 1 935 527 A10 10 0 0 1 954 527 L954 960 L70 960 Z"/>
+    <path id="mossFrontEdge" d="M70 498 A17 17 0 0 1 88 527 A10 10 0 0 1 99 543 A10 10 0 0 1 110 559 A18 18 0 0 1 130 587 A7 7 0 0 1 137 597 A15 15 0 0 1 155 620 A14 14 0 0 1 172 639 A8 8 0 0 1 182 650 A18 18 0 0 1 206 675 A9 9 0 0 1 218 686 A12 12 0 0 1 235 701 A16 16 0 0 1 259 721 A6 6 0 0 1 269 728 A17 17 0 0 1 296 746 A12 12 0 0 1 315 757 A9 9 0 0 1 331 764 A18 18 0 0 1 363 778 A7 7 0 0 1 376 782 A14 14 0 0 1 402 789 A15 15 0 0 1 430 795 A7 7 0 0 1 443 797 A18 18 0 0 1 478 799 A10 10 0 0 1 497 800 A11 11 0 0 1 517 800 A18 18 0 0 1 552 799 A7 7 0 0 1 564 799 A16 16 0 0 1 595 796 A13 13 0 0 1 620 793 A8 8 0 0 1 635 790 A19 19 0 0 1 670 782 A8 8 0 0 1 685 778 A13 13 0 0 1 709 770 A16 16 0 0 1 738 758 A7 7 0 0 1 749 753 A18 18 0 0 1 780 738 A11 11 0 0 1 799 727 A10 10 0 0 1 814 717 A19 19 0 0 1 844 696 A7 7 0 0 1 854 688 A15 15 0 0 1 877 669 A15 15 0 0 1 898 650 A7 7 0 0 1 908 641 A19 19 0 0 1 933 615 A9 9 0 0 1 945 602 A5 5 0 0 1 954 602 L954 960 L70 960 Z"/>
+    <clipPath id="frontMoss">
+      <use href="#mossFrontEdge"/>
+    </clipPath>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#stone)" filter="url(#drop)"/>
+
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#sheen)"/>
+    <g>
+      <circle cx="260" cy="230" r="5" fill="#FFFFFF" fill-opacity="0.16"/>
+      <circle cx="330" cy="300" r="3" fill="#FFFFFF" fill-opacity="0.14"/>
+      <circle cx="612" cy="210" r="4" fill="#000000" fill-opacity="0.08"/>
+      <circle cx="700" cy="280" r="6" fill="#FFFFFF" fill-opacity="0.12"/>
+      <circle cx="470" cy="360" r="3" fill="#000000" fill-opacity="0.08"/>
+      <circle cx="560" cy="470" r="5" fill="#FFFFFF" fill-opacity="0.1"/>
+      <circle cx="400" cy="520" r="4" fill="#000000" fill-opacity="0.07"/>
+      <circle cx="760" cy="380" r="3" fill="#FFFFFF" fill-opacity="0.14"/>
+      <circle cx="240" cy="410" r="3" fill="#000000" fill-opacity="0.08"/>
+    </g>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="none" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="6"/>
+
+    <use href="#mossBackEdge" fill="#0E1A12" fill-opacity="0.28" filter="url(#soft)" transform="translate(0 -6)"/>
+    <use href="#mossBackEdge" fill="url(#mossBack)"/>
+
+    <g>
+      <rect x="733" y="660" width="28" height="110" rx="14" fill="#EFE2C6"/>
+      <path d="M686 686 C686 636 724 612 747 612 C770 612 808 636 808 686 C780 678 714 678 686 686 Z" fill="url(#cap)"/>
+      <rect x="671" y="722" width="18" height="70" rx="9" fill="#EFE2C6"/>
+      <path d="M644 738 C644 708 666 694 680 694 C694 694 716 708 716 738 C700 733 660 733 644 738 Z" fill="url(#cap)"/>
+    </g>
+
+
+    <use href="#mossFrontEdge" fill="url(#mossFront)"/>
+    <g clip-path="url(#frontMoss)">
+      <circle cx="592" cy="904" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="918" cy="688" r="6" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="301" cy="865" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="845" cy="930" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="457" cy="1016" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="106" cy="731" r="6" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="554" cy="945" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="766" cy="895" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="774" cy="806" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="622" cy="850" r="6" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="604" cy="933" r="6" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="222" cy="845" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="237" cy="761" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="295" cy="928" r="6" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="633" cy="907" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="323" cy="1044" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="593" cy="948" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="709" cy="832" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="736" cy="790" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="318" cy="983" r="6" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="364" cy="866" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="913" cy="910" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="409" cy="1036" r="3" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="371" cy="859" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="921" cy="759" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="208" cy="778" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="506" cy="1006" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="231" cy="751" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="203" cy="935" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="924" cy="714" r="6" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="248" cy="939" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="357" cy="953" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="441" cy="944" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="490" cy="998" r="3" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="832" cy="863" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="582" cy="1072" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="229" cy="835" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="810" cy="753" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="796" cy="863" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="423" cy="970" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="595" cy="1006" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="327" cy="871" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="444" cy="1079" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="212" cy="903" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="374" cy="958" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="103" cy="801" r="3" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="512" cy="966" r="3" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="582" cy="978" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="632" cy="978" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="833" cy="800" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="826" cy="765" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="305" cy="1008" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="855" cy="861" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="678" cy="872" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="612" cy="913" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="719" cy="1053" r="6" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="909" cy="711" r="4" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="521" cy="962" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="450" cy="916" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="271" cy="943" r="3" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="523" cy="853" r="6" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="158" cy="823" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="119" cy="744" r="3" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="590" cy="862" r="5" fill="#1F4A1C" fill-opacity="0.2"/>
+      <circle cx="421" cy="1027" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="248" cy="748" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="543" cy="991" r="4" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="212" cy="858" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="161" cy="746" r="5" fill="#B3DB6C" fill-opacity="0.22"/>
+      <circle cx="160" cy="800" r="3" fill="#B3DB6C" fill-opacity="0.22"/>
+      <use href="#mossFrontEdge" fill="none" stroke="#B9E07A" stroke-opacity="0.5" stroke-width="8"/>
+    </g>
+  </g>
+</svg>

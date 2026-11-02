@@ -62,23 +62,26 @@ fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
             loop {
                 std::thread::sleep(TRUST_POLL_INTERVAL);
                 let trust = macos::ax::check_trust();
-                if tray.app_handle().state::<TrustState>().replace(trust) == trust {
-                    continue;
-                }
-                tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
-                let main_tray = tray.clone();
-                let scheduled = tray.app_handle().run_on_main_thread(move || {
-                    let trust = main_tray.app_handle().state::<TrustState>().current();
-                    if let Err(error) = tray::show_trust(&main_tray, trust) {
-                        tracing::warn!(%error, "tray update after a trust change failed");
-                    }
-                });
-                if let Err(error) = scheduled {
-                    tracing::warn!(%error, "could not schedule the tray update");
+                if tray.app_handle().state::<TrustState>().replace(trust) != trust {
+                    tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
+                    refresh_tray_on_main_thread(&tray);
                 }
             }
         })?;
     Ok(())
+}
+
+fn refresh_tray_on_main_thread(tray: &TrayIcon) {
+    let main_tray = tray.clone();
+    let scheduled = tray.app_handle().run_on_main_thread(move || {
+        let trust = main_tray.app_handle().state::<TrustState>().current();
+        if let Err(error) = tray::show_trust(&main_tray, trust) {
+            tracing::warn!(%error, "tray update after a trust change failed");
+        }
+    });
+    if let Err(error) = scheduled {
+        tracing::warn!(%error, "could not schedule the tray update");
+    }
 }
 
 fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {

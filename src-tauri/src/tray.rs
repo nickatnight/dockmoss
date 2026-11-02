@@ -4,7 +4,6 @@ use tauri::tray::TrayIconBuilder;
 
 const QUIT_ID: &str = "quit";
 
-/// Adds the menu-bar icon with a Quit item. The app's tray manager keeps it alive.
 pub fn build(app: &AppHandle) -> Result<(), crate::Error> {
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Dock Moss", true, Some("CmdOrCtrl+Q"))?;
     let menu = Menu::with_items(app, &[&quit])?;

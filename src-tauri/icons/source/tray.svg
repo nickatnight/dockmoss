@@ -8,5 +8,5 @@
     </clipPath>
   </defs>
   <rect x="3" y="3" width="38" height="38" rx="9" fill="none" stroke="#000" stroke-width="4"/>
-  <path clip-path="url(#tile)" fill="#000" d="M-1 24 H8.58 A4 4 0 0 1 12.42 26.86 A3 3 0 0 0 18.17 26.86 A4 4 0 0 1 22 24 A4 4 0 0 1 25.83 26.86 A3 3 0 0 0 31.58 26.86 A4 4 0 0 1 35.42 24 H45 V45 H-1 Z"/>
+  <path clip-path="url(#tile)" fill="#000" d="M-1 25 H8.97 A4 4 0 0 1 12.58 27.29 A3 3 0 0 0 18.17 26.86 A4 4 0 0 1 22 24 A4 4 0 0 1 25.83 26.86 A3 3 0 0 0 31.42 27.29 A4 4 0 0 1 35.03 25 H45 V45 H-1 Z"/>
 </svg>

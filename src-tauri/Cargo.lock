@@ -663,6 +663,7 @@ dependencies = [
  "objc2-application-services",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",

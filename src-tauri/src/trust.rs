@@ -1,3 +1,10 @@
+use std::sync::atomic::AtomicBool;
+
+/// The latest Accessibility trust reading, managed as app state so the Dock
+/// tracker can check it. The `ax-trust` watcher is its only writer after
+/// startup.
+pub struct TrustState(pub AtomicBool);
+
 /// How the tray menu must change after an Accessibility trust reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayChange {

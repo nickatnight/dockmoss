@@ -3,22 +3,22 @@ mod error;
 mod growth;
 mod macos;
 mod tray;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the Accessibility watcher calls it from the next commit"
-    )
-)]
 mod trust;
 mod usage;
 
 pub use error::Error;
 
-use tauri::{AppHandle, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use tauri::tray::TrayIcon;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
+use trust::TrustState;
+
 const OVERLAY_LABEL: &str = "overlay";
+const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Builds and runs the Tauri application.
 ///
@@ -38,7 +38,12 @@ pub fn run() {
             // untrusted, and every later check passes `false`.
             let trusted = macos::ax::is_trusted(true);
             tracing::info!(trusted, "accessibility trust checked");
-            tray::build(app.handle())?;
+            let tray = tray::build(app.handle())?;
+            if let Some(change) = trust::tray_change(None, trusted) {
+                tray::apply(&tray, change)?;
+            }
+            app.manage(TrustState(AtomicBool::new(trusted)));
+            spawn_trust_watcher(tray)?;
             let overlay = build_overlay(app.handle())?;
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
@@ -54,6 +59,36 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("tauri runtime starts with the bundled context");
+}
+
+/// Re-checks trust every few seconds for the life of the app, in both
+/// directions, and updates the tray on the main thread when it changes.
+fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("ax-trust".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(TRUST_POLL_INTERVAL);
+                let state = tray.app_handle().state::<TrustState>();
+                let previous = state.0.load(Ordering::Relaxed);
+                let trusted = macos::ax::is_trusted(false);
+                let Some(change) = trust::tray_change(Some(previous), trusted) else {
+                    continue;
+                };
+                state.0.store(trusted, Ordering::Relaxed);
+                tracing::info!(trusted, "accessibility trust changed");
+                let main_tray = tray.clone();
+                let scheduled = tray.app_handle().run_on_main_thread(move || {
+                    if let Err(error) = tray::apply(&main_tray, change) {
+                        tracing::warn!(%error, "tray update after a trust change failed");
+                    }
+                });
+                if let Err(error) = scheduled {
+                    tracing::warn!(%error, "could not schedule the tray update");
+                }
+            }
+        })?;
+    Ok(())
 }
 
 fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {

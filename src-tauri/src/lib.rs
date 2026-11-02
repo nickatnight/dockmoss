@@ -27,7 +27,6 @@ pub fn run() {
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dock moss started");
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
         .run(tauri::generate_context!())
         .expect("tauri runtime starts with the bundled context");
 }

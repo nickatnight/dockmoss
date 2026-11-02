@@ -5,7 +5,6 @@ body {
   background: transparent;
 }
 
-/* Debug frame for slice 2: marks the bottom 120 px, where the Dock sits. */
 .debug-dock-band {
   position: fixed;
   right: 0;

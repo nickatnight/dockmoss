@@ -13,18 +13,12 @@ pub enum OverlayError {
     NullWindow,
 }
 
-/// Window levels after pinning, as read back from the `NSWindow`.
 #[derive(Debug, Clone, Copy)]
 pub struct PinnedLevels {
     pub dock: NSWindowLevel,
     pub overlay: NSWindowLevel,
 }
 
-/// Raises the overlay one level above the Dock and keeps it on every Space,
-/// over full-screen apps, and out of Cmd-Tab and Mission Control.
-///
-/// `_mtm` proves the caller is on the main thread, where `AppKit` requires
-/// every `NSWindow` call to happen.
 pub fn pin_above_dock(
     window: &WebviewWindow,
     _mtm: MainThreadMarker,
@@ -33,7 +27,6 @@ pub fn pin_above_dock(
     let ptr = NonNull::new(raw.cast::<NSWindow>()).ok_or(OverlayError::NullWindow)?;
     let ns_window = as_ns_window(ptr);
 
-    // i32 to isize widens on both macOS targets (aarch64, x86_64).
     let dock = CGWindowLevelForKey(CGWindowLevelKey::DockWindowLevelKey) as NSWindowLevel;
     ns_window.setLevel(dock + 1);
     ns_window.setCollectionBehavior(

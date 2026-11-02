@@ -43,7 +43,6 @@ pub fn run() {
         .expect("tauri runtime starts with the bundled context");
 }
 
-/// Creates the transparent, click-through overlay over the main display's frame.
 fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {
     let display = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
     let scale = display.scale_factor();

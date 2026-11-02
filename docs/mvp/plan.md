@@ -140,3 +140,34 @@ A settings change makes Rust recompute and push to the overlay immediately. Excl
 | AX polling at 60 Hz is costly | Med | Proximity-gated rate (slice 5), measured at Checkpoint A |
 | Manual visual checks are subjective for an agent | Med | Screenshots in `build.md`; Checkpoint C plus the UI Designer reviewer |
 | macOS 27 API changes vs objc2 crate bindings | Med | Pin crate versions; slice 2–4 surface it early |
+
+## Follow-ups from job 001 reviews
+
+These are optional findings from the job 001 reviews (round 1 and round 2 in that job's folder), grouped by the job that should pick them up. Tags like "round-2 perf #1" give the review round, the reviewer and the finding number. A job that edits a check edits CONSTRAINTS.md and `package.json` together.
+
+### Job 002 (overlay window)
+- Replace `"csp": null` in `tauri.conf.json` with a restrictive policy before the first window loads, with no `'unsafe-eval'` and no remote origin (round-2 security #1, round-2 code-review #1).
+- Before Checkpoint A, the CONSTRAINTS.md idle-CPU check sums `%CPU` of dock-moss plus its WebKit WebContent and GPU processes, and records idle wakeups/s (round-2 perf #1).
+- Give the overlay and settings windows separate HTML entries. Each has a transparent `html, body`, `margin: 0` and `overflow: hidden` (round-2 UI #5).
+- Set Vite `build.modulePreload.polyfill: false`, and `build.target` to the WebKit version that matches `minimumSystemVersion` (round-2 perf #3, #4).
+- Add a grep guard to `check:fast`, run from `src-tauri/`, so unit tests live only in `tests.rs`: `! grep -rlE --include='*.rs' '#\[([a-z_]+::)?test\]' src | grep -v '/tests[.]rs$'`. Note "(enforced by a grep in `check:fast`)" on the CONSTRAINTS.md Floor bullet (round-2 test-engineer A).
+- Add `unused_result_ok = "deny"` under `[lints.clippy]` (round-2 test-engineer B).
+- Add a grep guard to `check:fast` that keeps `unsafe_code` opt-ins inside `src/macos/`: `! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/'` (round-2 test-engineer B, round-2 security #2).
+
+### Job 003 (AX trust)
+- Replace the stock Tauri bundle icons with a Dock Moss app icon before the Accessibility pane flow, because that pane shows the bundle icon (round-2 UI #2).
+- Re-export the tray glyph at about 40 px tall on the 44 px canvas, centred, with the vein at least 3 px wide or dropped (round-2 UI #1, #3).
+
+### Job 013 (live settings and bundle)
+- Set `opt-level = "s"` in the release profile. It measured 20% smaller (3.38 MB against 4.24 MB) with the same idle CPU. Recheck the Checkpoint A CPU figure after switching (round-2 perf #2).
+- Set bundle `targets` to `["app", "dmg"]` (round-2 code-review #4).
+- Add `.env` and `.env.*` to `.gitignore` before any signing or notarisation credentials exist (round-2 security #4).
+- Run cargo-deny `sources` (and `bans`), with `unknown-registry = "deny"` and `unknown-git = "deny"` in `deny.toml` (round-2 security #3).
+
+### Later, or when relevant
+- Run `gitleaks dir --redact --no-banner` on `src` and `src-tauri/src` so untracked files are scanned. Never point it at the repo root, because `target/` is several GB (round-2 test-engineer C).
+- Once `src/ipc.ts` lands, add a ts-comment check: a grep for `@ts-(ignore|expect-error)` or ESLint `ban-ts-comment` (round-2 test-engineer D).
+- `check:task` runs the tests twice, in `cargo test` and again in `cargo llvm-cov`. If test time grows, drop `cargo test`, because llvm-cov already fails on a failing test (round-2 code-review #2).
+- The CLAUDE.md Lints bullet should list the four deny lints added in job 001 (`unsafe_code`, `allow_attributes`, `allow_attributes_without_reason`, `let_underscore_must_use`) or point to `Cargo.toml` (round-2 code-review #6).
+- The ⌘Q accelerator on the tray's Quit item works only while the menu is open, because an Accessory app has no app menu (round-2 code-review #5).
+- A tray glyph drawn from the product (a moss cushion, or an icon outline with moss along its bottom edge) would identify the app better than a leaf (round-2 UI #4).

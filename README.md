@@ -4,7 +4,7 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 1 of 13 (the scaffold). The app starts with no Dock icon and puts a leaf in the menu bar. The tray menu has one item, Quit Dock Moss. There is no overlay and no moss yet. The slices are listed in [docs/mvp/plan.md](docs/mvp/plan.md).
+MVP slice 1 of 13 (the scaffold). The app starts with no Dock icon and puts a leaf in the menu bar. The tray menu has one item, Quit Dock Moss. There is no overlay and no moss yet.
 
 ## Requirements
 
@@ -51,8 +51,3 @@ src/                # webview frontend (renderer from slice 9)
 
 - [CLAUDE.md](CLAUDE.md): engineering conventions (Rust, Tauri, objc2, overlay gotchas)
 - [CONSTRAINTS.md](CONSTRAINTS.md): the quality bar and the checks that enforce it
-- [docs/mvp/spec.md](docs/mvp/spec.md) and [docs/mvp/plan.md](docs/mvp/plan.md): MVP scope, acceptance criteria and slices
-- [docs/adr/](docs/adr/): architecture decisions
-  - [0001](docs/adr/0001-tauri-2-with-objc2-and-unsafe-only-in-macos.md): Tauri 2 with objc2, and every `unsafe` block in `macos/`
-  - [0002](docs/adr/0002-vanilla-typescript-and-raw-webgl2-renderer.md): vanilla TypeScript and one raw WebGL2 shader
-  - [0003](docs/adr/0003-pure-growth-and-usage-logic-with-injected-time.md): pure `growth/` and `usage/` logic, with time passed in

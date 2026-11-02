@@ -59,12 +59,8 @@ fn menu(app: &AppHandle, grant_item: bool) -> tauri::Result<Menu<Wry>> {
 fn open_accessibility_settings() {
     let mtm =
         macos::MainThreadMarker::new().expect("tauri delivers tray menu events on the main thread");
-    if macos::open_url(ACCESSIBILITY_SETTINGS_URL, mtm) {
-        tracing::info!("accessibility settings opened from tray");
-    } else {
-        tracing::warn!(
-            url = ACCESSIBILITY_SETTINGS_URL,
-            "macOS did not open the accessibility settings"
-        );
+    match macos::open_url(ACCESSIBILITY_SETTINGS_URL, mtm) {
+        Ok(()) => tracing::info!("accessibility settings opened from tray"),
+        Err(error) => tracing::warn!(%error, "accessibility settings did not open"),
     }
 }

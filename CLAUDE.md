@@ -2,6 +2,8 @@
 
 macOS-only Tauri 2 app: a transparent, click-through overlay that grows moss on Dock icons for apps that haven't been used in a while. Product rules, the last-used algorithm, risks and milestones are in `SUMMARY.md`. Read it before touching usage tracking or growth logic, and update it when one of those rules changes.
 
+Read CONSTRAINTS.md before writing code. Do not weaken it to make a change pass.
+
 ## Checks
 
 Run from `src-tauri/`. All four must pass before a change is done:

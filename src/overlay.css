@@ -13,5 +13,4 @@ body {
   box-sizing: border-box;
   height: 120px;
   border: 2px solid #ff2bd6;
-  pointer-events: none;
 }

@@ -9,6 +9,7 @@ const QUIT_ID: &str = "quit";
 const GRANT_ID: &str = "grant-accessibility";
 const ACCESSIBILITY_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+
 pub fn build(app: &AppHandle, trust: Trust) -> Result<TrayIcon, crate::Error> {
     let tray = TrayIconBuilder::with_id("main")
         .icon(tauri::include_image!("icons/tray.png"))

@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cd .. && tsc --noEmit",
+    "check:task": "pnpm check:fast && cd src-tauri && cargo test && cargo llvm-cov --summary-only && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks detect --redact --no-banner",
+    "check": "pnpm check:fast"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"

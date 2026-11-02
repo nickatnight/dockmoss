@@ -23,10 +23,12 @@ fn missing_main_display_has_its_own_kind() {
 }
 
 #[test]
-fn overlay_failures_have_the_overlay_kind() {
-    let error = Error::from(crate::macos::OverlayError::NullWindow);
+fn overlay_failures_have_the_overlay_kind_and_message() {
+    let json = serde_json::to_value(Error::from(crate::macos::OverlayError::NullWindow))
+        .expect("Error serializes to JSON");
 
-    let json = serde_json::to_value(&error).expect("Error serializes to JSON");
-
-    assert_eq!(json["kind"], "overlay");
+    assert_eq!(
+        json,
+        serde_json::json!({ "kind": "overlay", "message": "overlay's native window pointer is null" })
+    );
 }

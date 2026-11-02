@@ -10,6 +10,11 @@ pub enum OverlayError {
     NativeWindow(#[source] tauri::Error),
     #[error("overlay's native window pointer is null")]
     NullWindow,
+    #[error("overlay window level {overlay} is not above the Dock's level {dock}")]
+    LevelNotRaised {
+        dock: NSWindowLevel,
+        overlay: NSWindowLevel,
+    },
 }
 
 #[derive(Debug)]
@@ -33,10 +38,17 @@ pub fn pin_above_dock(
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
 
-    Ok(PinnedLevels {
-        dock,
-        overlay: ns_window.level(),
-    })
+    let overlay = ns_window.level();
+    ensure_raised(dock, overlay)?;
+    Ok(PinnedLevels { dock, overlay })
+}
+
+fn ensure_raised(dock: NSWindowLevel, overlay: NSWindowLevel) -> Result<(), OverlayError> {
+    if overlay > dock {
+        Ok(())
+    } else {
+        Err(OverlayError::LevelNotRaised { dock, overlay })
+    }
 }
 
 #[expect(
@@ -55,3 +67,6 @@ fn as_ns_window(
     let ns_window = unsafe { Retained::retain(raw.cast::<NSWindow>()) };
     ns_window.ok_or(OverlayError::NullWindow)
 }
+
+#[cfg(test)]
+mod tests;

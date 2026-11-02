@@ -11,3 +11,13 @@ fn serializes_as_kind_and_message() {
         serde_json::json!({ "kind": "tauri", "message": error.to_string() })
     );
 }
+
+#[test]
+fn missing_main_display_has_its_own_kind() {
+    let json = serde_json::to_value(Error::NoMainDisplay).expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({ "kind": "no_main_display", "message": "macOS reports no main display" })
+    );
+}

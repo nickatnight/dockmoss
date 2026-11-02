@@ -1,0 +1,18 @@
+html,
+body {
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* Debug frame for slice 2: marks the bottom 120 px, where the Dock sits. */
+.debug-dock-band {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  box-sizing: border-box;
+  height: 120px;
+  border: 2px solid #ff2bd6;
+  pointer-events: none;
+}

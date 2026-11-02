@@ -5,12 +5,15 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 pub enum Error {
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
+    #[error("macOS reports no main display")]
+    NoMainDisplay,
 }
 
 impl Error {
     fn kind(&self) -> &'static str {
         match self {
             Self::Tauri(_) => "tauri",
+            Self::NoMainDisplay => "no_main_display",
         }
     }
 }

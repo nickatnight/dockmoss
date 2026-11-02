@@ -21,11 +21,9 @@ pub struct PinnedLevels {
 
 pub fn pin_above_dock(
     window: &WebviewWindow,
-    _mtm: MainThreadMarker,
+    mtm: MainThreadMarker,
 ) -> Result<PinnedLevels, OverlayError> {
-    let raw = window.ns_window().map_err(OverlayError::NativeWindow)?;
-    let ptr = NonNull::new(raw.cast::<NSWindow>()).ok_or(OverlayError::NullWindow)?;
-    let ns_window = as_ns_window(ptr);
+    let ns_window = as_ns_window(window, mtm)?;
 
     let dock = CGWindowLevelForKey(CGWindowLevelKey::DockWindowLevelKey) as NSWindowLevel;
     ns_window.setLevel(dock + 1);
@@ -46,10 +44,11 @@ pub fn pin_above_dock(
     unsafe_code,
     reason = "Tauri hands out the NSWindow only as a raw pointer"
 )]
-fn as_ns_window<'a>(ptr: NonNull<NSWindow>) -> &'a NSWindow {
-    // SAFETY: `ptr` is non-null and comes from `WebviewWindow::ns_window()`,
-    // which returns the live `NSWindow` that tao retains for as long as the
-    // Tauri window exists. The caller holds a `&WebviewWindow`, so the window
-    // outlives the borrow, and the caller is on the main thread.
-    unsafe { ptr.as_ref() }
+fn as_ns_window(window: &WebviewWindow, _mtm: MainThreadMarker) -> Result<&NSWindow, OverlayError> {
+    let raw = window.ns_window().map_err(OverlayError::NativeWindow)?;
+    let ptr = NonNull::new(raw.cast::<NSWindow>()).ok_or(OverlayError::NullWindow)?;
+    // SAFETY: `ns_window()` returns the NSWindow that tao retains for as long
+    // as `window` exists, and the returned borrow cannot outlive `window`.
+    let ns_window = unsafe { ptr.as_ref() };
+    Ok(ns_window)
 }

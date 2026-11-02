@@ -27,7 +27,15 @@ pub fn run() {
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tray::build(app.handle())?;
-            build_overlay(app.handle())?;
+            let overlay = build_overlay(app.handle())?;
+            let mtm =
+                macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
+            let levels = macos::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
+            tracing::info!(
+                dock_level = levels.dock,
+                overlay_level = levels.overlay,
+                "overlay pinned above the dock"
+            );
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dock moss started");
             Ok(())
         })

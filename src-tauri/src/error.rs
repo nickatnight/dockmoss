@@ -7,6 +7,8 @@ pub enum Error {
     Tauri(#[from] tauri::Error),
     #[error("macOS reports no main display")]
     NoMainDisplay,
+    #[error(transparent)]
+    Overlay(#[from] crate::macos::OverlayError),
 }
 
 impl Error {
@@ -14,6 +16,7 @@ impl Error {
         match self {
             Self::Tauri(_) => "tauri",
             Self::NoMainDisplay => "no_main_display",
+            Self::Overlay(_) => "overlay",
         }
     }
 }

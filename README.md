@@ -43,7 +43,7 @@ src-tauri/src/
   error.rs          # crate Error, serialized as { kind, message }
   commands.rs       # Tauri commands (none yet)
   tray.rs           # menu-bar icon, Quit, and the Accessibility grant item
-  trust.rs          # pure rule: which tray change a trust reading needs
+  trust.rs          # Trust (trusted or not) and the shared latest reading
   growth/           # pure growth model (slice 6)
   usage/            # launch log and Spotlight seed (slices 7-8)
   macos/            # all objc2 / AppKit / AX code and every unsafe block

@@ -8,7 +8,6 @@ mod usage;
 
 pub use error::Error;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::tray::TrayIcon;
@@ -34,13 +33,10 @@ pub fn run() {
         )
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            let trusted = macos::ax::is_trusted(true);
-            tracing::info!(trusted, "accessibility trust checked");
-            let tray = tray::build(app.handle())?;
-            if let Some(change) = trust::tray_change(None, trusted) {
-                tray::apply(&tray, change)?;
-            }
-            app.manage(TrustState(AtomicBool::new(trusted)));
+            let trust = macos::ax::request_trust();
+            tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
+            let tray = tray::build(app.handle(), trust)?;
+            app.manage(TrustState::new(trust));
             spawn_trust_watcher(tray)?;
             let overlay = build_overlay(app.handle())?;
             let mtm =
@@ -65,17 +61,15 @@ fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
         .spawn(move || {
             loop {
                 std::thread::sleep(TRUST_POLL_INTERVAL);
-                let state = tray.app_handle().state::<TrustState>();
-                let previous = state.0.load(Ordering::Relaxed);
-                let trusted = macos::ax::is_trusted(false);
-                let Some(change) = trust::tray_change(Some(previous), trusted) else {
+                let trust = macos::ax::check_trust();
+                if tray.app_handle().state::<TrustState>().replace(trust) == trust {
                     continue;
-                };
-                state.0.store(trusted, Ordering::Relaxed);
-                tracing::info!(trusted, "accessibility trust changed");
+                }
+                tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
                 let main_tray = tray.clone();
                 let scheduled = tray.app_handle().run_on_main_thread(move || {
-                    if let Err(error) = tray::apply(&main_tray, change) {
+                    let trust = main_tray.app_handle().state::<TrustState>().current();
+                    if let Err(error) = tray::show_trust(&main_tray, trust) {
                         tracing::warn!(%error, "tray update after a trust change failed");
                     }
                 });

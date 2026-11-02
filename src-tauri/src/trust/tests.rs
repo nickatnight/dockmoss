@@ -1,32 +1,31 @@
-use super::{TrayChange, tray_change};
+use super::{Trust, TrustState};
 
 #[test]
-fn tray_follows_each_trust_reading() {
+fn state_starts_at_the_first_reading() {
+    for first in [Trust::Trusted, Trust::Untrusted] {
+        assert_eq!(TrustState::new(first).current(), first);
+    }
+}
+
+#[test]
+fn replace_returns_the_previous_reading_and_keeps_the_new_one() {
     let cases = [
-        (
-            "first reading untrusted",
-            None,
-            false,
-            Some(TrayChange::ShowGrantItem),
-        ),
-        ("first reading trusted", None, true, None),
-        (
-            "grant revoked",
-            Some(true),
-            false,
-            Some(TrayChange::ShowGrantItem),
-        ),
-        (
-            "grant given",
-            Some(false),
-            true,
-            Some(TrayChange::HideGrantItem),
-        ),
-        ("still trusted", Some(true), true, None),
-        ("still untrusted", Some(false), false, None),
+        ("grant revoked", Trust::Trusted, Trust::Untrusted),
+        ("grant given", Trust::Untrusted, Trust::Trusted),
+        ("still trusted", Trust::Trusted, Trust::Trusted),
+        ("still untrusted", Trust::Untrusted, Trust::Untrusted),
     ];
 
-    for (case, previous, trusted, expected) in cases {
-        assert_eq!(tray_change(previous, trusted), expected, "{case}");
+    for (case, previous, reading) in cases {
+        let state = TrustState::new(previous);
+
+        assert_eq!(state.replace(reading), previous, "{case}: previous");
+        assert_eq!(state.current(), reading, "{case}: current");
     }
+}
+
+#[test]
+fn only_trusted_reports_trusted() {
+    assert!(Trust::Trusted.is_trusted());
+    assert!(!Trust::Untrusted.is_trusted());
 }

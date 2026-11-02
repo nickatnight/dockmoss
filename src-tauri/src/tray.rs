@@ -3,21 +3,18 @@ use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Wry};
 
 use crate::macos;
-use crate::trust::TrayChange;
+use crate::trust::Trust;
 
 const QUIT_ID: &str = "quit";
 const GRANT_ID: &str = "grant-accessibility";
 const ACCESSIBILITY_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-const TRUSTED_TOOLTIP: &str = "DockMoss";
-const UNTRUSTED_TOOLTIP: &str = "DockMoss needs Accessibility access";
-
-pub fn build(app: &AppHandle) -> Result<TrayIcon, crate::Error> {
+pub fn build(app: &AppHandle, trust: Trust) -> Result<TrayIcon, crate::Error> {
     let tray = TrayIconBuilder::with_id("main")
         .icon(tauri::include_image!("icons/tray.png"))
         .icon_as_template(true)
-        .tooltip(TRUSTED_TOOLTIP)
-        .menu(&menu(app, false)?)
+        .tooltip(tooltip(trust))
+        .menu(&menu(app, trust)?)
         .on_menu_event(|app, event| match event.id().as_ref() {
             QUIT_ID => {
                 tracing::info!("quit requested from tray");
@@ -30,19 +27,22 @@ pub fn build(app: &AppHandle) -> Result<TrayIcon, crate::Error> {
     Ok(tray)
 }
 
-pub fn apply(tray: &TrayIcon, change: TrayChange) -> Result<(), crate::Error> {
-    let (grant_item, tooltip) = match change {
-        TrayChange::ShowGrantItem => (true, UNTRUSTED_TOOLTIP),
-        TrayChange::HideGrantItem => (false, TRUSTED_TOOLTIP),
-    };
-    tray.set_menu(Some(menu(tray.app_handle(), grant_item)?))?;
-    tray.set_tooltip(Some(tooltip))?;
+pub fn show_trust(tray: &TrayIcon, trust: Trust) -> Result<(), crate::Error> {
+    tray.set_menu(Some(menu(tray.app_handle(), trust)?))?;
+    tray.set_tooltip(Some(tooltip(trust)))?;
     Ok(())
 }
 
-fn menu(app: &AppHandle, grant_item: bool) -> tauri::Result<Menu<Wry>> {
+fn tooltip(trust: Trust) -> &'static str {
+    match trust {
+        Trust::Trusted => "DockMoss",
+        Trust::Untrusted => "DockMoss needs Accessibility access",
+    }
+}
+
+fn menu(app: &AppHandle, trust: Trust) -> tauri::Result<Menu<Wry>> {
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit DockMoss", true, Some("CmdOrCtrl+Q"))?;
-    if !grant_item {
+    if trust == Trust::Trusted {
         return Menu::with_items(app, &[&quit]);
     }
     let grant = MenuItem::with_id(

@@ -1,5 +1,5 @@
 [package]
-name = "dock-moss"
+name = "dockmoss"
 version = "0.1.0"
 description = "Grows moss on Dock icons for apps you haven't used in a while"
 authors = ["Nick Kelly"]
@@ -8,7 +8,7 @@ rust-version = "1.99"
 publish = false
 
 [lib]
-name = "dock_moss_lib"
+name = "dockmoss_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]

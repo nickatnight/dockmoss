@@ -1,4 +1,4 @@
-# Dock Moss
+# DockMoss
 
 A novelty macOS app that grows moss on Dock icons for apps you haven't opened in a while. The longer an app sits unused, the more overgrown it gets. Launch the app and the moss retreats.
 
@@ -48,7 +48,7 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 - **Dock magnification lag:** polling icon positions can trail the animation by a frame. Mask or accept it; consider an `AXObserver` later.
 - **Auto-hidden Dock:** icons sit offscreen, so draw nothing.
 - **Slow start:** with the launch log starting empty, real moss only appears after weeks of use. Consider a "demo/fast-forward" setting for testing and screenshots.
-- **Apps launched outside our watch:** apps already running at first start, or launched while Dock Moss was quit, won't be logged. Treat "app is running" as in use, and accept the gap while the app is closed.
+- **Apps launched outside our watch:** apps already running at first start, or launched while DockMoss was quit, won't be logged. Treat "app is running" as in use, and accept the gap while the app is closed.
 - **Moss that fits the icon shape:** icons are irregular, so grow moss from the bottom edge and corners, clipped to the icon's rounded rect, rather than reading the artwork.
 - **Battery:** keep the render loop idle when nothing is animating. Static moss only needs a redraw when the Dock moves.
 - **Many icons:** use one shared shader or instanced draw rather than a layer per icon.

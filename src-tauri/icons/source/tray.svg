@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
-  <!-- Dock Moss tray glyph: an app tile outline with moss over its bottom third, topped by three
+  <!-- DockMoss tray glyph: an app tile outline with moss over its bottom third, topped by three
        tufts. Black plus alpha only; macOS tints it as a template image. Regenerate with
        pnpm tauri icon at PNG size 44 (the png flag), then rename 44x44.png to icons/tray.png. -->
   <defs>

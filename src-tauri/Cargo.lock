@@ -655,7 +655,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dock-moss"
+name = "dockmoss"
 version = "0.1.0"
 dependencies = [
  "objc2",

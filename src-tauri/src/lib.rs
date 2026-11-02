@@ -37,7 +37,7 @@ pub fn run() {
                 "overlay pinned above the dock"
             );
             overlay.show()?;
-            tracing::info!(version = env!("CARGO_PKG_VERSION"), "dock moss started");
+            tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -52,7 +52,7 @@ fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {
 
     let window =
         WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
-            .title("Dock Moss Overlay")
+            .title("DockMoss Overlay")
             .position(origin.x, origin.y)
             .inner_size(size.width, size.height)
             .transparent(true)

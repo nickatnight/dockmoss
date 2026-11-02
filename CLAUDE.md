@@ -1,4 +1,4 @@
-# Dock Moss
+# DockMoss
 
 macOS-only Tauri 2 app: a transparent, click-through overlay that grows moss on Dock icons for apps that haven't been used in a while. Product rules, the last-used algorithm, risks and milestones are in `SUMMARY.md`. Read it before touching usage tracking or growth logic, and update it when one of those rules changes.
 
@@ -21,7 +21,7 @@ Run the app with `pnpm tauri dev` from the repo root. The package manager is **p
 
 ```
 src-tauri/src/
-  main.rs        # one line: dock_moss_lib::run()
+  main.rs        # one line: dockmoss_lib::run()
   lib.rs         # Builder, plugins, setup(), command registration
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules

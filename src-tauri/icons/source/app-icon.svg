@@ -1,4 +1,4 @@
-<!-- Dock Moss app icon master: a stone app tile on the macOS icon grid (824 px tile, radius 185, on a 1024 canvas) with moss creeping up from the bottom edge and lower corners.
+<!-- DockMoss app icon master: a stone app tile on the macOS icon grid (824 px tile, radius 185, on a 1024 canvas) with moss creeping up from the bottom edge and lower corners.
      Regenerate the bundle icons with: pnpm tauri icon src-tauri/icons/source/app-icon.svg (then delete the non-macOS outputs). -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>

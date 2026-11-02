@@ -1,3 +1,3 @@
 fn main() {
-    dock_moss_lib::run();
+    dockmoss_lib::run();
 }

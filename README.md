@@ -1,10 +1,10 @@
-# Dock Moss
+# DockMoss
 
 A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened in a while. The longer an app sits unused, the more overgrown its icon gets. Opening the app clears the moss. Product rules and the last-used algorithm are in [SUMMARY.md](SUMMARY.md).
 
 ## Status
 
-MVP slice 2 of 13 (the overlay window). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. The tray menu has one item, Quit Dock Moss. A transparent, click-through window covers the main display one level above the Dock, on every Space. For now it draws only a 2 px magenta debug band around the bottom 120 px; there is no moss yet. Clicks, hovers and magnification pass through to the Dock.
+MVP slice 2 of 13 (the overlay window). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. The tray menu has one item, Quit DockMoss. A transparent, click-through window covers the main display one level above the Dock, on every Space. For now it draws only a 2 px magenta debug band around the bottom 120 px; there is no moss yet. Clicks, hovers and magnification pass through to the Dock.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ pnpm tauri dev
 
 `pnpm tauri dev` starts Vite on port 5110, then builds and runs the app. Quit it from the moss tile in the menu bar.
 
-`tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dock-moss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
+`tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dockmoss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
 
 ## Commands
 

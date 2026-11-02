@@ -35,6 +35,7 @@ undocumented_unsafe_blocks = "deny"
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
 let_underscore_must_use = "deny"
+unused_result_ok = "deny"
 
 [profile.release]
 codegen-units = 1

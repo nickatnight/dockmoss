@@ -3,6 +3,14 @@ mod error;
 mod growth;
 mod macos;
 mod tray;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the Accessibility watcher calls it from the next commit"
+    )
+)]
+mod trust;
 mod usage;
 
 pub use error::Error;

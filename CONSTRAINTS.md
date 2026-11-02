@@ -22,7 +22,7 @@ Read alongside `CLAUDE.md`. This file does not get weakened to make a change pas
 | Lint (Rust) | Zero warnings, pedantic on | `cargo clippy --all-targets -- -D warnings` | every edit | Lints in `Cargo.toml` are the project's bar |
 | Types (TS) | Zero errors, `strict: true` | `pnpm exec tsc --noEmit` | every edit | Keeps the IPC wrapper honest |
 | Tests | All pass | `cargo test` (in `src-tauri/`) | task end | |
-| Coverage | ≥ 80% line coverage of `growth/`, `usage/`, `geometry.rs`, `settings.rs` | `cargo llvm-cov --summary-only` filtered to those paths | task end | Pure logic is fully testable. `macos/` and the render code are verified manually, so they are excluded instead of padded. |
+| Coverage | ≥ 80% line coverage of `src-tauri/src/`, excluding only the hand-verified platform and glue files: `macos/`, `main.rs`, `lib.rs`, `tray.rs`, `commands.rs` | `cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/\|(main\|lib\|tray\|commands)[.]rs)'` | task end | Pure logic is fully testable. Platform and glue code is verified manually, so it is excluded instead of padded. Excluding a new file means adding it to this regex in CONSTRAINTS.md, where review sees it. |
 | Deps: advisories | No advisory at high or above; no unknown licences | `cargo deny check advisories licenses` | task end | External opinion (RustSec DB) |
 | Deps: JS | Nothing at high or above | `pnpm audit --audit-level high` | task end | External opinion |
 | Secrets | No findings | `gitleaks detect --redact --no-banner` | task end | `--redact` keeps any match out of transcripts |
@@ -34,7 +34,7 @@ Scripts in `package.json` mirror this file; if they drift, this file wins:
 
 ```json
 "check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cd .. && tsc --noEmit",
-"check:task": "pnpm check:fast && cd src-tauri && cargo test && cargo llvm-cov --summary-only && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks detect --redact --no-banner",
+"check:task": "pnpm check:fast && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks detect --redact --no-banner",
 "check": "pnpm check:fast"
 ```
 

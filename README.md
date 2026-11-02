@@ -22,7 +22,7 @@ pnpm tauri dev
 
 `pnpm tauri dev` starts Vite on port 5110, then builds and runs the app. Quit it from the moss tile in the menu bar.
 
-`tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dock-moss`.
+`tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dock-moss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
 
 ## Commands
 
@@ -68,6 +68,18 @@ mv src-tauri/icons/44x44.png src-tauri/icons/tray.png
 ```
 
 The tray glyph is a template image: pure black plus alpha, which macOS tints for light and dark menu bars.
+
+After any change to `tray.svg`, decode the alpha channel of the 44×44 `tray.png` and check that:
+
+- the glyph's bounding box spans at least 40 px on its longer axis, with at most 2 px of padding on that axis;
+- it is centred within 1 px on both axes;
+- every visible pixel is black (0,0,0);
+- no stroke, gap or notch is thinner than 3 px, so a 3×3 morphological opening and a 3×3 closing each change no pixel;
+- each valley in the moss edge is at least 4 px below the tuft tops on both sides (tuft relief).
+
+The current glyph sits exactly on the relief floor. In `tray.svg` the centre tuft tops out at y=24, the outer shoulders at y=25 and the valley floors at y=29, so the shoulder side gives exactly 4 px. Any edit that lowers a shoulder or raises a floor fails the check. If the relief has to grow, raise the tops rather than lowering the floors, so the moss stays in the bottom third. Raising the centre alone does not help, because the shoulder side is the shallower one; move the centre to y=23 and the shoulders to y=24 together, which gives 5 px and keeps the centre highest. The tuft arcs are tangent to 3 px valley fillets, so recompute the tangent points instead of nudging single coordinates.
+
+`pnpm tauri icon` writes the chunks of `icon.icns` in a different order on each run, so a regenerated `icon.icns` differs byte-for-byte even when the artwork is identical. Commit it only when `app-icon.svg` changed.
 
 ## Docs
 

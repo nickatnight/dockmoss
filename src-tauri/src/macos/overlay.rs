@@ -13,7 +13,7 @@ pub enum OverlayError {
     NullWindow,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct PinnedLevels {
     pub dock: NSWindowLevel,
     pub overlay: NSWindowLevel,

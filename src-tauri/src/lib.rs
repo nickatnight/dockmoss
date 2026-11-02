@@ -34,8 +34,6 @@ pub fn run() {
         )
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            // The only check that may prompt: macOS shows its dialog when
-            // untrusted, and every later check passes `false`.
             let trusted = macos::ax::is_trusted(true);
             tracing::info!(trusted, "accessibility trust checked");
             let tray = tray::build(app.handle())?;
@@ -61,8 +59,6 @@ pub fn run() {
         .expect("tauri runtime starts with the bundled context");
 }
 
-/// Re-checks trust every few seconds for the life of the app, in both
-/// directions, and updates the tray on the main thread when it changes.
 fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("ax-trust".into())

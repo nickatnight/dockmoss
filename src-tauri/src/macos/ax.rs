@@ -1,8 +1,6 @@
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{CFBoolean, CFDictionary, CFString};
 
-/// Whether macOS lists this app as a trusted Accessibility client.
-///
 /// With `prompt` set and the process untrusted, macOS shows its own
 /// Accessibility dialog asynchronously and adds the app to the list in
 /// System Settings. The return value does not wait for the user's answer.

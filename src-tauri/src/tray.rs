@@ -12,7 +12,6 @@ const ACCESSIBILITY_SETTINGS_URL: &str =
 const TRUSTED_TOOLTIP: &str = "DockMoss";
 const UNTRUSTED_TOOLTIP: &str = "DockMoss needs Accessibility access";
 
-/// Builds the tray in its trusted layout: Quit alone.
 pub fn build(app: &AppHandle) -> Result<TrayIcon, crate::Error> {
     let tray = TrayIconBuilder::with_id("main")
         .icon(tauri::include_image!("icons/tray.png"))
@@ -31,7 +30,6 @@ pub fn build(app: &AppHandle) -> Result<TrayIcon, crate::Error> {
     Ok(tray)
 }
 
-/// Shows or removes the grant item and sets the matching tooltip.
 pub fn apply(tray: &TrayIcon, change: TrayChange) -> Result<(), crate::Error> {
     let (grant_item, tooltip) = match change {
         TrayChange::ShowGrantItem => (true, UNTRUSTED_TOOLTIP),

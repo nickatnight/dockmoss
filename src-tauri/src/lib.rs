@@ -34,6 +34,10 @@ pub fn run() {
         )
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            // The only check that may prompt: macOS shows its dialog when
+            // untrusted, and every later check passes `false`.
+            let trusted = macos::ax::is_trusted(true);
+            tracing::info!(trusted, "accessibility trust checked");
             tray::build(app.handle())?;
             let overlay = build_overlay(app.handle())?;
             let mtm =

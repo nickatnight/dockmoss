@@ -1,0 +1,11 @@
+node_modules
+dist
+*.log
+*.local
+.vscode
+.idea
+.DS_Store
+*.sw?
+
+# Local-only docs (MVP spec, plan, ADRs) for now
+docs/

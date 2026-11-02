@@ -1,6 +1,5 @@
-use std::ptr::NonNull;
-
 use objc2::MainThreadMarker;
+use objc2::rc::Retained;
 use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior, NSWindowLevel};
 use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey};
 use tauri::WebviewWindow;
@@ -44,11 +43,15 @@ pub fn pin_above_dock(
     unsafe_code,
     reason = "Tauri hands out the NSWindow only as a raw pointer"
 )]
-fn as_ns_window(window: &WebviewWindow, _mtm: MainThreadMarker) -> Result<&NSWindow, OverlayError> {
+fn as_ns_window(
+    window: &WebviewWindow,
+    _mtm: MainThreadMarker,
+) -> Result<Retained<NSWindow>, OverlayError> {
     let raw = window.ns_window().map_err(OverlayError::NativeWindow)?;
-    let ptr = NonNull::new(raw.cast::<NSWindow>()).ok_or(OverlayError::NullWindow)?;
-    // SAFETY: `ns_window()` returns the NSWindow that tao retains for as long
-    // as `window` exists, and the returned borrow cannot outlive `window`.
-    let ns_window = unsafe { ptr.as_ref() };
-    Ok(ns_window)
+    // SAFETY: `raw` is tao's live NSWindow or null. tao frees the window only
+    // from the event loop, which cannot run during this synchronous call on
+    // the main thread, so the pointer is valid to retain here. The returned
+    // `Retained` then owns its own reference.
+    let ns_window = unsafe { Retained::retain(raw.cast::<NSWindow>()) };
+    ns_window.ok_or(OverlayError::NullWindow)
 }

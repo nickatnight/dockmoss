@@ -36,6 +36,7 @@ pub fn run() {
                 overlay_level = levels.overlay,
                 "overlay pinned above the dock"
             );
+            overlay.show()?;
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dock moss started");
             Ok(())
         })
@@ -62,6 +63,7 @@ fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {
             .focusable(false)
             .skip_taskbar(true)
             .visible_on_all_workspaces(true)
+            .visible(false)
             .build()?;
     window.set_ignore_cursor_events(true)?;
 

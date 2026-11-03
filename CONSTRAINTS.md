@@ -10,7 +10,7 @@ Read alongside `CLAUDE.md`. This file does not get weakened to make a change pas
 - No `todo!()`, `unimplemented!()`, or `.unwrap()` outside `#[cfg(test)]` (enforced by `clippy::unwrap_used`, `clippy::todo`, `clippy::unimplemented` set to deny in `[lints]`).
 - No `let _ = <Result>` that discards an error silently. Log it or propagate it (enforced by `clippy::let_underscore_must_use` set to deny). The same goes for `.ok()` on a `Result` whose value is then dropped (enforced by `clippy::unused_result_ok` set to deny).
 - No `#[ignore]`d, skipped or deleted tests without a reason in the commit message.
-- No `@ts-ignore` / `@ts-expect-error` / `eslint-disable` without a reason comment.
+- No `@ts-ignore` or `@ts-expect-error` anywhere under `src/` (enforced by a grep in `check:fast`). No `eslint-disable` without a reason comment.
 - Every `unsafe` block lives in `src-tauri/src/macos/` and has a `// SAFETY:` comment. `unsafe_code` is set to deny crate-wide, so each `macos/` item that needs `unsafe` opts in with `#[expect(unsafe_code, reason = "...")]`, and `clippy::undocumented_unsafe_blocks` is set to deny. No `unsafe_code` opt-in exists outside `src/macos/` (enforced by a grep in `check:fast`).
 - Unit tests live in `<module>/tests.rs`, declared with `#[cfg(test)] mod tests;`, not in an inline module (enforced by a grep in `check:fast`). Coverage excludes those files, so it measures only logic.
 - No secrets in source.
@@ -34,7 +34,7 @@ Dropped: Lighthouse and axe. A desktop overlay has no URL to audit, and the sett
 Scripts in `package.json` mirror this file; if they drift, this file wins:
 
 ```json
-"check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rlE --include='*.rs' '#\\[([a-z_]+::)?test\\]' src | grep -v '/tests[.]rs$' && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && cd .. && tsc --noEmit",
+"check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rlE --include='*.rs' '#\\[([a-z_]+::)?test\\]' src | grep -v '/tests[.]rs$' && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
 "check:task": "pnpm check:fast && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)|/tests[.]rs$' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
 "check": "pnpm check:fast"
 ```

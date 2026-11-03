@@ -61,8 +61,8 @@ fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
         .spawn(move || {
             loop {
                 std::thread::sleep(TRUST_POLL_INTERVAL);
-                let trust = macos::ax::check_trust();
-                if tray.app_handle().state::<TrustState>().replace(trust) != trust {
+                let state = tray.app_handle().state::<TrustState>();
+                if let Some(trust) = state.update(macos::ax::check_trust()) {
                     tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
                     refresh_tray_on_main_thread(&tray);
                 }

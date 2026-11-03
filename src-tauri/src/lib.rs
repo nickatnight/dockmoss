@@ -1,19 +1,7 @@
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the dock_items command is the first caller")
-)]
 mod bundle_id;
 mod commands;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the dock_items command is the first caller")
-)]
 mod dock;
 mod error;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the dock_items command is the first caller")
-)]
 mod geometry;
 mod growth;
 mod macos;
@@ -54,7 +42,8 @@ pub fn run() {
             let tray = tray::build(app.handle(), trust)?;
             app.manage(TrustState::new(trust));
             spawn_trust_watcher(tray)?;
-            let overlay = build_overlay(app.handle(), primary_display(app.handle())?)?;
+            let display = primary_display(app.handle())?;
+            let overlay = build_overlay(app.handle(), display)?;
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
@@ -64,6 +53,7 @@ pub fn run() {
                 "overlay pinned above the dock"
             );
             overlay.show()?;
+            log_dock_items_once(display)?;
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
@@ -98,6 +88,29 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
     if let Err(error) = scheduled {
         tracing::warn!(%error, "could not schedule the tray update");
     }
+}
+
+fn log_dock_items_once(display: Display) -> std::io::Result<()> {
+    std::thread::Builder::new().name("dock-read".into()).spawn(
+        move || match macos::dock::items() {
+            Ok(children) => {
+                let items = dock::app_items(children, display);
+                tracing::info!(count = items.len(), "dock items read");
+                for item in &items {
+                    tracing::info!(
+                        bundle_id = item.bundle_id.as_str(),
+                        x = item.rect.x,
+                        y = item.rect.y,
+                        width = item.rect.width,
+                        height = item.rect.height,
+                        "dock item"
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(%error, "dock items not read"),
+        },
+    )?;
+    Ok(())
 }
 
 fn primary_display(app: &AppHandle) -> Result<Display, Error> {

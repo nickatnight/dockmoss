@@ -174,18 +174,26 @@ pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
             .into_iter()
             .map(|(bundle_id, at)| (bundle_id, SpotlightSeed::assume_sane(at)))
             .collect(),
-        baseline_at: match file.baseline_at {
-            Value::Null => None,
-            value => match timestamp(&value, latest) {
-                Ok(at) => Some(at),
-                Err(reason) => {
-                    dropped.push(Dropped::Baseline { reason });
-                    None
-                }
-            },
-        },
+        baseline_at: decode_baseline(&file.baseline_at, latest, &mut dropped),
     };
     Ok(Decoded { log, dropped })
+}
+
+fn decode_baseline(
+    value: &Value,
+    latest: Timestamp,
+    dropped: &mut Vec<Dropped>,
+) -> Option<Timestamp> {
+    if value.is_null() {
+        return None;
+    }
+    match timestamp(value, latest) {
+        Ok(at) => Some(at),
+        Err(reason) => {
+            dropped.push(Dropped::Baseline { reason });
+            None
+        }
+    }
 }
 
 fn decode_map(

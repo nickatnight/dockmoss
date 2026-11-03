@@ -27,21 +27,16 @@ mod usage;
 
 pub use error::Error;
 
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::time::Duration;
 
-use tauri::ipc::Channel;
 use tauri::tray::TrayIcon;
-use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
 use commands::{TrackerInbox, TrackerMessage};
-use dock::DockItem;
 use geometry::Display;
-use tracker::{PollRate, Tick, TickLog, Tracker, Visibility};
+use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
@@ -92,7 +87,7 @@ pub fn run() {
             } else {
                 Visibility::Hidden
             };
-            spawn_dock_tracker(app.handle().clone(), messages, display, shown)?;
+            dock_tracker::spawn(app.handle().clone(), messages, display, shown)?;
             macos::screen::on_screen_parameters_change(
                 move || {
                     if screen_changes
@@ -140,209 +135,199 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
     }
 }
 
-fn spawn_dock_tracker(
-    app: AppHandle,
-    messages: Receiver<TrackerMessage>,
-    display: Display,
-    overlay: Visibility,
-) -> std::io::Result<()> {
-    std::thread::Builder::new()
-        .name("dock-tracker".into())
-        .spawn(move || track_dock(&app, &messages, display, overlay))?;
-    Ok(())
-}
-
 #[deny(
     clippy::expect_used,
     clippy::indexing_slicing,
     reason = "polling path: release builds abort on panic"
 )]
-fn track_dock(
-    app: &AppHandle,
-    messages: &Receiver<TrackerMessage>,
-    display: Display,
-    overlay: Visibility,
-) {
-    let Some(trust) = app.try_state::<TrustState>() else {
-        tracing::warn!("dock tracker started before the trust state; not tracking");
-        return;
-    };
-    let mut reader = macos::dock::DockReader::new();
-    let mut tracker = Tracker::new(display, overlay);
-    let mut watcher = None;
-    let mut rate = PollRate::Slow;
-    let mut screen_changed = false;
-    loop {
-        let started = Instant::now();
-        if std::mem::take(&mut screen_changed) {
-            follow_display(app, &mut tracker);
-        }
-        let cursor = macos::cursor::location();
-        let read = dock::read(trust.current(), || reader.read());
-        tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
-        let tick = tracker.tick(read, cursor);
-        if tick.rate != rate {
-            tracing::debug!(rate = ?tick.rate, "dock poll rate changed");
-            rate = tick.rate;
-        }
-        perform(app, tick, &mut watcher);
-        let delay = tracker::next_delay(rate, started.elapsed());
-        drain_inbox_for(
-            delay,
-            messages,
-            &mut tracker,
-            &mut watcher,
-            &mut screen_changed,
-        );
+mod dock_tracker {
+    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::time::{Duration, Instant};
+
+    use tauri::ipc::Channel;
+    use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
+
+    use crate::commands::TrackerMessage;
+    use crate::dock::{self, DockItem};
+    use crate::geometry::Display;
+    use crate::tracker::{self, PollRate, Tick, TickLog, Tracker, Visibility};
+    use crate::trust::TrustState;
+    use crate::{OVERLAY_LABEL, macos, primary_display};
+
+    pub(super) fn spawn(
+        app: AppHandle,
+        messages: Receiver<TrackerMessage>,
+        display: Display,
+        overlay: Visibility,
+    ) -> std::io::Result<()> {
+        std::thread::Builder::new()
+            .name("dock-tracker".into())
+            .spawn(move || track_dock(&app, &messages, display, overlay))?;
+        Ok(())
     }
-}
 
-/// Applies each message that arrives within `delay`, and returns only once
-/// `delay` has passed. A burst of screen notifications (one per frame while
-/// the Dock slides in) therefore adds no Dock reads; it sets `screen_changed`
-/// for the next tick.
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
-fn drain_inbox_for(
-    delay: Duration,
-    messages: &Receiver<TrackerMessage>,
-    tracker: &mut Tracker,
-    watcher: &mut Option<Channel<Vec<DockItem>>>,
-    screen_changed: &mut bool,
-) {
-    let deadline = Instant::now().checked_add(delay);
-    loop {
-        let left = deadline.map_or(Duration::ZERO, |deadline| {
-            deadline.saturating_duration_since(Instant::now())
-        });
-        match messages.recv_timeout(left) {
-            Ok(TrackerMessage::Watch(channel)) => {
-                *watcher = Some(channel);
-                tracker.resend_on_next_tick();
+    fn track_dock(
+        app: &AppHandle,
+        messages: &Receiver<TrackerMessage>,
+        display: Display,
+        overlay: Visibility,
+    ) {
+        let Some(trust) = app.try_state::<TrustState>() else {
+            tracing::warn!("dock tracker started before the trust state; not tracking");
+            return;
+        };
+        let mut reader = macos::dock::DockReader::new();
+        let mut tracker = Tracker::new(display, overlay);
+        let mut watcher = None;
+        let mut rate = PollRate::Slow;
+        let mut screen_changed = false;
+        loop {
+            let started = Instant::now();
+            if std::mem::take(&mut screen_changed) {
+                follow_display(app, &mut tracker);
             }
-            Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
-            Err(RecvTimeoutError::Timeout) => return,
-            Err(RecvTimeoutError::Disconnected) => {
-                std::thread::sleep(left);
+            let cursor = macos::cursor::location();
+            let read = dock::read(trust.current(), || reader.read());
+            tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
+            let tick = tracker.tick(read, cursor);
+            if tick.rate != rate {
+                tracing::debug!(rate = ?tick.rate, "dock poll rate changed");
+                rate = tick.rate;
+            }
+            perform(app, tick, &mut watcher);
+            let delay = tracker::next_delay(rate, started.elapsed());
+            drain_inbox_for(
+                delay,
+                messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+            );
+        }
+    }
+
+    /// Applies each message that arrives within `delay`, and returns only once
+    /// `delay` has passed. A burst of screen notifications (one per frame while
+    /// the Dock slides in) therefore adds no Dock reads; it sets `screen_changed`
+    /// for the next tick.
+    fn drain_inbox_for(
+        delay: Duration,
+        messages: &Receiver<TrackerMessage>,
+        tracker: &mut Tracker,
+        watcher: &mut Option<Channel<Vec<DockItem>>>,
+        screen_changed: &mut bool,
+    ) {
+        let deadline = Instant::now().checked_add(delay);
+        loop {
+            let left = deadline.map_or(Duration::ZERO, |deadline| {
+                deadline.saturating_duration_since(Instant::now())
+            });
+            match messages.recv_timeout(left) {
+                Ok(TrackerMessage::Watch(channel)) => {
+                    *watcher = Some(channel);
+                    tracker.resend_on_next_tick();
+                }
+                Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
+                Err(RecvTimeoutError::Timeout) => return,
+                Err(RecvTimeoutError::Disconnected) => {
+                    std::thread::sleep(left);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
+        let display = match primary_display(app) {
+            Ok(display) => display,
+            Err(error) => {
+                tracing::warn!(%error, "display change not followed");
                 return;
             }
-        }
-    }
-}
-
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
-fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
-    let display = match primary_display(app) {
-        Ok(display) => display,
-        Err(error) => {
-            tracing::warn!(%error, "display change not followed");
+        };
+        if !tracker.set_display(display) {
+            tracing::debug!("screen parameters changed; primary display unchanged");
             return;
         }
-    };
-    if !tracker.set_display(display) {
-        tracing::debug!("screen parameters changed; primary display unchanged");
-        return;
-    }
-    let frame = display.frame();
-    let scale = display.scale_factor;
-    let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
-        tracing::warn!("display changed but the overlay window is gone");
-        return;
-    };
-    let moved = window
-        .set_position(LogicalPosition::new(frame.x, frame.y))
-        .and_then(|()| window.set_size(LogicalSize::new(frame.width, frame.height)));
-    match moved {
-        Ok(()) => tracing::info!(
-            x = frame.x,
-            y = frame.y,
-            width = frame.width,
-            height = frame.height,
-            scale,
-            "overlay moved to the new display frame"
-        ),
-        Err(error) => tracing::warn!(%error, "overlay not moved to the new display frame"),
-    }
-}
-
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
-fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
-    match tick.log {
-        Some(TickLog::ReadFailed(error)) => tracing::warn!(%error, "dock read failed"),
-        Some(TickLog::Recovered) => tracing::info!("dock read recovered"),
-        None => {}
-    }
-    if let Some(visibility) = tick.overlay {
-        order_overlay(app, visibility);
-    }
-    let Some(frame) = tick.send else {
-        return;
-    };
-    let count = frame.len();
-    let Some(channel) = watcher.as_ref() else {
-        tracing::debug!(count, "dock items changed with no watcher");
-        return;
-    };
-    match channel.send(frame) {
-        Ok(()) => tracing::debug!(count, "dock items sent"),
-        Err(error) => {
-            tracing::debug!(%error, "dock watcher dropped after a failed send");
-            *watcher = None;
-        }
-    }
-}
-
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
-fn order_overlay(app: &AppHandle, visibility: Visibility) {
-    let main = app.clone();
-    let scheduled = app.run_on_main_thread(move || {
-        let Some(mtm) = macos::MainThreadMarker::new() else {
-            tracing::warn!("overlay ordering ran off the main thread");
+        let frame = display.frame();
+        let scale = display.scale_factor;
+        let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
+            tracing::warn!("display changed but the overlay window is gone");
             return;
         };
-        let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
-            tracing::warn!("overlay window is gone");
-            return;
-        };
-        match macos::overlay::set_visible(&window, visibility == Visibility::Shown, mtm) {
-            Ok(state) => tracing::debug!(
-                ?visibility,
-                visible = state.visible,
-                level = state.level,
-                ignores_mouse_events = state.ignores_mouse_events,
-                collection_behavior = state.collection_behavior,
-                "overlay ordered"
+        let moved = window
+            .set_position(LogicalPosition::new(frame.x, frame.y))
+            .and_then(|()| window.set_size(LogicalSize::new(frame.width, frame.height)));
+        match moved {
+            Ok(()) => tracing::info!(
+                x = frame.x,
+                y = frame.y,
+                width = frame.width,
+                height = frame.height,
+                scale,
+                "overlay moved to the new display frame"
             ),
-            Err(error) => tracing::warn!(%error, ?visibility, "overlay not ordered"),
+            Err(error) => tracing::warn!(%error, "overlay not moved to the new display frame"),
         }
-    });
-    if let Err(error) = scheduled {
-        tracing::warn!(%error, "could not schedule the overlay ordering");
     }
-}
 
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
-fn micros(duration: Duration) -> u64 {
-    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+    fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
+        match tick.log {
+            Some(TickLog::ReadFailed(error)) => tracing::warn!(%error, "dock read failed"),
+            Some(TickLog::Recovered) => tracing::info!("dock read recovered"),
+            None => {}
+        }
+        if let Some(visibility) = tick.overlay {
+            order_overlay(app, visibility);
+        }
+        let Some(frame) = tick.send else {
+            return;
+        };
+        let count = frame.len();
+        let Some(channel) = watcher.as_ref() else {
+            tracing::debug!(count, "dock items changed with no watcher");
+            return;
+        };
+        match channel.send(frame) {
+            Ok(()) => tracing::debug!(count, "dock items sent"),
+            Err(error) => {
+                tracing::debug!(%error, "dock watcher dropped after a failed send");
+                *watcher = None;
+            }
+        }
+    }
+
+    fn order_overlay(app: &AppHandle, visibility: Visibility) {
+        let main = app.clone();
+        let scheduled = app.run_on_main_thread(move || {
+            let Some(mtm) = macos::MainThreadMarker::new() else {
+                tracing::warn!("overlay ordering ran off the main thread");
+                return;
+            };
+            let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
+                tracing::warn!("overlay window is gone");
+                return;
+            };
+            match macos::overlay::set_visible(&window, visibility == Visibility::Shown, mtm) {
+                Ok(state) => tracing::debug!(
+                    ?visibility,
+                    visible = state.visible,
+                    level = state.level,
+                    ignores_mouse_events = state.ignores_mouse_events,
+                    collection_behavior = state.collection_behavior,
+                    "overlay ordered"
+                ),
+                Err(error) => tracing::warn!(%error, ?visibility, "overlay not ordered"),
+            }
+        });
+        if let Err(error) = scheduled {
+            tracing::warn!(%error, "could not schedule the overlay ordering");
+        }
+    }
+
+    fn micros(duration: Duration) -> u64 {
+        u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+    }
 }
 
 #[deny(

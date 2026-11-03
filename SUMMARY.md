@@ -50,7 +50,7 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 - **Slow start:** with the launch log starting empty, real moss only appears after weeks of use. Consider a "demo/fast-forward" setting for testing and screenshots.
 - **Apps launched outside our watch:** apps already running at first start, or launched while DockMoss was quit, won't be logged. Treat "app is running" as in use, and accept the gap while the app is closed.
 - **Moss that fits the icon shape:** icons are irregular, so grow moss from the bottom edge and corners, clipped to the icon's rounded rect, rather than reading the artwork.
-- **Battery:** keep the render loop idle when nothing is animating. Static moss only needs a redraw when the Dock moves.
+- **Battery:** keep the render loop idle when nothing is animating. Static moss only needs a redraw when the Dock moves. While the Dock is hidden (auto-hide, a full-screen Space) or cannot be read, the overlay window is ordered out, so WindowServer has nothing of ours to composite; it is ordered back in when the Dock shows.
 - **Many icons:** use one shared shader or instanced draw rather than a layer per icon.
 
 ## Possible milestones

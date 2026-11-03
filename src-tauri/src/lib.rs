@@ -1,17 +1,7 @@
 mod bundle_id;
 mod commands;
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod dock;
 mod error;
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod geometry;
 #[cfg_attr(
     not(test),
@@ -21,18 +11,8 @@ mod geometry;
         reason = "growth and its re-exports are wired to the tracker in slice 8"
     )
 )]
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "growth is recomputed on the tracker thread from slice 8, and release builds abort on panic"
-)]
 mod growth;
 mod macos;
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod tracker;
 mod tray;
 mod trust;
@@ -66,6 +46,10 @@ const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
 ///
 /// Panics if the Tauri runtime fails to start.
 pub fn run() {
+    #[expect(
+        clippy::expect_used,
+        reason = "startup invariant: the runtime starts with the context built into the binary"
+    )]
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -86,6 +70,10 @@ pub fn run() {
             let screen_changes = inbox.clone();
             app.manage(TrackerInbox(inbox));
             let overlay = build_overlay(app.handle(), display)?;
+            #[expect(
+                clippy::expect_used,
+                reason = "startup invariant: tauri runs setup() on the main thread"
+            )]
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
@@ -148,11 +136,6 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
     }
 }
 
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod dock_tracker {
     use std::sync::mpsc::{Receiver, RecvTimeoutError};
     use std::time::{Duration, Instant};
@@ -347,11 +330,6 @@ mod dock_tracker {
     mod tests;
 }
 
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 fn primary_display(app: &AppHandle) -> Result<Display, Error> {
     let monitor = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
     let origin = monitor.position();

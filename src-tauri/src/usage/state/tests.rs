@@ -502,3 +502,43 @@ fn a_log_change_saves_and_any_change_recomputes_growth() {
         assert_eq!(change.moves_growth(), moves_growth, "{change:?}");
     }
 }
+
+#[test]
+fn an_app_pinned_twice_is_read_once_and_counted_once() {
+    let mut state = UsageState::new(LaunchLog::default());
+    let dock = vec![
+        app("com.microsoft.VSCode"),
+        app("com.apple.Safari"),
+        app("com.microsoft.VSCode"),
+    ];
+
+    let DockUpdate::Seed(to_read) = state.dock_apps(dock, now()) else {
+        panic!("a first non-empty Dock list starts seeding");
+    };
+    assert_eq!(
+        to_read,
+        vec![app("com.microsoft.VSCode"), app("com.apple.Safari")]
+    );
+    let readings = to_read
+        .into_iter()
+        .map(|app| (app.bundle_id, Some(ago(days(40)))))
+        .collect();
+    let report = state.seeded(readings, now());
+
+    assert_eq!(
+        report,
+        Some(SeedReport {
+            dock_apps: 2,
+            dates_read: 2,
+            seeds_kept: 2,
+            migration_batch: false,
+        })
+    );
+    assert_eq!(
+        state
+            .growth(now(), &Thresholds::default(), FastForward::X1)
+            .len(),
+        3,
+        "growth keeps one entry per Dock item"
+    );
+}

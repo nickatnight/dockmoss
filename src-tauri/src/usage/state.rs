@@ -45,7 +45,8 @@ impl Change {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DockUpdate {
-    /// First run: read these apps' Spotlight dates, then call `seeded`.
+    /// First run: read these apps' Spotlight dates, one entry per bundle ID,
+    /// then call `seeded`.
     Seed(Vec<DockApp>),
     Applied(Change),
 }
@@ -102,7 +103,7 @@ impl UsageState {
         let first_run_done = self.log.baseline_at().is_some();
         if !first_run_done && !self.seeding && !self.dock.is_empty() {
             self.seeding = true;
-            return DockUpdate::Seed(self.dock.clone());
+            return DockUpdate::Seed(self.distinct_dock_apps());
         }
         if first_run_done && self.first_see_new_apps(now) {
             return DockUpdate::Applied(Change::Log);
@@ -171,6 +172,17 @@ impl UsageState {
                     stage: growth.stage(),
                 }
             })
+            .collect()
+    }
+
+    /// The Dock apps in Dock order, each bundle ID once: an app pinned twice
+    /// is read from Spotlight once.
+    fn distinct_dock_apps(&self) -> Vec<DockApp> {
+        let mut seen = BTreeSet::new();
+        self.dock
+            .iter()
+            .filter(|app| seen.insert(&app.bundle_id))
+            .cloned()
             .collect()
     }
 

@@ -306,7 +306,7 @@ mod dock_tracker {
     use tauri::ipc::Channel;
     use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
 
-    use crate::commands::TrackerMessage;
+    use crate::commands::{TrackerInbox, TrackerMessage};
     use crate::dock::{self, DockItem};
     use crate::geometry::Display;
     use crate::tracker::{self, PollRate, Tick, TickLog, Tracker, Visibility};
@@ -388,6 +388,7 @@ mod dock_tracker {
                     tracker.resend_on_next_tick();
                 }
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
+                Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
                 Err(RecvTimeoutError::Timeout) => return,
                 Err(RecvTimeoutError::Disconnected) => {
                     std::thread::sleep(left);
@@ -457,6 +458,9 @@ mod dock_tracker {
         }
     }
 
+    /// Orders the overlay in or out on the main thread. A failure is sent
+    /// back to the tracker inbox as `OverlayOrderFailed`, so the next tick
+    /// tries again.
     fn order_overlay(app: &AppHandle, visibility: Visibility) {
         let main = app.clone();
         let scheduled = app.run_on_main_thread(move || {
@@ -477,11 +481,25 @@ mod dock_tracker {
                     collection_behavior = state.collection_behavior,
                     "overlay ordered"
                 ),
-                Err(error) => tracing::warn!(%error, ?visibility, "overlay not ordered"),
+                Err(error) => {
+                    tracing::warn!(%error, ?visibility, "overlay not ordered");
+                    report_order_failed(&main);
+                }
             }
         });
         if let Err(error) = scheduled {
             tracing::warn!(%error, "could not schedule the overlay ordering");
+            report_order_failed(app);
+        }
+    }
+
+    fn report_order_failed(app: &AppHandle) {
+        let Some(inbox) = app.try_state::<TrackerInbox>() else {
+            tracing::warn!("overlay ordering not retried: no tracker inbox");
+            return;
+        };
+        if inbox.0.send(TrackerMessage::OverlayOrderFailed).is_err() {
+            tracing::warn!("overlay ordering not retried: the dock tracker stopped");
         }
     }
 

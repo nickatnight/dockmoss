@@ -54,6 +54,10 @@ pub struct RawDockChild {
 /// running shows up first as a read that returns `ApiDisabled`. From then on
 /// the gate skips the read and calls `recheck` (a trust query that never
 /// prompts) each tick, until it or `TrustState` reports trust again.
+///
+/// The latch holds only while `check_trust` agrees with AX. If it ever
+/// reported trusted while reads still returned `ApiDisabled`, reads would
+/// carry on at the poll rate; no known macOS 27 state does this.
 #[derive(Debug, Default)]
 pub struct ReadGate {
     revoked: bool,

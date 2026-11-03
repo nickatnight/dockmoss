@@ -11,7 +11,7 @@ pub struct SaveSchedule {
 impl SaveSchedule {
     pub fn changed(&mut self, now: Instant) {
         if self.deadline.is_none() {
-            self.deadline = Some(after(now, SAVE_DELAY));
+            self.deadline = Some(after_or_now(now, SAVE_DELAY));
         }
     }
 
@@ -28,11 +28,11 @@ impl SaveSchedule {
     }
 
     pub fn save_failed(&mut self, now: Instant) {
-        self.deadline = Some(after(now, RETRY_DELAY));
+        self.deadline = Some(after_or_now(now, RETRY_DELAY));
     }
 }
 
-fn after(now: Instant, delay: Duration) -> Instant {
+fn after_or_now(now: Instant, delay: Duration) -> Instant {
     now.checked_add(delay).unwrap_or(now)
 }
 

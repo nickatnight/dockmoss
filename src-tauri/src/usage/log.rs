@@ -172,7 +172,7 @@ pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
         first_seen: decode_map(file.first_seen, latest, &mut dropped),
         spotlight_seed: decode_map(file.spotlight_seed, latest, &mut dropped)
             .into_iter()
-            .map(|(bundle_id, at)| (bundle_id, SpotlightSeed::from_log(at)))
+            .map(|(bundle_id, at)| (bundle_id, SpotlightSeed::assume_sane(at)))
             .collect(),
         baseline_at: match file.baseline_at {
             Value::Null => None,

@@ -277,7 +277,7 @@ fn encode_then_decode_round_trips_all_four_fields() {
     log.set_first_seen(id("com.apple.Chess"), at("2026-11-02T09:00:00Z"));
     log.set_spotlight_seed(
         id("com.apple.TextEdit"),
-        SpotlightSeed::from_log(at("2026-10-03T06:45:44Z")),
+        SpotlightSeed::assume_sane(at("2026-10-03T06:45:44Z")),
     );
 
     let text = encode(&log);

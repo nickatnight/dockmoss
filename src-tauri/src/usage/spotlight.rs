@@ -13,7 +13,7 @@ const MIGRATION_WINDOW: SignedDuration = SignedDuration::from_secs(5);
 pub struct SpotlightSeed(Timestamp);
 
 impl SpotlightSeed {
-    pub(super) fn from_log(at: Timestamp) -> Self {
+    pub(super) fn assume_sane(at: Timestamp) -> Self {
         Self(at)
     }
 

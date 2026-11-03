@@ -188,7 +188,7 @@ mod launch_log_writer {
     use jiff::Timestamp;
 
     use crate::bundle_id::BundleId;
-    use crate::usage::{self, LaunchLog, SaveSchedule};
+    use crate::usage::{self, LaunchLog, Recorded, SaveSchedule};
 
     pub enum WriterMessage {
         Used { bundle_id: BundleId, at: Timestamp },
@@ -216,7 +216,7 @@ mod launch_log_writer {
             };
             match message {
                 Ok(WriterMessage::Used { bundle_id, at }) => {
-                    if log.record(bundle_id, at) {
+                    if log.record(bundle_id, at) == Recorded::Changed {
                         schedule.changed(Instant::now());
                     }
                 }

@@ -43,9 +43,20 @@ impl LaunchLog {
         self.last_launched.len()
     }
 
-    pub fn record(&mut self, bundle_id: BundleId, at: Timestamp) -> bool {
-        self.last_launched.insert(bundle_id, at) != Some(at)
+    pub fn record(&mut self, bundle_id: BundleId, at: Timestamp) -> Recorded {
+        if self.last_launched.insert(bundle_id, at) == Some(at) {
+            Recorded::Unchanged
+        } else {
+            Recorded::Changed
+        }
     }
+}
+
+/// Whether `LaunchLog::record` changed the log, so it needs saving.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recorded {
+    Changed,
+    Unchanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

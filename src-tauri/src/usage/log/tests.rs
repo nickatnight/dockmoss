@@ -1,6 +1,6 @@
 use jiff::Timestamp;
 
-use super::{DropReason, Dropped, LaunchLog, decode, encode};
+use super::{DropReason, Dropped, LaunchLog, Recorded, decode, encode};
 use crate::bundle_id::BundleId;
 
 fn at(text: &str) -> Timestamp {
@@ -17,9 +17,9 @@ const NOW: &str = "2026-11-02T12:00:00Z";
 fn record_on_an_empty_log_adds_the_entry() {
     let mut log = LaunchLog::default();
 
-    let changed = log.record(id("com.apple.Safari"), at("2026-11-02T09:14:03Z"));
+    let recorded = log.record(id("com.apple.Safari"), at("2026-11-02T09:14:03Z"));
 
-    assert!(changed);
+    assert_eq!(recorded, Recorded::Changed);
     assert_eq!(
         log.last_launched(&id("com.apple.Safari")),
         Some(at("2026-11-02T09:14:03Z"))
@@ -40,9 +40,9 @@ fn record_replaces_the_entry_whichever_way_the_time_moves() {
         let mut log = LaunchLog::default();
         log.record(id("com.apple.Safari"), at("2026-11-02T09:00:00Z"));
 
-        let changed = log.record(id("com.apple.Safari"), at(next));
+        let recorded = log.record(id("com.apple.Safari"), at(next));
 
-        assert!(changed, "{case}");
+        assert_eq!(recorded, Recorded::Changed, "{case}");
         assert_eq!(
             log.last_launched(&id("com.apple.Safari")),
             Some(at(next)),
@@ -57,9 +57,9 @@ fn record_of_the_same_time_reports_no_change() {
     let mut log = LaunchLog::default();
     log.record(id("com.apple.Safari"), at("2026-11-02T09:00:00Z"));
 
-    let changed = log.record(id("com.apple.Safari"), at("2026-11-02T09:00:00Z"));
+    let recorded = log.record(id("com.apple.Safari"), at("2026-11-02T09:00:00Z"));
 
-    assert!(!changed);
+    assert_eq!(recorded, Recorded::Unchanged);
 }
 
 #[test]

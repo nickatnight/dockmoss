@@ -1,10 +1,25 @@
 mod bundle_id;
 mod commands;
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 mod dock;
 mod error;
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 mod geometry;
 mod growth;
 mod macos;
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 mod tracker;
 mod tray;
 mod trust;
@@ -137,6 +152,11 @@ fn spawn_dock_tracker(
     Ok(())
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn track_dock(
     app: &AppHandle,
     messages: &Receiver<TrackerMessage>,
@@ -167,27 +187,57 @@ fn track_dock(
         }
         perform(app, tick, &mut watcher);
         let delay = tracker::next_delay(rate, started.elapsed());
-        let deadline = Instant::now().checked_add(delay);
-        loop {
-            let left = deadline.map_or(Duration::ZERO, |deadline| {
-                deadline.saturating_duration_since(Instant::now())
-            });
-            match messages.recv_timeout(left) {
-                Ok(TrackerMessage::Watch(channel)) => {
-                    watcher = Some(channel);
-                    tracker.resend_on_next_tick();
-                }
-                Ok(TrackerMessage::ScreenParametersChanged) => screen_changed = true,
-                Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => {
-                    std::thread::sleep(left);
-                    break;
-                }
+        drain_inbox_for(
+            delay,
+            messages,
+            &mut tracker,
+            &mut watcher,
+            &mut screen_changed,
+        );
+    }
+}
+
+/// Applies each message that arrives within `delay`, and returns only once
+/// `delay` has passed. A burst of screen notifications (one per frame while
+/// the Dock slides in) therefore adds no Dock reads; it sets `screen_changed`
+/// for the next tick.
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
+fn drain_inbox_for(
+    delay: Duration,
+    messages: &Receiver<TrackerMessage>,
+    tracker: &mut Tracker,
+    watcher: &mut Option<Channel<Vec<DockItem>>>,
+    screen_changed: &mut bool,
+) {
+    let deadline = Instant::now().checked_add(delay);
+    loop {
+        let left = deadline.map_or(Duration::ZERO, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        });
+        match messages.recv_timeout(left) {
+            Ok(TrackerMessage::Watch(channel)) => {
+                *watcher = Some(channel);
+                tracker.resend_on_next_tick();
+            }
+            Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
+            Err(RecvTimeoutError::Timeout) => return,
+            Err(RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(left);
+                return;
             }
         }
     }
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
     let display = match primary_display(app) {
         Ok(display) => display,
@@ -222,6 +272,11 @@ fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
     }
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
     match tick.log {
         Some(TickLog::ReadFailed(error)) => tracing::warn!(%error, "dock read failed"),
@@ -248,6 +303,11 @@ fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockIte
     }
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn order_overlay(app: &AppHandle, visibility: Visibility) {
     let main = app.clone();
     let scheduled = app.run_on_main_thread(move || {
@@ -276,10 +336,20 @@ fn order_overlay(app: &AppHandle, visibility: Visibility) {
     }
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn micros(duration: Duration) -> u64 {
     u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn primary_display(app: &AppHandle) -> Result<Display, Error> {
     let monitor = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
     let origin = monitor.position();

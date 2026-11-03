@@ -1,8 +1,10 @@
 use serde::Serialize;
 
 mod jitter;
+mod last_used;
 
 pub use jitter::jitter;
+pub use last_used::{LastUsedSources, effective_last_used};
 
 /// The smallest Fuzz threshold, in days. It is larger than the largest
 /// jitter (1 day), so jitter alone never puts moss on a just-used app.

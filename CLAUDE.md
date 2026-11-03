@@ -23,7 +23,7 @@ Run the app with `pnpm tauri dev` from the repo root. The package manager is **p
 src-tauri/src/
   main.rs        # one line: dockmoss_lib::run()
   lib.rs         # Builder, plugins, setup(), command registration, and the
-                 #   dock-tracker and launch-log thread glue
+                 #   dock-tracker, launch-log (usage) and spotlight-seed thread glue
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules
   tracker.rs     # pure: per Dock read -> what to send, log and show, and the poll rate
@@ -31,9 +31,12 @@ src-tauri/src/
   dock.rs        # pure: raw Dock children -> DockItems (application items only)
   bundle_id.rs   # pure: BundleId newtype
   growth/        # pure: effective last-used -> 0..1 overgrowth, jitter, stages
-  usage/         # launch log model, file format, atomic store, save schedule, running-app
-                 #   filter; Spotlight seeding and migration detection from slice 8
-  macos/         # every objc2 / AppKit / AX call, and every `unsafe` block
+  usage/         # launch log model and file format (log.rs), atomic store (store.rs),
+                 #   save and recompute schedule (schedule.rs), running-app filter,
+                 #   Spotlight parsing and migration-batch check (spotlight.rs), and
+                 #   UsageState (state.rs): first run, first-seen, growth per Dock app
+  macos/         # every objc2 / AppKit / AX call, the `mdls` subprocess, and every
+                 #   `unsafe` block
 src-tauri/capabilities/   # one capability file per window
 src/                      # webview: canvas/WebGL moss renderer, settings UI
 ```
@@ -63,7 +66,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 
 - **Commands:** use `async fn` with owned arguments. Shared state goes in through `app.manage(...)` and comes out as `State<'_, T>`. Use `std::sync::Mutex` when the lock never crosses an `.await`; use `tokio::sync::Mutex` only when it does.
 - **Spawning:** use `tauri::async_runtime::spawn`. A bare `tokio::spawn` panics inside `setup()` because no runtime context exists there yet.
-- **Rust → webview:** send discrete updates (growth changed, app launched) with `Emitter::emit_to("overlay", ...)`. Stream Dock geometry over a `tauri::ipc::Channel` and send only when rects actually change, so the webview render loop can stay idle (see Battery in `SUMMARY.md`).
+- **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
 - **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` (the command that hands Rust its `Channel`). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
 - **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures.
 
@@ -79,7 +82,11 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 ## Usage data rules (code-level)
 
 - The launch log is the source of truth (see `SUMMARY.md`). It lives at `app.path().app_data_dir()/launch_log.json`. Write it atomically (temp file in the same directory, then `rename`), so a crash mid-write can't destroy history. `usage::save` removes a stale temp file and creates the new one with `create_new` and mode 0600; do not change that to `File::create`, which would keep an old mode and follow a planted link.
-- The file is versioned JSON (`version: 1`, ADR-0009). Timestamps are RFC 3339 strings parsed one entry at a time with `str::parse::<Timestamp>()`, and jiff's `serde` feature stays off, so a bad entry is dropped and logged, never a panic. Entries more than `FUTURE_TOLERANCE` (5 minutes) after now are dropped at load. A file that does not decode is renamed to `launch_log.json.corrupt`, never deleted.
-- Only the `launch-log` thread in `lib.rs` touches the `LaunchLog`. Everything else sends it `WriterMessage::Used` or `Flush` over its channel.
+- The file is versioned JSON (`version: 1`, ADR-0009, amended by ADR-0010). It holds `baseline_at` (set at the first run; it marks the first run as done and is not a last-used time), `last_launched`, `first_seen` and `spotlight_seed`. The last two are optional on read, so older files load.
+- Every map value and `baseline_at` is read as a `serde_json::Value` and checked on its own. A value that is not a string, a bad bundle ID, an RFC 3339 timestamp that does not parse, or one more than `FUTURE_TOLERANCE` (5 minutes) after now is dropped and logged, and the rest of the file loads. jiff's `serde` feature stays off, so nothing panics. A file that does not decode at all is renamed to `launch_log.json.corrupt`, never deleted.
+- When decode drops anything, `load_or_set_aside` copies the bytes it read to `launch_log.json.dropped` before the next save can rewrite the file. It uses the same `write_private` as the temp file (stale file removed, `create_new`, mode 0600).
+- `BundleId::new` refuses an empty ID or one over 255 bytes, so the Dock, workspace events and decode all share one cap.
+- A `SpotlightSeed` is made only by `usage::spotlight::sane_seeds` (future dates dropped, then every date dropped on a migration batch) or, for a seed already stored, by log decode through `assume_sane`.
+- Only the `launch-log` thread in `lib.rs` touches the `UsageState` (the log, the running set and the Dock list). Everything else sends it `WriterMessage::{Used, DockApps, WatchGrowth, Flush}` over its channel. The first-run Spotlight read runs on a short-lived `spotlight-seed` thread, one `mdls` per app with a 2 s timeout, and returns its readings through its `JoinHandle`. The writer holds no sender to its own inbox.
 - **Jitter must be stable across runs and Rust versions.** It is FNV-1a 64 of the bundle ID's UTF-8 bytes, mapped to whole seconds in ±1 day (`growth/jitter.rs`). Never use `std::hash::DefaultHasher` or an RNG. Changing the hash or the mapping moves every user's moss, and the golden-value tests in `growth/jitter/tests.rs` fail by design.
 - Test migration detection and the growth curve with table-driven tests over fixed timestamps, including the edge cases from `SUMMARY.md`: null Spotlight dates, 5+ apps within seconds, first-run grace, and apps running at startup.

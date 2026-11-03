@@ -2,9 +2,7 @@ use super::BundleId;
 
 #[test]
 fn a_non_empty_string_is_a_bundle_id() {
-    let id = BundleId::new("com.apple.Safari").expect("non-empty bundle id");
-
-    assert_eq!(id.as_str(), "com.apple.Safari");
+    assert!(BundleId::new("com.apple.Safari").is_some());
 }
 
 #[test]

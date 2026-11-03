@@ -146,12 +146,18 @@ fn kept_items_stay_in_dock_order() {
         ..safari()
     };
 
-    let ids: Vec<String> = app_items(vec![finder, trash, safari()], PRIMARY_2X)
+    let ids: Vec<BundleId> = app_items(vec![finder, trash, safari()], PRIMARY_2X)
         .into_iter()
-        .map(|item| item.bundle_id.as_str().to_owned())
+        .map(|item| item.bundle_id)
         .collect();
 
-    assert_eq!(ids, ["com.apple.finder", "com.apple.Safari"]);
+    assert_eq!(
+        ids,
+        [
+            BundleId::new("com.apple.finder").expect("non-empty bundle id"),
+            BundleId::new("com.apple.Safari").expect("non-empty bundle id"),
+        ]
+    );
 }
 
 #[test]

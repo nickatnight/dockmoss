@@ -10,10 +10,6 @@ impl BundleId {
         let id = id.into();
         (!id.is_empty()).then_some(Self(id))
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 #[cfg(test)]

@@ -9,7 +9,6 @@ use crate::dock::DockItem;
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
     ScreenParametersChanged,
-    /// The overlay ordering the tracker last issued did not reach the window.
     OverlayOrderFailed,
 }
 

@@ -1,6 +1,3 @@
-//! The app's own launch log: the last time each app was launched, made
-//! frontmost or quit, keyed by bundle ID (SUMMARY.md "Last-used data", rule 1).
-
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -12,9 +9,6 @@ use crate::bundle_id::BundleId;
 
 const VERSION: u64 = 1;
 
-/// How far past `now` a stored timestamp may lie and still load. Anything
-/// later came from a clock skewed forward or a damaged file, and would
-/// otherwise read as "just used" until that date passed.
 pub const FUTURE_TOLERANCE: SignedDuration = SignedDuration::from_mins(5);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -49,15 +43,11 @@ impl LaunchLog {
         self.last_launched.len()
     }
 
-    /// Sets the app's entry to `at`, earlier or later than the one stored:
-    /// the latest event wins, so an entry written under a clock that ran
-    /// ahead heals on the next real event. Returns whether anything changed.
     pub fn record(&mut self, bundle_id: BundleId, at: Timestamp) -> bool {
         self.last_launched.insert(bundle_id, at) != Some(at)
     }
 }
 
-/// A file entry that `decode` left out, so the rest of the log could load.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dropped {
     Entry {
@@ -92,7 +82,6 @@ pub struct Decoded {
     pub dropped: Vec<Dropped>,
 }
 
-/// The whole file is unreadable; nothing in it can be trusted.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
     #[error("not a launch log: {0}")]
@@ -106,15 +95,12 @@ struct FileVersion {
     version: u64,
 }
 
-/// Version 1 as stored. Timestamps stay strings until `decode` parses each
-/// one on its own, so a bad entry is dropped instead of failing the file.
 #[derive(Deserialize)]
 struct FileV1 {
     baseline_at: Option<String>,
     last_launched: BTreeMap<String, String>,
 }
 
-/// Writes `log` as version 1 JSON, entries ordered by bundle ID.
 pub fn encode(log: &LaunchLog) -> String {
     let entries: Map<String, Value> = log
         .last_launched
@@ -129,9 +115,6 @@ pub fn encode(log: &LaunchLog) -> String {
     format!("{file:#}\n")
 }
 
-/// Reads a launch log written by `encode`. Entries that cannot be used are
-/// left out and listed in `Decoded::dropped`; `now` bounds how far in the
-/// future a timestamp may be (`FUTURE_TOLERANCE`).
 pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
     let FileVersion { version } = serde_json::from_str(text)?;
     if version != VERSION {

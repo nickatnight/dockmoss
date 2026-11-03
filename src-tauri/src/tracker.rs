@@ -77,11 +77,6 @@ impl Tracker {
         self.last_sent = None;
     }
 
-    /// The last ordering did not reach the window. `order` records the new
-    /// visibility before the main thread applies it, and an ordering is only
-    /// computed when a frame is sent, so both are undone: the window is
-    /// taken to be as it was, and the next tick sends the frame again and
-    /// issues the same ordering.
     pub fn order_failed(&mut self) {
         self.overlay = match self.overlay {
             Visibility::Shown => Visibility::Hidden,

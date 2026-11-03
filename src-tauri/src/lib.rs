@@ -36,7 +36,6 @@ use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
 const LAUNCH_LOG_FILE: &str = "launch_log.json";
-/// How long quitting waits for the launch log's last save.
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
@@ -118,8 +117,6 @@ pub fn run() {
     });
 }
 
-/// Loads the launch log, starts its writer, records every app running now
-/// as used now, then records each launch, activation and quit from here on.
 fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
     let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
     let log = usage::load(&path, Timestamp::now());
@@ -168,9 +165,6 @@ fn record_app_event(inbox: &mpsc::Sender<WriterMessage>, event: usage::AppEvent)
     }
 }
 
-/// Saves any unsaved launch log change before the process exits, waiting at
-/// most `FLUSH_TIMEOUT`, so the last half second of app switches survives a
-/// quit from the tray.
 fn flush_launch_log(app: &AppHandle) {
     let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
         return;
@@ -197,17 +191,12 @@ mod launch_log_writer {
     use crate::usage::{self, LaunchLog, SaveSchedule};
 
     pub enum WriterMessage {
-        Used {
-            bundle_id: BundleId,
-            at: Timestamp,
-        },
-        /// Save now if anything is unsaved, then acknowledge.
+        Used { bundle_id: BundleId, at: Timestamp },
         Flush(Sender<()>),
     }
 
     pub struct LaunchLogInbox(pub Sender<WriterMessage>);
 
-    /// Starts the `launch-log` thread, the only owner of `log`.
     pub fn spawn(path: PathBuf, log: LaunchLog) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
         std::thread::Builder::new()
@@ -216,7 +205,6 @@ mod launch_log_writer {
         Ok(inbox)
     }
 
-    /// Blocks while nothing is unsaved, so an idle log costs no wakeups.
     fn write_launch_log(path: &Path, mut log: LaunchLog, messages: &Receiver<WriterMessage>) {
         let mut schedule = SaveSchedule::default();
         loop {
@@ -255,7 +243,6 @@ mod launch_log_writer {
         }
     }
 
-    /// `trigger` names what asked for the save, for the debug log.
     fn save(path: &Path, log: &LaunchLog, schedule: &mut SaveSchedule, trigger: &'static str) {
         match usage::save(path, log) {
             Ok(()) => {
@@ -458,9 +445,6 @@ mod dock_tracker {
         }
     }
 
-    /// Orders the overlay in or out on the main thread. A failure is sent
-    /// back to the tracker inbox as `OverlayOrderFailed`, so the next tick
-    /// tries again.
     fn order_overlay(app: &AppHandle, visibility: Visibility) {
         let main = app.clone();
         let scheduled = app.run_on_main_thread(move || {

@@ -46,8 +46,6 @@ enum Reading {
 
 pub struct DockReader {
     dock: Option<CFRetained<AXUIElement>>,
-    /// The global AX messaging timeout is in place. It is set before the
-    /// first find, and again only if setting it failed.
     timeout_set: bool,
     child_attributes: CFRetained<CFArray<CFString>>,
     bundle_ids: BundleIdCache,
@@ -207,7 +205,6 @@ fn application(pid: i32) -> CFRetained<AXUIElement> {
     unsafe_code,
     reason = "the AX system-wide constructor and timeout setter are C functions"
 )]
-/// Returns whether the timeout was set.
 fn set_global_messaging_timeout() -> bool {
     // SAFETY: AXUIElementCreateSystemWide takes no arguments and returns a
     // new +1 element, which the binding wraps in `CFRetained`. It returns

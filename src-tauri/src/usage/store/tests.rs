@@ -95,8 +95,6 @@ fn a_file_with_some_bad_entries_loads_the_rest_in_place() {
     assert!(!sibling(&path, ".corrupt").exists());
 }
 
-/// A valid log padded with trailing whitespace to `len` bytes, so only the
-/// size can make it unreadable.
 fn padded_log(len: usize) -> Vec<u8> {
     let mut bytes = super::encode(&two_apps()).into_bytes();
     bytes.resize(len, b' ');

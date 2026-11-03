@@ -37,7 +37,6 @@ fn open_url(url: &str, _mtm: MainThreadMarker) -> Result<(), WorkspaceError> {
     }
 }
 
-/// Every app running now, agents and helpers included.
 pub fn running_apps(_mtm: MainThreadMarker) -> Vec<RunningApp> {
     NSWorkspace::sharedWorkspace()
         .runningApplications()
@@ -46,11 +45,6 @@ pub fn running_apps(_mtm: MainThreadMarker) -> Vec<RunningApp> {
         .collect()
 }
 
-/// Calls `on_event` on the main thread whenever an app launches, becomes
-/// frontmost or quits. Workspace notifications are posted only to
-/// `NSWorkspace`'s own notification center, not the default one. The
-/// observers stay registered for the life of the process, as in
-/// `screen::on_screen_parameters_change`.
 #[expect(
     unsafe_code,
     reason = "the notification names are AppKit extern statics and the observer API takes a block"
@@ -75,6 +69,8 @@ pub fn on_app_events(on_event: impl Fn(AppEvent) + Send + Sync + 'static, _mtm: 
             ),
         ]
     };
+    // Workspace notifications are posted only to NSWorkspace's own center,
+    // never to NSNotificationCenter.defaultCenter.
     let center = NSWorkspace::sharedWorkspace().notificationCenter();
     let queue = NSOperationQueue::mainQueue();
     for (name, kind) in names {

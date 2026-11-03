@@ -79,8 +79,6 @@ fn rect(x: f64, y: f64, width: f64, height: f64) -> ScreenRect {
     }
 }
 
-// ---- diff ----
-
 #[test]
 fn nothing_sent_yet_is_a_change() {
     assert!(changed(None, &[safari(ICON)]));
@@ -186,11 +184,8 @@ fn slow_drift_is_sent_once_it_adds_up_to_the_tolerance() {
     assert_eq!(sent_x, Some(700.6), "0.6 from the sent frame");
 }
 
-// ---- poll rate ----
-
 #[test]
 fn cursor_near_the_dock_polls_fast() {
-    // Dock box spans x 440..1070 and y 920..976 (a visible bottom Dock).
     let dock = Some(rect(440.0, 920.0, 630.0, 56.0));
     let cases = [
         (
@@ -239,7 +234,6 @@ fn cursor_near_the_dock_polls_fast() {
 
 #[test]
 fn hidden_dock_measures_the_band_from_the_display_bottom_edge() {
-    // An auto-hidden Dock sits below the 982 pt display.
     let hidden = Some(rect(440.0, 987.0, 630.0, 56.0));
     let cases = [
         (
@@ -355,8 +349,6 @@ fn tick_reports_the_rate_for_the_cursor_and_the_read() {
         "failed read, near the bottom edge"
     );
 }
-
-// ---- step ----
 
 #[test]
 fn tracker_sends_changes_and_logs_errors_once() {
@@ -499,8 +491,6 @@ fn new_display_converts_the_next_read_against_it() {
     );
 }
 
-// ---- overlay visibility ----
-
 #[test]
 fn overlay_is_ordered_out_for_an_empty_frame_and_in_for_a_full_one() {
     let mut tracker = Tracker::new(PRIMARY_2X);
@@ -551,8 +541,6 @@ fn first_empty_frame_orders_the_overlay_out() {
 
     assert_eq!(tick.overlay, Some(Visibility::Hidden));
 }
-
-// ---- tick timing ----
 
 #[test]
 fn next_delay_is_the_interval_minus_the_read() {

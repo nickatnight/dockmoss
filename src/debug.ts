@@ -1,10 +1,5 @@
 import { type DockItem, isCommandError, watchDock } from "./ipc";
 
-/**
- * Outlines every Dock app item. Outlines are keyed by Dock position, since
- * two items can share a bundle ID. Each message requests at most one
- * animation frame, and nothing runs between messages.
- */
 export async function outlineDockItems(root: HTMLElement): Promise<void> {
   const layer = document.createElement("div");
   layer.className = "debug-layer";

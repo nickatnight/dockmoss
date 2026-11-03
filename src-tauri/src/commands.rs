@@ -6,11 +6,8 @@ use tauri::ipc::Channel;
 use crate::Error;
 use crate::dock::DockItem;
 
-/// What the `dock-tracker` thread receives. The thread owns all tracker
-/// state, so commands only post to it.
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
-    /// `NSApplicationDidChangeScreenParametersNotification` arrived.
     ScreenParametersChanged,
 }
 

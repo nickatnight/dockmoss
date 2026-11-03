@@ -1,22 +1,15 @@
-//! Decides, for each Dock read, what to send to the overlay, what to log,
-//! whether the overlay window should be shown, and how soon to read again.
-//! The `dock-tracker` thread in `lib.rs` only performs what this returns.
-
 use std::time::Duration;
 
 use crate::dock::{self, DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, ScreenPoint, ScreenRect};
 
-/// A rect field must move this far from the last frame sent to count as a change.
 const TOLERANCE: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
-    /// 60 Hz, while the cursor is near the Dock and magnification may run.
     Fast,
-    /// 2 Hz, otherwise.
     Slow,
 }
 
@@ -59,7 +52,6 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    /// The overlay window is shown at startup, so the tracker starts there.
     pub fn new(display: Display) -> Self {
         Self {
             display,
@@ -77,7 +69,6 @@ impl Tracker {
         changed
     }
 
-    /// A new subscriber has seen nothing, so the next tick sends the current frame.
     pub fn resubscribe(&mut self) {
         self.last_sent = None;
     }
@@ -126,10 +117,6 @@ impl Tracker {
     }
 }
 
-/// True when `next` differs from the last frame sent: nothing sent yet, a
-/// different length, another app at any index, or any rect field moved by
-/// at least `TOLERANCE`. Comparing against the last frame *sent* means slow
-/// drift is still sent once it adds up.
 pub fn changed(sent: Option<&[DockItem]>, next: &[DockItem]) -> bool {
     let Some(sent) = sent else {
         return true;
@@ -170,10 +157,6 @@ pub fn dock_bounds(children: &[RawDockChild]) -> Option<ScreenRect> {
         })
 }
 
-/// `Fast` when the cursor is within `PROXIMITY` of the Dock's bounds. When
-/// those bounds are off the display (an auto-hidden Dock, or no read yet),
-/// the band is measured from the display's bottom edge instead, so moving
-/// toward a hidden Dock speeds the poll up before it slides in.
 pub fn poll_rate(
     cursor: Option<ScreenPoint>,
     dock_bounds: Option<ScreenRect>,
@@ -210,8 +193,6 @@ fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect) -> bool {
         && (bottom - PROXIMITY..=bottom).contains(&point.y)
 }
 
-/// How long to wait before the next read. A read that overran its interval
-/// is followed by the next one at once; missed ticks are skipped, not caught up.
 pub fn next_delay(rate: PollRate, read_took: Duration) -> Duration {
     rate.interval().saturating_sub(read_took)
 }

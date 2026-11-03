@@ -43,8 +43,6 @@ pub fn pin_above_dock(
     Ok(PinnedLevels { dock, overlay })
 }
 
-/// What the window reports after an order-out or order-in, logged so a
-/// regression in level, click-through or Spaces behaviour shows up.
 #[derive(Debug)]
 pub struct OrderedState {
     pub visible: bool,
@@ -53,9 +51,6 @@ pub struct OrderedState {
     pub collection_behavior: usize,
 }
 
-/// Orders the overlay in without activating the app or making the window
-/// key, or orders it out. Level, collection behaviour and click-through are
-/// properties of the window, so they survive both.
 pub fn set_visible(
     window: &WebviewWindow,
     visible: bool,

@@ -41,8 +41,6 @@ enum Reading {
     Missing,
 }
 
-/// Reads the Dock's children, keeping the Dock's application element and
-/// each app's bundle ID between reads. Build it on the thread that polls.
 pub struct DockReader {
     dock: Option<CFRetained<AXUIElement>>,
     child_attributes: CFRetained<CFArray<CFString>>,
@@ -60,8 +58,6 @@ impl DockReader {
         }
     }
 
-    /// One full read. Any failure drops the cached Dock element, so the next
-    /// read finds the Dock again, as after `killall Dock`.
     pub fn read(&mut self) -> Result<Vec<RawDockChild>, DockError> {
         let read = autoreleasepool(|_| self.read_in_pool());
         if read.is_err() {
@@ -87,8 +83,6 @@ impl DockReader {
         Ok(kept)
     }
 
-    /// Reads one child's four attributes in a single AX call. `bundle_ids`
-    /// collects this read's IDs, so the cache only holds apps still in the Dock.
     fn raw_child(
         &self,
         child: &AXUIElement,
@@ -132,9 +126,6 @@ impl DockReader {
     }
 }
 
-/// `ApiDisabled` and `CannotComplete` mean the whole Dock is unreadable. Any
-/// other error belongs to one child (an app quit between the list read and
-/// the child read, say), so only that child is dropped.
 fn keep_child(read: Result<RawDockChild, DockError>) -> Result<Option<RawDockChild>, DockError> {
     match read {
         Ok(child) => Ok(Some(child)),
@@ -146,8 +137,6 @@ fn keep_child(read: Result<RawDockChild, DockError>) -> Result<Option<RawDockChi
     }
 }
 
-/// The `com.apple.dock` process whose bundle is the system Dock, so another
-/// process that claims the bundle ID is never read.
 fn find_dock() -> Result<CFRetained<AXUIElement>, DockError> {
     let pid =
         NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
@@ -229,7 +218,6 @@ fn children(element: &AXUIElement) -> Result<Vec<CFRetained<AXUIElement>>, DockE
         .collect())
 }
 
-/// The four child attributes in request order, each `None` when missing.
 #[expect(
     unsafe_code,
     reason = "AXUIElementCopyMultipleAttributeValues returns its values through an out-pointer"

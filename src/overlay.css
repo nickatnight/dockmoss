@@ -11,9 +11,6 @@ body {
   pointer-events: none;
 }
 
-/* The dark inset line keeps the outline visible on light wallpapers, and
-   alternating colours show a 1 pt gap or overlap between neighbours. The
-   outer edge is the 1 px border, so captures can be checked against AX. */
 .debug-dock-item {
   position: absolute;
   top: 0;

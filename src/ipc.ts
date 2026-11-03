@@ -15,7 +15,6 @@ export interface DockItem {
   rect: LogicalRect;
 }
 
-// Mirrors Error::kind() in src-tauri/src/error.rs.
 export type ErrorKind =
   | "tauri"
   | "no_main_display"

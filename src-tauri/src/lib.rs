@@ -31,7 +31,6 @@ use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
-/// Debug builds log every Dock read and send; release builds stay at info.
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
     LevelFilter::Debug
 } else {
@@ -132,9 +131,6 @@ fn spawn_dock_tracker(
     Ok(())
 }
 
-/// The thread body: read, let `Tracker` decide, do what it says, wait. It
-/// must not panic (release builds abort), so it holds no `expect`, `unwrap`
-/// or indexing.
 fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Display) {
     let Some(trust) = app.try_state::<TrustState>() else {
         tracing::warn!("dock tracker started before the trust state; not tracking");
@@ -161,8 +157,6 @@ fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Dis
         perform(app, tick, &mut watcher);
         let delay = tracker::next_delay(rate, started.elapsed());
         let deadline = Instant::now().checked_add(delay);
-        // Messages never cut the wait short: a burst of screen notifications
-        // (one per frame while the Dock slides in) must not add reads.
         loop {
             let left = deadline.map_or(Duration::ZERO, |deadline| {
                 deadline.saturating_duration_since(Instant::now())
@@ -183,8 +177,6 @@ fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Dis
     }
 }
 
-/// Re-reads the primary display and moves the conversion and the overlay
-/// window to it together, both from `Display::frame()` (ADR-0006).
 fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
     let display = match primary_display(app) {
         Ok(display) => display,
@@ -245,8 +237,6 @@ fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockIte
     }
 }
 
-/// Orders the overlay out while the Dock is hidden (or unreadable) and back
-/// in when it shows. `NSWindow` calls must run on the main thread.
 fn order_overlay(app: &AppHandle, visibility: Visibility) {
     let main = app.clone();
     let scheduled = app.run_on_main_thread(move || {

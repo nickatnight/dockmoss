@@ -64,3 +64,13 @@ fn dock_ax_failures_name_the_attribute_and_code() {
         })
     );
 }
+
+#[test]
+fn stopped_tracker_has_its_own_kind() {
+    let json = serde_json::to_value(Error::TrackerStopped).expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({ "kind": "tracker_stopped", "message": "the Dock tracker is not running" })
+    );
+}

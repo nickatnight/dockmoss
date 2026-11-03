@@ -5,8 +5,24 @@ body {
   background: transparent;
 }
 
-.debug-dock-item {
+.debug-layer {
   position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The dark inset line keeps the outline visible on light wallpapers, and
+   alternating colours show a 1 pt gap or overlap between neighbours. The
+   outer edge is the 1 px border, so captures can be checked against AX. */
+.debug-dock-item {
+  position: absolute;
+  top: 0;
+  left: 0;
   box-sizing: border-box;
   border: 1px solid #ff2bd6;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+
+.debug-dock-item:nth-child(even) {
+  border-color: #00e0ff;
 }

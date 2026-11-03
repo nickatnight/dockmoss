@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export type BundleId = string & { readonly __brand: "BundleId" };
 
@@ -15,7 +15,13 @@ export interface DockItem {
   rect: LogicalRect;
 }
 
-export type ErrorKind = "tauri" | "no_main_display" | "overlay" | "dock";
+// Mirrors Error::kind() in src-tauri/src/error.rs.
+export type ErrorKind =
+  | "tauri"
+  | "no_main_display"
+  | "overlay"
+  | "dock"
+  | "tracker_stopped";
 
 export interface CommandError {
   kind: ErrorKind;
@@ -33,6 +39,11 @@ export function isCommandError(error: unknown): error is CommandError {
   );
 }
 
-export function dockItems(): Promise<DockItem[]> {
-  return invoke<DockItem[]>("dock_items");
+/** Calls `onItems` with the current Dock items, then again on every change. */
+export function watchDock(
+  onItems: (items: DockItem[]) => void,
+): Promise<void> {
+  const channel = new Channel<DockItem[]>();
+  channel.onmessage = onItems;
+  return invoke<void>("watch_dock", { onItems: channel });
 }

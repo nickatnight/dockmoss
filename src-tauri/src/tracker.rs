@@ -69,6 +69,13 @@ impl Tracker {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "display changes reach the tracker from a later commit"
+        )
+    )]
     pub fn set_display(&mut self, display: Display) {
         self.display = display;
     }

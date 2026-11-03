@@ -12,6 +12,7 @@ Read alongside `CLAUDE.md`. This file does not get weakened to make a change pas
 - No `#[ignore]`d, skipped or deleted tests without a reason in the commit message.
 - No `@ts-ignore` or `@ts-expect-error` anywhere under `src/` (enforced by a grep in `check:fast`). No `eslint-disable` without a reason comment.
 - Every `unsafe` block lives in `src-tauri/src/macos/` and has a `// SAFETY:` comment. `unsafe_code` is set to deny crate-wide, so each `macos/` item that needs `unsafe` opts in with `#[expect(unsafe_code, reason = "...")]`, and `clippy::undocumented_unsafe_blocks` is set to deny. No `unsafe_code` opt-in exists outside `src/macos/` (enforced by a grep in `check:fast`).
+- No `expect`, `unwrap` or slice indexing on the Dock polling path. Release builds abort on panic, so the `dock-tracker` thread must not panic. `unwrap_used` is denied crate-wide; every polling-path item (`mod dock_tracker` and `primary_display` in `lib.rs`, and the `dock`, `geometry`, `tracker`, `macos::dock` and `macos::cursor` modules) also denies `clippy::expect_used` and `clippy::indexing_slicing`. A module the loop starts calling gets the same attribute.
 - Unit tests live in `<module>/tests.rs`, declared with `#[cfg(test)] mod tests;`, not in an inline module (enforced by a grep in `check:fast`). Coverage excludes those files, so it measures only logic.
 - No secrets in source.
 

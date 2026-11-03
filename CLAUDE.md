@@ -25,6 +25,7 @@ src-tauri/src/
   lib.rs         # Builder, plugins, setup(), command registration
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules
+  tracker.rs     # pure: per Dock read -> what to send, log and show, and the poll rate
   geometry.rs    # pure: AX rects -> overlay-local logical pixels (the one conversion)
   dock.rs        # pure: raw Dock children -> DockItems (application items only)
   bundle_id.rs   # pure: BundleId newtype
@@ -35,7 +36,7 @@ src-tauri/capabilities/   # one capability file per window
 src/                      # webview: canvas/WebGL moss renderer, settings UI
 ```
 
-The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
+The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `tracker.rs`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
 
 ## Rust conventions
 
@@ -61,7 +62,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **Commands:** use `async fn` with owned arguments. Shared state goes in through `app.manage(...)` and comes out as `State<'_, T>`. Use `std::sync::Mutex` when the lock never crosses an `.await`; use `tokio::sync::Mutex` only when it does.
 - **Spawning:** use `tauri::async_runtime::spawn`. A bare `tokio::spawn` panics inside `setup()` because no runtime context exists there yet.
 - **Rust → webview:** send discrete updates (growth changed, app launched) with `Emitter::emit_to("overlay", ...)`. Stream Dock geometry over a `tauri::ipc::Channel` and send only when rects actually change, so the webview render loop can stay idle (see Battery in `SUMMARY.md`).
-- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-dock-items`. The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
+- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` (the command that hands Rust its `Channel`). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
 - **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures.
 
 ## macOS overlay gotchas

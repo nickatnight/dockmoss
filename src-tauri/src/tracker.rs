@@ -95,10 +95,12 @@ impl Tracker {
                 (Vec::new(), None, log)
             }
         };
-        let send = changed(self.last_sent.as_deref(), &frame).then(|| {
+        let send = if changed(self.last_sent.as_deref(), &frame) {
             self.last_sent = Some(frame.clone());
-            frame
-        });
+            Some(frame)
+        } else {
+            None
+        };
         let overlay = send.as_deref().and_then(|sent| self.order(sent));
         Tick {
             send,
@@ -114,10 +116,11 @@ impl Tracker {
         } else {
             Visibility::Shown
         };
-        (wanted != self.overlay).then(|| {
-            self.overlay = wanted;
-            wanted
-        })
+        if wanted == self.overlay {
+            return None;
+        }
+        self.overlay = wanted;
+        Some(wanted)
     }
 }
 

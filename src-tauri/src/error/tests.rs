@@ -74,3 +74,36 @@ fn stopped_tracker_has_its_own_kind() {
         serde_json::json!({ "kind": "tracker_stopped", "message": "the Dock tracker is not running" })
     );
 }
+
+#[test]
+fn error_kind_in_ipc_ts_lists_every_error_kind() {
+    let errors = [
+        Error::Tauri(tauri::Error::WindowNotFound),
+        Error::NoMainDisplay,
+        Error::Overlay(crate::macos::overlay::OverlayError::NullWindow),
+        Error::Dock(crate::dock::DockError::ApiDisabled),
+        Error::TrackerStopped,
+    ];
+    for error in &errors {
+        // A new variant stops this compiling until it is added to `errors`.
+        match error {
+            Error::Tauri(_)
+            | Error::NoMainDisplay
+            | Error::Overlay(_)
+            | Error::Dock(_)
+            | Error::TrackerStopped => {}
+        }
+    }
+    let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();
+
+    let ipc = include_str!("../../../src/ipc.ts");
+    let union = ipc
+        .split("export type ErrorKind =")
+        .nth(1)
+        .and_then(|rest| rest.split(';').next())
+        .expect("src/ipc.ts declares ErrorKind");
+    let typescript: std::collections::BTreeSet<&str> =
+        union.split('"').skip(1).step_by(2).collect();
+
+    assert_eq!(typescript, rust);
+}

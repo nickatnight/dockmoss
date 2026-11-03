@@ -15,6 +15,7 @@ export interface DockItem {
   rect: LogicalRect;
 }
 
+// error/tests.rs fails when this list and Error::kind() disagree.
 export type ErrorKind =
   | "tauri"
   | "no_main_display"

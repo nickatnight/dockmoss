@@ -6,7 +6,7 @@ A novelty macOS app that grows moss on Dock icons for apps you haven't opened in
 
 - A transparent, click-through overlay sits above the Dock.
 - Each Dock app icon gets a moss layer whose coverage scales with days since the app was last used.
-- Stages (tunable): clean, light fuzz (~30 days), patchy moss (~90 days), fully overgrown with tiny mushrooms or flowers (~180+ days).
+- Stages (tunable): clean, light fuzz (5 days), patchy moss (10 days), fully overgrown with tiny mushrooms or flowers (30+ days).
 - Opening the app clears its moss, with a small "shrivel" animation.
 
 ## How it works
@@ -27,8 +27,16 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 3. **First-run grace period.** On first run, treat every app with no launch history as "last seen today" and let moss grow from there, so the Dock isn't green on day one.
 4. **Spotlight as a seed only.** Use `kMDItemLastUsedDate` to seed the initial state when it looks sane. Ignore `kMDItemDateAdded` and Spotlight dates entirely when many apps share an identical timestamp (a migration signature, e.g. 5+ apps within a few seconds).
 5. **Unknown is gentle.** Apps with no data never jump straight to overgrown; they start young and grow on the normal curve.
-6. **Jitter.** Add a small random per-app offset (a few days) to the growth curve so apps with similar baselines don't all change stage on the same day.
+6. **Jitter.** Add a per-app offset of up to ±1 day to the growth curve so apps with similar baselines don't all change stage on the same day. It comes from a fixed hash of the bundle ID, so an app's offset is the same on every run.
 7. **Check periodically.** Quick test: `mdls -name kMDItemLastUsedDate /Applications/Safari.app`.
+
+**Growth curve**
+
+- **Clean hold.** An app used within the Fuzz threshold (5 days by default, shifted by its jitter) has no moss.
+- **Linear growth.** From Fuzz, overgrowth rises linearly to 0.5 at Patchy (10 days) and to 1.0 at Overgrown (30 days), then stays at 1.0. It never jumps at a stage boundary.
+- **Fast-forward** (1x, 10x, 100x, 1000x) multiplies the time since last use. The jitter is added afterwards and never scaled. Scaled, it would be worth ±1,000 days at 1000x.
+- **Threshold limits.** Thresholds are whole days with 2 ≤ Fuzz < Patchy < Overgrown ≤ 3650. Fuzz is at least one day more than the largest jitter, so jitter alone never puts moss on an app that was just used.
+- **Running or just launched** means clean, whatever the jitter. An app with no last-used time at all shows no moss. Rule 3's baseline gives every app present at first run a time. Slice 8 is to give apps that first appear later a first-seen time, so they grow as rule 5 says.
 
 ## Stack (leading option)
 

@@ -136,10 +136,7 @@ pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
     let mut dropped = Vec::new();
     let mut log = LaunchLog::default();
     for (key, value) in file.last_launched {
-        let entry = BundleId::new(key.as_str())
-            .ok_or(DropReason::EmptyBundleId)
-            .and_then(|bundle_id| Ok((bundle_id, timestamp(&value, latest)?)));
-        match entry {
+        match entry(&key, &value, latest) {
             Ok((bundle_id, at)) => {
                 log.last_launched.insert(bundle_id, at);
             }
@@ -156,6 +153,11 @@ pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
         }
     }
     Ok(Decoded { log, dropped })
+}
+
+fn entry(key: &str, value: &str, latest: Timestamp) -> Result<(BundleId, Timestamp), DropReason> {
+    let bundle_id = BundleId::new(key).ok_or(DropReason::EmptyBundleId)?;
+    Ok((bundle_id, timestamp(value, latest)?))
 }
 
 fn timestamp(text: &str, latest: Timestamp) -> Result<Timestamp, DropReason> {

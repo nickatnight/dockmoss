@@ -222,7 +222,7 @@ mod launch_log_writer {
                 }
                 Ok(WriterMessage::Flush(ack)) => {
                     if schedule.deadline().is_some() {
-                        save(path, &log, &mut schedule, "flush");
+                        save(path, &log, &mut schedule, SaveTrigger::Flush);
                     }
                     if ack.send(()).is_err() {
                         tracing::debug!("launch log flushed after the quit stopped waiting");
@@ -231,27 +231,34 @@ mod launch_log_writer {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
                     if schedule.deadline().is_some() {
-                        save(path, &log, &mut schedule, "disconnected");
+                        save(path, &log, &mut schedule, SaveTrigger::Disconnected);
                     }
                     tracing::debug!("launch log writer stopped: no senders left");
                     return;
                 }
             }
             if schedule.is_due(Instant::now()) {
-                save(path, &log, &mut schedule, "deadline");
+                save(path, &log, &mut schedule, SaveTrigger::Deadline);
             }
         }
     }
 
-    fn save(path: &Path, log: &LaunchLog, schedule: &mut SaveSchedule, trigger: &'static str) {
+    #[derive(Debug, Clone, Copy)]
+    enum SaveTrigger {
+        Deadline,
+        Flush,
+        Disconnected,
+    }
+
+    fn save(path: &Path, log: &LaunchLog, schedule: &mut SaveSchedule, trigger: SaveTrigger) {
         match usage::save(path, log) {
             Ok(()) => {
                 schedule.saved();
-                tracing::debug!(entries = log.len(), trigger, "launch log saved");
+                tracing::debug!(entries = log.len(), ?trigger, "launch log saved");
             }
             Err(error) => {
                 schedule.save_failed(Instant::now());
-                tracing::warn!(%error, trigger, "launch log not saved; retrying in 5 s");
+                tracing::warn!(%error, ?trigger, "launch log not saved; retrying in 5 s");
             }
         }
     }

@@ -3,6 +3,7 @@ pub mod cursor;
 pub mod dock;
 pub mod overlay;
 pub mod screen;
+pub mod spotlight;
 pub mod workspace;
 
 pub use objc2::MainThreadMarker;

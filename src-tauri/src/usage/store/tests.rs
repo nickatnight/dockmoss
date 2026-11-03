@@ -209,3 +209,81 @@ fn a_save_over_an_existing_log_replaces_it_atomically() {
         "a reader of the old file still sees all of it, never a partial write"
     );
 }
+
+fn dropped_path(path: &Path) -> PathBuf {
+    sibling(path, ".dropped")
+}
+
+const ONE_BAD_ENTRY: &str = r#"{"version": 1, "baseline_at": null, "last_launched": {
+    "com.apple.Safari": "2026-11-02T09:14:03Z",
+    "com.apple.Notes": 7
+}}"#;
+
+#[test]
+fn a_file_with_a_dropped_entry_is_copied_byte_for_byte_to_dropped() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = log_path(&dir);
+    fs::write(&path, ONE_BAD_ENTRY).expect("write file");
+
+    let log = load_or_set_aside(&path, at(NOW));
+
+    assert_eq!(log.len(), 1, "the good entry loads");
+    let copy = dropped_path(&path);
+    assert_eq!(
+        fs::read(&copy).expect("the .dropped copy exists"),
+        ONE_BAD_ENTRY.as_bytes()
+    );
+    let mode = fs::metadata(&copy).expect("copy").permissions().mode();
+    assert_eq!(mode & 0o777, 0o600, "mode {mode:o}");
+    assert_eq!(
+        fs::read(&path).expect("the log stays in place"),
+        ONE_BAD_ENTRY.as_bytes()
+    );
+}
+
+#[test]
+fn a_clean_file_leaves_no_dropped_copy() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = log_path(&dir);
+    save(&path, &two_apps()).expect("save succeeds");
+
+    let log = load_or_set_aside(&path, at(NOW));
+
+    assert_eq!(log, two_apps());
+    assert!(!dropped_path(&path).exists());
+}
+
+#[test]
+fn a_stale_dropped_copy_is_replaced() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = log_path(&dir);
+    let copy = dropped_path(&path);
+    fs::write(&copy, "an older dropped copy").expect("write stale copy");
+    fs::set_permissions(&copy, fs::Permissions::from_mode(0o644)).expect("chmod stale copy");
+    fs::write(&path, ONE_BAD_ENTRY).expect("write file");
+
+    load_or_set_aside(&path, at(NOW));
+
+    assert_eq!(
+        fs::read(&copy).expect("the .dropped copy exists"),
+        ONE_BAD_ENTRY.as_bytes()
+    );
+    let mode = fs::metadata(&copy).expect("copy").permissions().mode();
+    assert_eq!(mode & 0o777, 0o600, "mode {mode:o}");
+}
+
+#[test]
+fn a_failed_dropped_copy_still_loads_the_log() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = log_path(&dir);
+    fs::create_dir(dropped_path(&path)).expect("block the copy path with a directory");
+    fs::create_dir(dropped_path(&path).join("child")).expect("make the directory non-empty");
+    fs::write(&path, ONE_BAD_ENTRY).expect("write file");
+
+    let log = load_or_set_aside(&path, at(NOW));
+
+    assert_eq!(
+        log.last_launched(&id("com.apple.Safari")),
+        Some(at("2026-11-02T09:14:03Z"))
+    );
+}

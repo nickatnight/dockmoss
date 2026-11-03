@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
-use super::SaveSchedule;
+use super::{SaveSchedule, recompute_interval};
+use crate::growth::FastForward;
 
 fn ms(millis: u64) -> Duration {
     Duration::from_millis(millis)
@@ -78,4 +79,21 @@ fn a_failed_save_stays_pending_and_retries_5_s_later() {
         Some(failed_at + Duration::from_secs(5)),
         "a change while a retry is pending waits for the retry"
     );
+}
+
+#[test]
+fn growth_is_recomputed_every_5_minutes_over_the_speed_but_at_most_once_a_second() {
+    let cases = [
+        (FastForward::X1, Duration::from_secs(300)),
+        (FastForward::X10, Duration::from_secs(30)),
+        (FastForward::X100, Duration::from_secs(3)),
+        (FastForward::X1000, Duration::from_secs(1)),
+    ];
+    for (fast_forward, expected) in cases {
+        assert_eq!(
+            recompute_interval(fast_forward),
+            expected,
+            "{fast_forward:?}"
+        );
+    }
 }

@@ -13,6 +13,8 @@ pub enum Error {
     Dock(#[from] crate::dock::DockError),
     #[error("the Dock tracker is not running")]
     TrackerStopped,
+    #[error("usage tracking is not running")]
+    UsageStopped,
 }
 
 impl Error {
@@ -23,6 +25,7 @@ impl Error {
             Self::Overlay(_) => "overlay",
             Self::Dock(_) => "dock",
             Self::TrackerStopped => "tracker_stopped",
+            Self::UsageStopped => "usage_stopped",
         }
     }
 }

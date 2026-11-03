@@ -4,11 +4,15 @@ use std::path::PathBuf;
 mod log;
 mod running;
 mod schedule;
+mod spotlight;
+mod state;
 mod store;
 
-pub use log::{LaunchLog, Recorded};
+pub use log::LaunchLog;
 pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
-pub use schedule::SaveSchedule;
+pub use schedule::{SaveSchedule, recompute_interval};
+pub use spotlight::parse_mdls;
+pub use state::{AppGrowth, Change, DockApp, DockUpdate, UsageState};
 pub use store::{load_or_set_aside, save};
 
 #[derive(Debug, thiserror::Error)]

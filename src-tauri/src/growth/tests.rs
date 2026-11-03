@@ -21,6 +21,17 @@ fn overgrowth_clamps_to_zero_one_and_maps_nan_to_zero() {
 }
 
 #[test]
+fn overgrowth_of_negative_zero_is_positive_zero() {
+    let zero = Overgrowth::new(-0.0);
+
+    assert!(zero.get().is_sign_positive(), "{:?}", zero.get());
+    assert_eq!(
+        serde_json::to_string(&zero).expect("Overgrowth serializes to JSON"),
+        "0.0"
+    );
+}
+
+#[test]
 fn overgrowth_serializes_as_a_bare_number() {
     let json = serde_json::to_value(Overgrowth::new(0.5)).expect("Overgrowth serializes to JSON");
 
@@ -117,4 +128,21 @@ fn fast_forward_factors_are_1_10_100_1000() {
 #[test]
 fn fast_forward_defaults_to_real_time() {
     assert_eq!(FastForward::default(), FastForward::X1);
+}
+
+#[test]
+fn fast_forward_from_factor_accepts_only_the_four_speeds() {
+    let cases = [
+        (1, Some(FastForward::X1)),
+        (10, Some(FastForward::X10)),
+        (100, Some(FastForward::X100)),
+        (1000, Some(FastForward::X1000)),
+        (0, None),
+        (2, None),
+        (50, None),
+        (10_000, None),
+    ];
+    for (factor, expected) in cases {
+        assert_eq!(FastForward::from_factor(factor), expected, "{factor}");
+    }
 }

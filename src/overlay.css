@@ -23,3 +23,26 @@ body {
 .debug-dock-item:nth-child(even) {
   border-color: #00e0ff;
 }
+
+.debug-dock-item-label {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 2px;
+  padding: 0 3px;
+  white-space: nowrap;
+  font: 10px/1.3 ui-monospace, monospace;
+  color: #fff;
+  background: rgb(0 0 0 / 0.7);
+}
+
+/* Every second label sits one line higher, so labels on one row are two
+   tiles apart, wider than the longest label ("1.00 overgrown"). */
+.debug-dock-item:nth-child(even) .debug-dock-item-label {
+  margin-bottom: calc(2px + 1.3em);
+}
+
+.debug-dock-item-label:empty {
+  display: none;
+}

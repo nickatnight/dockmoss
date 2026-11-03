@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::dock::{self, DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, ScreenPoint, ScreenRect};
+use crate::usage::DockApp;
 
 /// Overlay-local logical pixels a rect field must move, from the last frame
 /// sent, to count as a change.
@@ -43,12 +44,17 @@ pub struct Tick {
     pub log: Option<TickLog>,
     /// The overlay window's new visibility, if it changed.
     pub overlay: Option<Visibility>,
+    /// The Dock's apps, when a sent frame lists other apps than the last
+    /// non-empty frame did. Empty frames (Dock hidden or unreadable) never
+    /// report, so growth keeps the last known apps.
+    pub apps: Option<Vec<DockApp>>,
     pub rate: PollRate,
 }
 
 pub struct Tracker {
     display: Display,
     last_sent: Option<Vec<DockItem>>,
+    last_apps: Option<Vec<DockApp>>,
     last_error: Option<DockError>,
     /// Recorded when the ordering is issued, before the main thread applies it.
     ordered: Visibility,
@@ -63,6 +69,7 @@ impl Tracker {
         Self {
             display,
             last_sent: None,
+            last_apps: None,
             last_error: None,
             ordered: overlay,
             before_order: overlay,
@@ -111,12 +118,32 @@ impl Tracker {
             None
         };
         let overlay = send.as_deref().and_then(|sent| self.order(sent));
+        let apps = send.as_deref().and_then(|sent| self.apps_changed(sent));
         Tick {
             send,
             log,
             overlay,
+            apps,
             rate: poll_rate(cursor, bounds, self.display),
         }
+    }
+
+    fn apps_changed(&mut self, sent: &[DockItem]) -> Option<Vec<DockApp>> {
+        if sent.is_empty() {
+            return None;
+        }
+        let apps: Vec<DockApp> = sent
+            .iter()
+            .map(|item| DockApp {
+                bundle_id: item.bundle_id.clone(),
+                app_path: item.app_path.clone(),
+            })
+            .collect();
+        if self.last_apps.as_ref() == Some(&apps) {
+            return None;
+        }
+        self.last_apps = Some(apps.clone());
+        Some(apps)
     }
 
     fn order(&mut self, sent: &[DockItem]) -> Option<Visibility> {

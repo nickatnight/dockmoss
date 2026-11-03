@@ -1,8 +1,7 @@
 use jiff::SignedDuration;
 
-use super::{fnv1a_64, jitter_from_hash};
+use super::{fnv1a_64, jitter, jitter_from_hash};
 use crate::bundle_id::BundleId;
-use crate::growth::jitter;
 
 const ONE_DAY: SignedDuration = SignedDuration::from_secs(86_400);
 

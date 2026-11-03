@@ -1,7 +1,15 @@
 use std::time::{Duration, Instant};
 
+use crate::growth::FastForward;
+
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 const RETRY_DELAY: Duration = Duration::from_secs(5);
+const RECOMPUTE_EVERY: Duration = Duration::from_mins(5);
+const MIN_RECOMPUTE_EVERY: Duration = Duration::from_secs(1);
+
+pub fn recompute_interval(fast_forward: FastForward) -> Duration {
+    (RECOMPUTE_EVERY / fast_forward.factor()).max(MIN_RECOMPUTE_EVERY)
+}
 
 #[derive(Debug, Default)]
 pub struct SaveSchedule {

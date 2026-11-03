@@ -76,6 +76,19 @@ fn stopped_tracker_has_its_own_kind() {
 }
 
 #[test]
+fn stopped_usage_thread_has_its_own_kind() {
+    let json = serde_json::to_value(Error::UsageStopped).expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "usage_stopped",
+            "message": "usage tracking is not running"
+        })
+    );
+}
+
+#[test]
 fn error_kind_in_ipc_ts_lists_every_error_kind() {
     let errors = [
         Error::Tauri(tauri::Error::WindowNotFound),
@@ -83,6 +96,7 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
         Error::Overlay(crate::macos::overlay::OverlayError::NullWindow),
         Error::Dock(crate::dock::DockError::ApiDisabled),
         Error::TrackerStopped,
+        Error::UsageStopped,
     ];
     for error in &errors {
         // A new variant must be added here and to `errors`; the `declared`
@@ -92,7 +106,8 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
             | Error::NoMainDisplay
             | Error::Overlay(_)
             | Error::Dock(_)
-            | Error::TrackerStopped => {}
+            | Error::TrackerStopped
+            | Error::UsageStopped => {}
         }
     }
     let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();

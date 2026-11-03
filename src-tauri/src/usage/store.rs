@@ -23,23 +23,37 @@ enum Unreadable {
 }
 
 pub fn load_or_set_aside(path: &Path, now: Timestamp) -> LaunchLog {
-    let decoded = match read_capped(path) {
+    let text = match read_capped(path) {
         Ok(None) => {
             tracing::info!(path = %path.display(), "no launch log yet; starting empty");
             return LaunchLog::default();
         }
-        Ok(Some(text)) => decode(&text, now).map_err(Unreadable::from),
-        Err(error) => Err(error),
+        Ok(Some(text)) => text,
+        Err(error) => {
+            set_aside(path, &error);
+            return LaunchLog::default();
+        }
     };
-    match decoded {
+    match decode(&text, now) {
         Ok(Decoded { log, dropped }) => {
-            dropped.into_iter().for_each(warn_dropped);
+            if !dropped.is_empty() {
+                dropped.into_iter().for_each(warn_dropped);
+                keep_as_read(path, text.as_bytes());
+            }
             log
         }
         Err(error) => {
-            set_aside(path, &error);
+            set_aside(path, &error.into());
             LaunchLog::default()
         }
+    }
+}
+
+fn keep_as_read(path: &Path, bytes: &[u8]) {
+    let copy = sibling(path, ".dropped");
+    match write_private(&copy, bytes) {
+        Ok(()) => tracing::warn!(copy = %copy.display(), "launch log as read kept"),
+        Err(error) => tracing::warn!(%error, "launch log as read not kept"),
     }
 }
 
@@ -89,25 +103,30 @@ pub fn save(path: &Path, log: &LaunchLog) -> Result<(), UsageError> {
         fs::create_dir_all(parent).map_err(io_error("create the directory", parent))?;
     }
     let tmp = sibling(path, ".tmp");
-    remove_stale_temp(&tmp)?;
+    write_private(&tmp, encode(log).as_bytes())?;
+    fs::rename(&tmp, path).map_err(io_error("rename the temp file over", path))
+}
+
+/// Writes `bytes` to a new file at `path` with `FILE_MODE`. A file left
+/// there (by a crash, or an earlier run) is removed, not reopened, so
+/// `create_new` follows no existing link and keeps no old mode.
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), UsageError> {
+    remove_stale(path)?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(FILE_MODE)
-        .open(&tmp)
-        .map_err(io_error("create", &tmp))?;
-    file.write_all(encode(log).as_bytes())
+        .open(path)
+        .map_err(io_error("create", path))?;
+    file.write_all(bytes)
         .and_then(|()| file.sync_all())
-        .map_err(io_error("write", &tmp))?;
-    fs::rename(&tmp, path).map_err(io_error("rename the temp file over", path))
+        .map_err(io_error("write", path))
 }
 
-/// A temp file left by a crash is removed, not reopened, so `create_new`
-/// makes the new one with `FILE_MODE` and follows no existing link.
-fn remove_stale_temp(tmp: &Path) -> Result<(), UsageError> {
-    match fs::remove_file(tmp) {
+fn remove_stale(path: &Path) -> Result<(), UsageError> {
+    match fs::remove_file(path) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => {
-            Err(io_error("remove the stale temp file", tmp)(error))
+            Err(io_error("remove the stale file", path)(error))
         }
         _ => Ok(()),
     }

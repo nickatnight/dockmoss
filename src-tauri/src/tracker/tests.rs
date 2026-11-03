@@ -7,6 +7,7 @@ use super::{
 use crate::bundle_id::BundleId;
 use crate::dock::{DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, LogicalRect, ScreenPoint, ScreenRect};
+use crate::usage::DockApp;
 
 const PRIMARY_2X: Display = Display {
     physical_x: 0,
@@ -706,4 +707,77 @@ fn a_failed_ordering_after_a_successful_one_is_issued_again() {
         Some(Visibility::Shown),
         "the failed ordering in is issued again"
     );
+}
+
+fn dock_app(bundle_id: &str) -> DockApp {
+    DockApp {
+        bundle_id: BundleId::new(bundle_id).expect("non-empty bundle id"),
+        app_path: PathBuf::from(format!("/Applications/{bundle_id}.app")),
+    }
+}
+
+#[test]
+fn tick_reports_the_dock_apps_when_the_list_changes() {
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+    let hidden = || {
+        Ok(vec![RawDockChild {
+            rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        }])
+    };
+    let steps = [
+        (
+            "first frame",
+            Ok(vec![raw_app("Safari", 700.0)]),
+            Some(vec![dock_app("Safari")]),
+        ),
+        (
+            "an app added",
+            Ok(vec![raw_app("Safari", 700.0), raw_app("Chess", 760.0)]),
+            Some(vec![dock_app("Safari"), dock_app("Chess")]),
+        ),
+        (
+            "rects move (magnification)",
+            Ok(vec![raw_app("Safari", 690.0), raw_app("Chess", 770.0)]),
+            None,
+        ),
+        ("Dock hidden: an empty frame", hidden(), None),
+        (
+            "read fails: an empty frame",
+            Err(DockError::CannotComplete),
+            None,
+        ),
+        (
+            "shown again with the same list",
+            Ok(vec![raw_app("Safari", 700.0), raw_app("Chess", 760.0)]),
+            None,
+        ),
+        (
+            "reordered",
+            Ok(vec![raw_app("Chess", 700.0), raw_app("Safari", 760.0)]),
+            Some(vec![dock_app("Chess"), dock_app("Safari")]),
+        ),
+        ("hidden again", hidden(), None),
+        (
+            "shown with an app removed",
+            Ok(vec![raw_app("Chess", 700.0)]),
+            Some(vec![dock_app("Chess")]),
+        ),
+    ];
+
+    for (case, read, apps) in steps {
+        assert_eq!(tracker.tick(read, None).apps, apps, "{case}");
+    }
+}
+
+#[test]
+fn a_resent_frame_does_not_report_the_apps_again() {
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+    tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+
+    tracker.resend_on_next_tick();
+    let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+
+    assert!(tick.send.is_some(), "the frame is resent");
+    assert_eq!(tick.apps, None);
 }

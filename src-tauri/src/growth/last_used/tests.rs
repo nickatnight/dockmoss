@@ -57,10 +57,10 @@ fn effective_last_used_takes_the_latest_source_clamped_to_now() {
         ),
     ];
 
-    for (name, launch_log, spotlight, baseline, running, expected) in cases {
+    for (name, launch_log, spotlight_seed, baseline, running, expected) in cases {
         let sources = LastUsedSources {
             launch_log,
-            spotlight,
+            spotlight_seed,
             baseline,
             running,
         };

@@ -3,7 +3,7 @@ use jiff::Timestamp;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LastUsedSources {
     pub launch_log: Option<Timestamp>,
-    pub spotlight: Option<Timestamp>,
+    pub spotlight_seed: Option<Timestamp>,
     pub baseline: Option<Timestamp>,
     pub running: bool,
 }
@@ -12,7 +12,7 @@ pub fn effective_last_used(now: Timestamp, sources: &LastUsedSources) -> Option<
     if sources.running {
         return Some(now);
     }
-    [sources.launch_log, sources.spotlight, sources.baseline]
+    [sources.launch_log, sources.spotlight_seed, sources.baseline]
         .into_iter()
         .flatten()
         .max()

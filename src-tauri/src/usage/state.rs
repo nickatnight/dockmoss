@@ -99,12 +99,12 @@ impl UsageState {
     pub fn dock_apps(&mut self, apps: Vec<DockApp>, now: Timestamp) -> DockUpdate {
         let list_changed = apps != self.dock;
         self.dock = apps;
-        if self.log.baseline_at().is_none() {
-            if !self.seeding && !self.dock.is_empty() {
-                self.seeding = true;
-                return DockUpdate::Seed(self.dock.clone());
-            }
-        } else if self.first_see_new_apps(now) {
+        let first_run_done = self.log.baseline_at().is_some();
+        if !first_run_done && !self.seeding && !self.dock.is_empty() {
+            self.seeding = true;
+            return DockUpdate::Seed(self.dock.clone());
+        }
+        if first_run_done && self.first_see_new_apps(now) {
             return DockUpdate::Applied(Change::Log);
         }
         DockUpdate::Applied(if list_changed {

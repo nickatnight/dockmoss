@@ -36,8 +36,6 @@ impl TrustState {
         Trust::from_trusted(self.trusted.load(Ordering::Relaxed))
     }
 
-    /// Stores `reading` and returns it if it differs from the stored one.
-    /// Only the `ax-trust` watcher calls it.
     pub fn update(&self, reading: Trust) -> Option<Trust> {
         let previous = self.trusted.swap(reading.is_trusted(), Ordering::Relaxed);
         (previous != reading.is_trusted()).then_some(reading)

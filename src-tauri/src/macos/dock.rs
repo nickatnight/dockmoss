@@ -1,5 +1,3 @@
-//! Reads the Dock's item list through Accessibility.
-//!
 //! Every call here is synchronous IPC to the Dock process and can block, so
 //! nothing in this module may run on the main thread.
 //!
@@ -40,19 +38,12 @@ pub enum DockError {
     Ax { attribute: &'static str, code: i32 },
 }
 
-/// Whether an attribute read found a value. A missing attribute is normal
-/// (a separator has no URL); every other failure is a [`DockError`].
 #[derive(Debug, PartialEq, Eq)]
 enum Reading {
     Present,
     Missing,
 }
 
-/// Reads every child of the Dock's item list, in Dock order.
-///
-/// Blocks on IPC to the Dock; call it off the main thread. It does not
-/// consult the trust state: without Accessibility access the first read
-/// fails with [`DockError::ApiDisabled`].
 pub fn items() -> Result<Vec<RawDockChild>, DockError> {
     let pid = dock_pid().ok_or(DockError::NotRunning)?;
     let dock = application(pid);

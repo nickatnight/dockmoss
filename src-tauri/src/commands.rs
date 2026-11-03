@@ -6,13 +6,8 @@ use crate::macos::dock::DockError;
 use crate::trust::{Trust, TrustState};
 use crate::{Error, macos};
 
-/// The display the overlay window covers, set once in `setup()`.
 pub struct OverlayDisplay(pub Display);
 
-/// Reads the Dock's application items in the overlay's coordinates.
-///
-/// The trust reading is advisory: when it says untrusted, the AX read is
-/// skipped, and when it says trusted, an AX failure is still reported.
 #[tauri::command]
 pub async fn dock_items(
     trust: State<'_, TrustState>,

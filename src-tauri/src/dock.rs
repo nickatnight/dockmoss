@@ -7,7 +7,6 @@ use crate::geometry::{Display, LogicalRect, ScreenRect, to_overlay_local};
 
 const APPLICATION_SUBROLE: &str = "AXApplicationDockItem";
 
-/// An application icon in the Dock, placed in the overlay's coordinates.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DockItem {
@@ -16,8 +15,6 @@ pub struct DockItem {
     pub rect: LogicalRect,
 }
 
-/// One child of the Dock's item list as Accessibility reports it, before
-/// any filtering. A field is `None` when the attribute is missing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawDockChild {
     pub subrole: Option<String>,
@@ -26,9 +23,6 @@ pub struct RawDockChild {
     pub bundle_id: Option<String>,
 }
 
-/// Keeps the application items that have a URL, a bundle ID and a rect
-/// inside `display`, in Dock order, converted to the coordinates of an
-/// overlay that covers `display`.
 pub fn app_items(children: Vec<RawDockChild>, display: Display) -> Vec<DockItem> {
     children
         .into_iter()

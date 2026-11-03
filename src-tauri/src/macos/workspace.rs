@@ -13,7 +13,6 @@ pub enum WorkspaceError {
     NotOpened(String),
 }
 
-/// Opens the Accessibility list in System Settings.
 pub fn open_accessibility_settings(mtm: MainThreadMarker) -> Result<(), WorkspaceError> {
     open_url(ACCESSIBILITY_SETTINGS_URL, mtm)
 }

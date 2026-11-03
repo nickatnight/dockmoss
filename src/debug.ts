@@ -1,7 +1,5 @@
 import { dockItems, isCommandError } from "./ipc";
 
-/** Outlines every Dock app icon with a 1 px rect, until the moss renderer
- * replaces this in slice 9. Draws nothing when the Dock cannot be read. */
 export async function outlineDockItems(root: HTMLElement): Promise<void> {
   try {
     const items = await dockItems();

@@ -1,6 +1,3 @@
-//! Converts Dock rects from Accessibility's global points into the
-//! overlay's own logical pixels.
-
 use serde::Serialize;
 
 /// A rect in global points with a top-left origin on the primary display,
@@ -14,8 +11,6 @@ pub struct ScreenRect {
     pub height: f64,
 }
 
-/// A monitor as Tauri reports it: physical origin and size, and the
-/// monitor's own scale factor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Display {
     pub physical_x: i32,
@@ -36,8 +31,6 @@ pub struct LogicalRect {
 }
 
 impl Display {
-    /// The display's frame in global points, which is also the overlay
-    /// window's frame when the overlay covers this display.
     pub fn frame(self) -> ScreenRect {
         ScreenRect {
             x: f64::from(self.physical_x) / self.scale_factor,

@@ -8,19 +8,14 @@ pub use curve::growth;
 pub use jitter::jitter;
 pub use last_used::{LastUsedSources, effective_last_used};
 
-/// The smallest Fuzz threshold, in days. It is larger than the largest
-/// jitter (1 day), so jitter alone never puts moss on a just-used app.
 const MIN_FUZZ_DAYS: u32 = 2;
-/// The largest Overgrown threshold, in days: ten years.
 const MAX_OVERGROWN_DAYS: u32 = 3650;
 
-/// How overgrown an icon is, from 0 (clean) to 1 (fully overgrown).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct Overgrowth(f32);
 
 impl Overgrowth {
-    /// Clamps `value` to `0.0..=1.0`. NaN becomes 0.
     pub fn new(value: f32) -> Self {
         if value.is_nan() {
             Self(0.0)
@@ -43,8 +38,6 @@ pub enum Stage {
     Overgrown,
 }
 
-/// The whole days at which each stage begins. Every value of this type
-/// satisfies `2 <= fuzz < patchy < overgrown <= 3650`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Thresholds {
     fuzz: u32,
@@ -84,8 +77,6 @@ impl Default for Thresholds {
     }
 }
 
-/// How much faster than real time moss grows. The settings offer exactly
-/// these four speeds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FastForward {
     #[default]
@@ -119,8 +110,6 @@ pub enum GrowthError {
     },
 }
 
-/// An icon's overgrowth and stage. Both come from the same day count, so
-/// they never disagree.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Growth {
     overgrowth: Overgrowth,

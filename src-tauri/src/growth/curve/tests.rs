@@ -46,8 +46,6 @@ fn just_used_is_clean_whatever_the_jitter() {
     let thresholds = Thresholds::default();
     let cases = [
         ("elapsed 0, jitter +1 d", ZERO, PLUS_DAY),
-        // Real jitter never exceeds one day, but growth() takes any offset.
-        // This row is the one that fails if the elapsed-zero rule is dropped.
         ("elapsed 0, jitter +30 d", ZERO, days(30)),
         ("last used 1 h after now, jitter +1 d", hours(-1), PLUS_DAY),
         ("last used 1 h after now, jitter +30 d", hours(-1), days(30)),
@@ -152,8 +150,6 @@ fn fast_forward_scales_elapsed_time_but_not_jitter() {
             1.0,
             Stage::Overgrown,
         ),
-        // 432 s x 1000 = 5 d, plus 1 d of jitter = 6 d. Scaling the jitter
-        // too would give 1,005 d and a fully overgrown icon.
         (
             "432 s at 1000x with +1 d",
             SignedDuration::from_secs(432),

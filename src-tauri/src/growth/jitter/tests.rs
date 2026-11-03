@@ -16,8 +16,6 @@ fn hash_matches_the_standard_fnv1a_64_test_vectors() {
     assert_eq!(fnv1a_64(b"a"), 0xaf63_dc4c_8601_ec8c);
 }
 
-// Computed with an independent FNV-1a implementation, not with this code.
-// If one of these changes, every user's moss moves.
 #[test]
 fn jitter_is_pinned_for_known_bundle_ids() {
     let cases = [
@@ -43,7 +41,6 @@ fn hash_remainder_0_maps_to_minus_one_day_and_172_800_to_plus_one_day() {
         (86_400, SignedDuration::ZERO),
         (172_800, ONE_DAY),
         (172_801, -ONE_DAY),
-        // u64::MAX % 172_801 = 11_266
         (u64::MAX, SignedDuration::from_secs(-75_134)),
     ];
 

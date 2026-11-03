@@ -53,7 +53,8 @@ pub struct RawDockChild {
 /// `TrustState` is refreshed only every few seconds, so trust revoked while
 /// running shows up first as a read that returns `ApiDisabled`. From then on
 /// the gate skips the read and calls `recheck` (a trust query that never
-/// prompts) each tick, until it or `TrustState` reports trust again.
+/// prompts) each tick, until it or `TrustState` reports trust again. The
+/// latch holds only while `check_trust` agrees with AX.
 #[derive(Debug, Default)]
 pub struct ReadGate {
     revoked: bool,

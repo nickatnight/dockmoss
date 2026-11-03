@@ -4,7 +4,13 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 4 of 13 (Dock geometry). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone. A transparent, click-through window covers the main display one level above the Dock, on every Space. When it loads, it reads the Dock's application icons once through Accessibility and draws a 1 px magenta debug outline around each one; folders, Trash and separators get none. The outlines do not follow magnification or Dock changes yet (slice 5), and without the grant nothing is drawn. There is no moss yet. Clicks, hovers and magnification pass through to the Dock.
+MVP slice 5 of 13 (tracking loop). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
+
+A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
+- at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden), and at 2 Hz otherwise;
+- it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
+
+The overlay draws a 1 px debug outline around each application icon, alternating magenta and cyan; folders, Trash and separators get none. The outlines follow magnification, auto-hide and Dock restarts. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. There is no moss yet. Clicks, hovers and magnification pass through to the Dock.
 
 ## Requirements
 
@@ -32,7 +38,7 @@ DockMoss needs the Accessibility grant to read the Dock. macOS gives the grant t
 - An app bundle launched from Finder or with `open` is its own responsible process. Build one with `pnpm tauri build --debug --bundles app` and run `open src-tauri/target/debug/bundle/macos/DockMoss.app`. Without a grant, macOS shows its Accessibility dialog once at launch, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list. macOS 27 titles that list "Device Control and Data Access".
 - Local bundles are ad-hoc signed, so each rebuild has a new signature and macOS treats it as a different app: a grant does not carry over. Signing with a stable identity is milestone 7.
 
-While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
+While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. If access is revoked while the app runs, the Dock tracker notices on its next read, stops reading the Dock, and re-checks trust each tick (without prompting) until access returns. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
 
 ## Commands
 
@@ -40,7 +46,7 @@ While it runs, the app re-checks every 5 s without prompting and rebuilds the tr
 |---|---|
 | `pnpm tauri dev` | The app, with Vite on `http://localhost:5110` |
 | `pnpm check` | Same as `check:fast` |
-| `pnpm check:fast` | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, two grep guards (unit tests only in `tests.rs`, `unsafe_code` opt-ins only in `src/macos/`), `tsc --noEmit` |
+| `pnpm check:fast` | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, three grep guards (unit tests only in `tests.rs`, `unsafe_code` opt-ins only in `src/macos/`, no `@ts-ignore` or `@ts-expect-error` under `src/`), `tsc --noEmit` |
 | `pnpm check:task` | `check:fast`, then tests, the 80% line-coverage gate, `cargo deny`, `pnpm audit` and three gitleaks passes |
 
 [CONSTRAINTS.md](CONSTRAINTS.md) defines what each check enforces. If the scripts and that file disagree, the file wins.
@@ -49,11 +55,13 @@ While it runs, the app re-checks every 5 s without prompting and rebuilds the tr
 
 ```
 src-tauri/src/
-  main.rs, lib.rs   # entry point; Tauri builder, plugins, setup()
+  main.rs, lib.rs   # entry point; Tauri builder, plugins, setup(); lib.rs also holds
+                    #   mod dock_tracker, the thread that reads, decides and sends
   error.rs          # crate Error, serialized as { kind, message }
-  commands.rs       # Tauri commands: dock_items
+  commands.rs       # Tauri command watch_dock: hands the overlay's Channel to the tracker
+  tracker.rs        # pure: per read, what to send, log and show, and the poll rate
   geometry.rs       # pure: AX rects to overlay-local logical pixels
-  dock.rs           # pure: raw Dock children to DockItems (apps only)
+  dock.rs           # pure: raw Dock children to DockItems (apps only), the trust gate
   bundle_id.rs      # BundleId newtype
   tray.rs           # menu-bar icon, Quit, and the Accessibility grant item
   trust.rs          # Trust (trusted or not) and the shared latest reading
@@ -63,13 +71,15 @@ src-tauri/src/
     overlay.rs      # raises the overlay NSWindow above the Dock, on every Space
     ax.rs           # Accessibility trust check (AXIsProcessTrustedWithOptions)
     dock.rs         # reads the Dock's item list through Accessibility
+    cursor.rs       # pointer location (CGEvent), no permission needed
+    screen.rs       # observes display changes (NSApplicationDidChangeScreenParameters)
     workspace.rs    # opens the Accessibility list in System Settings
 src-tauri/capabilities/
-  overlay.json      # overlay window may listen for events and call dock_items
+  overlay.json      # overlay window may listen for events and call watch_dock
 src-tauri/icons/
   source/           # SVG masters for the app icon and the tray glyph
 overlay.html        # Vite entry for the overlay window
-src/                # webview frontend: overlay.ts / overlay.css, ipc.ts (every invoke call), debug.ts (outlines; renderer from slice 9)
+src/                # webview frontend: overlay.ts / overlay.css, ipc.ts (every invoke call, watchDock's Channel), debug.ts (outlines; renderer from slice 9)
 ```
 
 ## Icons

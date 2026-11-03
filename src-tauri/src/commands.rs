@@ -1,33 +1,29 @@
+use std::sync::mpsc::Sender;
+
 use tauri::State;
+use tauri::ipc::Channel;
 
-use crate::dock::{self, DockItem};
-use crate::geometry::Display;
-use crate::macos::dock::DockError;
-use crate::trust::{Trust, TrustState};
-use crate::{Error, macos};
+use crate::Error;
+use crate::dock::DockItem;
 
-pub struct OverlayDisplay(pub Display);
+pub enum TrackerMessage {
+    Watch(Channel<Vec<DockItem>>),
+    ScreenParametersChanged,
+}
 
+pub struct TrackerInbox(pub Sender<TrackerMessage>);
+
+/// Streams the Dock items to `on_items`, starting with the current frame.
+/// A later call replaces the channel, so a reloaded webview resubscribes.
 #[tauri::command]
-pub async fn dock_items(
-    trust: State<'_, TrustState>,
-    overlay: State<'_, OverlayDisplay>,
-) -> Result<Vec<DockItem>, Error> {
-    let display = overlay.0;
-    let read = if trust.current() == Trust::Untrusted {
-        Err(DockError::ApiDisabled)
-    } else {
-        tauri::async_runtime::spawn_blocking(macos::dock::items).await?
-    };
-    match read {
-        Ok(children) => {
-            let items = dock::app_items(children, display);
-            tracing::debug!(count = items.len(), "dock items read");
-            Ok(items)
-        }
-        Err(error) => {
-            tracing::warn!(%error, "dock items not read");
-            Err(error.into())
-        }
-    }
+pub async fn watch_dock(
+    on_items: Channel<Vec<DockItem>>,
+    inbox: State<'_, TrackerInbox>,
+) -> Result<(), Error> {
+    inbox
+        .0
+        .send(TrackerMessage::Watch(on_items))
+        .map_err(|_| Error::TrackerStopped)?;
+    tracing::debug!("dock watcher subscribed");
+    Ok(())
 }

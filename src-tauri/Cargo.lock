@@ -658,6 +658,7 @@ dependencies = [
 name = "dockmoss"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "objc2",
  "objc2-app-kit",
  "objc2-application-services",

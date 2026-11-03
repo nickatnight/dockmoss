@@ -43,6 +43,33 @@ pub fn pin_above_dock(
     Ok(PinnedLevels { dock, overlay })
 }
 
+#[derive(Debug)]
+pub struct OrderedState {
+    pub visible: bool,
+    pub level: NSWindowLevel,
+    pub ignores_mouse_events: bool,
+    pub collection_behavior: usize,
+}
+
+pub fn set_visible(
+    window: &WebviewWindow,
+    visible: bool,
+    mtm: MainThreadMarker,
+) -> Result<OrderedState, OverlayError> {
+    let ns_window = as_ns_window(window, mtm)?;
+    if visible {
+        ns_window.orderFrontRegardless();
+    } else {
+        ns_window.orderOut(None);
+    }
+    Ok(OrderedState {
+        visible: ns_window.isVisible(),
+        level: ns_window.level(),
+        ignores_mouse_events: ns_window.ignoresMouseEvents(),
+        collection_behavior: ns_window.collectionBehavior().0,
+    })
+}
+
 fn ensure_raised(dock: NSWindowLevel, overlay: NSWindowLevel) -> Result<(), OverlayError> {
     if overlay > dock {
         Ok(())

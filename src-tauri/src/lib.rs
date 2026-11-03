@@ -1,28 +1,51 @@
 mod bundle_id;
 mod commands;
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 mod dock;
 mod error;
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 mod geometry;
 mod growth;
 mod macos;
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
+mod tracker;
 mod tray;
 mod trust;
 mod usage;
 
 pub use error::Error;
 
+use std::sync::mpsc;
 use std::time::Duration;
 
 use tauri::tray::TrayIcon;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
-use commands::OverlayDisplay;
+use commands::{TrackerInbox, TrackerMessage};
 use geometry::Display;
+use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
+    LevelFilter::Debug
+} else {
+    LevelFilter::Info
+};
 
 /// Builds and runs the Tauri application.
 ///
@@ -34,9 +57,10 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)
+                .level_for("dockmoss_lib", APP_LOG_LEVEL)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![commands::dock_items])
+        .invoke_handler(tauri::generate_handler![commands::watch_dock])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let trust = macos::ax::request_trust();
@@ -45,7 +69,9 @@ pub fn run() {
             app.manage(TrustState::new(trust));
             spawn_trust_watcher(tray)?;
             let display = primary_display(app.handle())?;
-            app.manage(OverlayDisplay(display));
+            let (inbox, messages) = mpsc::channel();
+            let screen_changes = inbox.clone();
+            app.manage(TrackerInbox(inbox));
             let overlay = build_overlay(app.handle(), display)?;
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
@@ -56,6 +82,23 @@ pub fn run() {
                 "overlay pinned above the dock"
             );
             overlay.show()?;
+            let shown = if overlay.is_visible()? {
+                Visibility::Shown
+            } else {
+                Visibility::Hidden
+            };
+            dock_tracker::spawn(app.handle().clone(), messages, display, shown)?;
+            macos::screen::on_screen_parameters_change(
+                move || {
+                    if screen_changes
+                        .send(TrackerMessage::ScreenParametersChanged)
+                        .is_err()
+                    {
+                        tracing::warn!("screen change not passed on: the dock tracker stopped");
+                    }
+                },
+                mtm,
+            );
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
@@ -92,6 +135,210 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
     }
 }
 
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
+mod dock_tracker {
+    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::time::{Duration, Instant};
+
+    use tauri::ipc::Channel;
+    use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
+
+    use crate::commands::TrackerMessage;
+    use crate::dock::{self, DockItem};
+    use crate::geometry::Display;
+    use crate::tracker::{self, PollRate, Tick, TickLog, Tracker, Visibility};
+    use crate::trust::TrustState;
+    use crate::{OVERLAY_LABEL, macos, primary_display};
+
+    pub(super) fn spawn(
+        app: AppHandle,
+        messages: Receiver<TrackerMessage>,
+        display: Display,
+        overlay: Visibility,
+    ) -> std::io::Result<()> {
+        std::thread::Builder::new()
+            .name("dock-tracker".into())
+            .spawn(move || track_dock(&app, &messages, display, overlay))?;
+        Ok(())
+    }
+
+    fn track_dock(
+        app: &AppHandle,
+        messages: &Receiver<TrackerMessage>,
+        display: Display,
+        overlay: Visibility,
+    ) {
+        let Some(trust) = app.try_state::<TrustState>() else {
+            tracing::warn!("dock tracker started before the trust state; not tracking");
+            return;
+        };
+        let mut reader = macos::dock::DockReader::new();
+        let mut gate = dock::ReadGate::default();
+        let mut tracker = Tracker::new(display, overlay);
+        let mut watcher = None;
+        let mut rate = PollRate::Slow;
+        let mut screen_changed = false;
+        loop {
+            let started = Instant::now();
+            if std::mem::take(&mut screen_changed) {
+                follow_display(app, &mut tracker);
+            }
+            let cursor = macos::cursor::location();
+            let read = gate.read(trust.current(), macos::ax::check_trust, || reader.read());
+            tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
+            let tick = tracker.tick(read, cursor);
+            if tick.rate != rate {
+                tracing::debug!(rate = ?tick.rate, "dock poll rate changed");
+                rate = tick.rate;
+            }
+            perform(app, tick, &mut watcher);
+            let delay = tracker::next_delay(rate, started.elapsed());
+            drain_inbox_for(
+                delay,
+                messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+            );
+        }
+    }
+
+    /// Applies each message that arrives within `delay`, and returns only once
+    /// `delay` has passed. A burst of screen notifications (one per frame while
+    /// the Dock slides in) therefore adds no Dock reads; it sets `screen_changed`
+    /// for the next tick.
+    fn drain_inbox_for(
+        delay: Duration,
+        messages: &Receiver<TrackerMessage>,
+        tracker: &mut Tracker,
+        watcher: &mut Option<Channel<Vec<DockItem>>>,
+        screen_changed: &mut bool,
+    ) {
+        let deadline = Instant::now().checked_add(delay);
+        loop {
+            let left = deadline.map_or(Duration::ZERO, |deadline| {
+                deadline.saturating_duration_since(Instant::now())
+            });
+            match messages.recv_timeout(left) {
+                Ok(TrackerMessage::Watch(channel)) => {
+                    *watcher = Some(channel);
+                    tracker.resend_on_next_tick();
+                }
+                Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
+                Err(RecvTimeoutError::Timeout) => return,
+                Err(RecvTimeoutError::Disconnected) => {
+                    std::thread::sleep(left);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
+        let display = match primary_display(app) {
+            Ok(display) => display,
+            Err(error) => {
+                tracing::warn!(%error, "display change not followed");
+                return;
+            }
+        };
+        if !tracker.set_display(display) {
+            tracing::debug!("screen parameters changed; primary display unchanged");
+            return;
+        }
+        let frame = display.frame();
+        let scale = display.scale_factor;
+        let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
+            tracing::warn!("display changed but the overlay window is gone");
+            return;
+        };
+        let moved = window
+            .set_position(LogicalPosition::new(frame.x, frame.y))
+            .and_then(|()| window.set_size(LogicalSize::new(frame.width, frame.height)));
+        match moved {
+            Ok(()) => tracing::info!(
+                x = frame.x,
+                y = frame.y,
+                width = frame.width,
+                height = frame.height,
+                scale,
+                "overlay moved to the new display frame"
+            ),
+            Err(error) => tracing::warn!(%error, "overlay not moved to the new display frame"),
+        }
+    }
+
+    fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
+        match tick.log {
+            Some(TickLog::ReadFailed(error)) => tracing::warn!(%error, "dock read failed"),
+            Some(TickLog::Recovered) => tracing::info!("dock read recovered"),
+            None => {}
+        }
+        if let Some(visibility) = tick.overlay {
+            order_overlay(app, visibility);
+        }
+        let Some(frame) = tick.send else {
+            return;
+        };
+        let count = frame.len();
+        let Some(channel) = watcher.as_ref() else {
+            tracing::debug!(count, "dock items changed with no watcher");
+            return;
+        };
+        match channel.send(frame) {
+            Ok(()) => tracing::debug!(count, "dock items sent"),
+            Err(error) => {
+                tracing::debug!(%error, "dock watcher dropped after a failed send");
+                *watcher = None;
+            }
+        }
+    }
+
+    fn order_overlay(app: &AppHandle, visibility: Visibility) {
+        let main = app.clone();
+        let scheduled = app.run_on_main_thread(move || {
+            let Some(mtm) = macos::MainThreadMarker::new() else {
+                tracing::warn!("overlay ordering ran off the main thread");
+                return;
+            };
+            let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
+                tracing::warn!("overlay window is gone");
+                return;
+            };
+            match macos::overlay::set_visible(&window, visibility == Visibility::Shown, mtm) {
+                Ok(state) => tracing::debug!(
+                    ?visibility,
+                    visible = state.visible,
+                    level = state.level,
+                    ignores_mouse_events = state.ignores_mouse_events,
+                    collection_behavior = state.collection_behavior,
+                    "overlay ordered"
+                ),
+                Err(error) => tracing::warn!(%error, ?visibility, "overlay not ordered"),
+            }
+        });
+        if let Err(error) = scheduled {
+            tracing::warn!(%error, "could not schedule the overlay ordering");
+        }
+    }
+
+    fn micros(duration: Duration) -> u64 {
+        u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+    }
+
+    #[cfg(test)]
+    mod tests;
+}
+
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "polling path: release builds abort on panic"
+)]
 fn primary_display(app: &AppHandle) -> Result<Display, Error> {
     let monitor = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
     let origin = monitor.position();

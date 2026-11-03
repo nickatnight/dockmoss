@@ -10,7 +10,9 @@ pub enum Error {
     #[error(transparent)]
     Overlay(#[from] crate::macos::overlay::OverlayError),
     #[error(transparent)]
-    Dock(#[from] crate::macos::dock::DockError),
+    Dock(#[from] crate::dock::DockError),
+    #[error("the Dock tracker is not running")]
+    TrackerStopped,
 }
 
 impl Error {
@@ -20,6 +22,7 @@ impl Error {
             Self::NoMainDisplay => "no_main_display",
             Self::Overlay(_) => "overlay",
             Self::Dock(_) => "dock",
+            Self::TrackerStopped => "tracker_stopped",
         }
     }
 }

@@ -20,6 +20,7 @@ mod trust;
     not(test),
     expect(
         dead_code,
+        unused_imports,
         reason = "the launch log is wired to the workspace observers in task 5 of job 007"
     )
 )]

@@ -1,0 +1,143 @@
+//! Reads and writes the launch log file. Std file I/O only, on a path the
+//! caller passes in, so this stays free of `tauri`.
+
+use std::ffi::OsString;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
+
+use jiff::Timestamp;
+
+use super::UsageError;
+use super::log::{DecodeError, Decoded, Dropped, LaunchLog, decode, encode};
+
+/// A larger file is treated as corrupt, so a damaged or planted file is never
+/// read into memory whole. A thousand apps is about 80 KB.
+pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
+/// The log is the user's app-usage history.
+const FILE_MODE: u32 = 0o600;
+
+#[derive(Debug, thiserror::Error)]
+enum Unreadable {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error("the file is larger than {MAX_FILE_BYTES} bytes")]
+    TooLarge,
+    #[error(transparent)]
+    Decode(#[from] DecodeError),
+}
+
+/// Loads the log at `path`, dropping entries dated after `now` plus
+/// `FUTURE_TOLERANCE`. Never fails: a missing file is an empty log, and an
+/// unreadable one is moved aside to `<path>.corrupt` (replacing an older
+/// one), so the history can still be recovered by hand, and an empty log is
+/// returned.
+pub fn load(path: &Path, now: Timestamp) -> LaunchLog {
+    let decoded = match read_capped(path) {
+        Ok(None) => {
+            tracing::info!(path = %path.display(), "no launch log yet; starting empty");
+            return LaunchLog::default();
+        }
+        Ok(Some(text)) => decode(&text, now).map_err(Unreadable::from),
+        Err(error) => Err(error),
+    };
+    match decoded {
+        Ok(Decoded { log, dropped }) => {
+            for entry in dropped {
+                match entry {
+                    Dropped::Entry { bundle_id, reason } => {
+                        tracing::warn!(bundle_id, %reason, "launch log entry dropped");
+                    }
+                    Dropped::Baseline { reason } => {
+                        tracing::warn!(%reason, "launch log baseline dropped");
+                    }
+                }
+            }
+            log
+        }
+        Err(error) => {
+            set_aside(path, &error);
+            LaunchLog::default()
+        }
+    }
+}
+
+fn read_capped(path: &Path) -> Result<Option<String>, Unreadable> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut text = String::new();
+    file.take(MAX_FILE_BYTES + 1).read_to_string(&mut text)?;
+    if u64::try_from(text.len()).map_or(true, |len| len > MAX_FILE_BYTES) {
+        return Err(Unreadable::TooLarge);
+    }
+    Ok(Some(text))
+}
+
+fn set_aside(path: &Path, error: &Unreadable) {
+    let corrupt = sibling(path, ".corrupt");
+    match fs::rename(path, &corrupt) {
+        Ok(()) => tracing::warn!(
+            path = %path.display(),
+            moved_to = %corrupt.display(),
+            %error,
+            "launch log unreadable; moved aside, starting empty"
+        ),
+        Err(move_error) => tracing::warn!(
+            path = %path.display(),
+            %error,
+            %move_error,
+            "launch log unreadable and not moved aside; starting empty"
+        ),
+    }
+}
+
+/// Writes `log` to `path` atomically: a `0600` temp file in the same
+/// directory, synced, then renamed over `path`. A failure at any step leaves
+/// the previous file as it was.
+pub fn save(path: &Path, log: &LaunchLog) -> Result<(), UsageError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(io_error("create the directory", parent))?;
+    }
+    let tmp = sibling(path, ".tmp");
+    // A temp file left by a crash is removed rather than reopened, so the
+    // new one is created with FILE_MODE and no existing link is followed.
+    match fs::remove_file(&tmp) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            return Err(io_error("remove the stale temp file", &tmp)(error));
+        }
+        _ => {}
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .open(&tmp)
+        .map_err(io_error("create", &tmp))?;
+    file.write_all(encode(log).as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(io_error("write", &tmp))?;
+    fs::rename(&tmp, path).map_err(io_error("rename the temp file over", path))
+}
+
+fn io_error(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> UsageError {
+    let path = path.to_path_buf();
+    move |source| UsageError::Io {
+        action,
+        path,
+        source,
+    }
+}
+
+/// `path` with `suffix` appended to its file name, in the same directory.
+fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = OsString::from(path.as_os_str());
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+#[cfg(test)]
+mod tests;

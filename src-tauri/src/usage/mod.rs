@@ -25,6 +25,7 @@ mod store;
 pub use log::{LaunchLog, Recorded};
 pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
 pub use schedule::SaveSchedule;
+pub use state::DockApp;
 pub use store::{load_or_set_aside, save};
 
 #[derive(Debug, thiserror::Error)]

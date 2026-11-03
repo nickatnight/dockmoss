@@ -8,7 +8,7 @@ pub use curve::growth;
 pub use jitter::jitter;
 pub use last_used::{LastUsedSources, effective_last_used};
 
-const MIN_FUZZ_DAYS: u32 = 2;
+const MIN_FUZZ_DAYS: u32 = jitter::MAX_JITTER_DAYS + 1;
 const MAX_OVERGROWN_DAYS: u32 = 3650;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
@@ -101,7 +101,9 @@ impl FastForward {
 pub enum GrowthError {
     #[error(
         "invalid stage thresholds fuzz={fuzz} patchy={patchy} overgrown={overgrown}: \
-         they must satisfy 2 <= fuzz < patchy < overgrown <= 3650 days"
+         they must satisfy {min} <= fuzz < patchy < overgrown <= {max} days",
+        min = MIN_FUZZ_DAYS,
+        max = MAX_OVERGROWN_DAYS
     )]
     InvalidThresholds {
         fuzz: u32,

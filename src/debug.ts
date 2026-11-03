@@ -10,26 +10,24 @@ export async function outlineDockItems(root: HTMLElement): Promise<void> {
   let latest: DockItem[] = [];
   let frameRequested = false;
 
+  const addOutline = (): HTMLDivElement => {
+    const outline = document.createElement("div");
+    outline.className = "debug-dock-item";
+    layer.append(outline);
+    outlines.push(outline);
+    return outline;
+  };
+
   const draw = (): void => {
     frameRequested = false;
     while (outlines.length > latest.length) {
       outlines.pop()?.remove();
     }
-    while (outlines.length < latest.length) {
-      const outline = document.createElement("div");
-      outline.className = "debug-dock-item";
-      layer.append(outline);
-      outlines.push(outline);
-    }
-    outlines.forEach((outline, index) => {
-      const item = latest[index];
-      if (item === undefined) {
-        return;
-      }
-      const { x, y, width, height } = item.rect;
-      outline.style.transform = `translate(${x}px, ${y}px)`;
-      outline.style.width = `${width}px`;
-      outline.style.height = `${height}px`;
+    latest.forEach(({ rect }, index) => {
+      const outline = outlines[index] ?? addOutline();
+      outline.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
+      outline.style.width = `${rect.width}px`;
+      outline.style.height = `${rect.height}px`;
     });
   };
 

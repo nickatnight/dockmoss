@@ -112,68 +112,46 @@ fn jitter_shifts_the_stage_boundaries_by_up_to_a_day() {
 }
 
 #[test]
-fn fast_forward_scales_elapsed_time_but_not_jitter() {
+fn fast_forward_scales_elapsed_time() {
+    use FastForward::{X10, X100, X1000};
     let cases = [
-        (
-            "1 h at 10x",
-            hours(1),
-            ZERO,
-            FastForward::X10,
-            0.0,
-            Stage::Clean,
-        ),
-        (
-            "1 d at 10x",
-            days(1),
-            ZERO,
-            FastForward::X10,
-            0.5,
-            Stage::Patchy,
-        ),
-        (
-            "1 h at 100x",
-            hours(1),
-            ZERO,
-            FastForward::X100,
-            0.0,
-            Stage::Clean,
-        ),
-        (
-            "1 d at 100x",
-            days(1),
-            ZERO,
-            FastForward::X100,
-            1.0,
-            Stage::Overgrown,
-        ),
-        (
-            "1 h at 1000x",
-            hours(1),
-            ZERO,
-            FastForward::X1000,
-            1.0,
-            Stage::Overgrown,
-        ),
-        (
-            "432 s at 1000x with +1 d",
-            SignedDuration::from_secs(432),
-            PLUS_DAY,
-            FastForward::X1000,
-            0.1,
-            Stage::Fuzz,
-        ),
+        ("1 h at 10x", hours(1), X10, 0.0, Stage::Clean),
+        ("1 d at 10x", days(1), X10, 0.5, Stage::Patchy),
+        ("1 h at 100x", hours(1), X100, 0.0, Stage::Clean),
+        ("1 d at 100x", days(1), X100, 1.0, Stage::Overgrown),
+        ("1 h at 1000x", hours(1), X1000, 1.0, Stage::Overgrown),
     ];
 
-    for (name, elapsed, jitter, fast_forward, overgrowth, stage) in cases {
+    for (name, elapsed, fast_forward, overgrowth, stage) in cases {
         let result = growth(
             now(),
             Some(now() - elapsed),
-            jitter,
+            ZERO,
             &Thresholds::default(),
             fast_forward,
         );
         assert_growth(name, result, overgrowth, stage);
     }
+}
+
+#[test]
+fn jitter_is_added_after_fast_forward_and_never_scaled() {
+    let elapsed = SignedDuration::from_secs(432);
+
+    let result = growth(
+        now(),
+        Some(now() - elapsed),
+        PLUS_DAY,
+        &Thresholds::default(),
+        FastForward::X1000,
+    );
+
+    assert_growth(
+        "432 s at 1000x is 5 d, plus 1 d of jitter is 6 d, not 1,005 d",
+        result,
+        0.1,
+        Stage::Fuzz,
+    );
 }
 
 #[test]

@@ -169,7 +169,7 @@ fn frame_changes_against_the_last_sent_frame() {
 
 #[test]
 fn slow_drift_is_sent_once_it_adds_up_to_the_tolerance() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     let first = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
     let drifted = tracker.tick(Ok(vec![raw_app("Safari", 700.3)]), None);
     let drifted_again = tracker.tick(Ok(vec![raw_app("Safari", 700.6)]), None);
@@ -186,7 +186,7 @@ fn slow_drift_is_sent_once_it_adds_up_to_the_tolerance() {
 
 #[test]
 fn cursor_near_the_dock_polls_fast() {
-    let dock = Some(rect(440.0, 920.0, 630.0, 56.0));
+    let visible_bottom_dock = Some(rect(440.0, 920.0, 630.0, 56.0));
     let cases = [
         (
             "inside the Dock box",
@@ -228,7 +228,11 @@ fn cursor_near_the_dock_polls_fast() {
     ];
 
     for (case, cursor, expected) in cases {
-        assert_eq!(poll_rate(cursor, dock, PRIMARY_2X), expected, "{case}");
+        assert_eq!(
+            poll_rate(cursor, visible_bottom_dock, PRIMARY_2X),
+            expected,
+            "{case}"
+        );
     }
 }
 
@@ -328,7 +332,7 @@ fn dock_bounds_of_no_rects_is_none() {
 
 #[test]
 fn tick_reports_the_rate_for_the_cursor_and_the_read() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
     let near = tracker.tick(
         Ok(vec![raw_app("Safari", 700.0)]),
@@ -358,7 +362,7 @@ fn tracker_sends_changes_and_logs_errors_once() {
         "/Applications/Safari.app",
         LogicalRect { x: 700.0, ..ICON },
     )];
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     let steps = [
         (
             "first read sends",
@@ -408,7 +412,7 @@ fn tracker_sends_changes_and_logs_errors_once() {
 
 #[test]
 fn error_before_any_frame_sends_an_empty_list() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
     let tick = tracker.tick(Err(DockError::ApiDisabled), None);
 
@@ -418,7 +422,7 @@ fn error_before_any_frame_sends_an_empty_list() {
 
 #[test]
 fn hidden_dock_after_an_error_sends_nothing_new() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     let hidden_read = || {
         Ok(vec![raw_app("Safari", 700.0)]
             .into_iter()
@@ -442,22 +446,22 @@ fn hidden_dock_after_an_error_sends_nothing_new() {
 }
 
 #[test]
-fn resubscribe_resends_the_current_frame() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+fn resend_on_next_tick_resends_the_current_frame() {
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
 
-    tracker.resubscribe();
+    tracker.resend_on_next_tick();
     let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
 
     assert_eq!(tick.send.map(|frame| frame.len()), Some(1));
 }
 
 #[test]
-fn resubscribe_during_an_error_resends_the_empty_list_without_logging() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+fn resend_during_an_error_resends_the_empty_list_without_logging() {
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     tracker.tick(Err(DockError::CannotComplete), None);
 
-    tracker.resubscribe();
+    tracker.resend_on_next_tick();
     let tick = tracker.tick(Err(DockError::CannotComplete), None);
 
     assert_eq!(tick.send, Some(vec![]));
@@ -466,7 +470,7 @@ fn resubscribe_during_an_error_resends_the_empty_list_without_logging() {
 
 #[test]
 fn new_display_converts_the_next_read_against_it() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
 
     let _changed = tracker.set_display(Display {
@@ -493,7 +497,7 @@ fn new_display_converts_the_next_read_against_it() {
 
 #[test]
 fn overlay_is_ordered_out_for_an_empty_frame_and_in_for_a_full_one() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     let hidden = || {
         Ok(vec![RawDockChild {
             rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
@@ -535,7 +539,7 @@ fn overlay_is_ordered_out_for_an_empty_frame_and_in_for_a_full_one() {
 
 #[test]
 fn first_empty_frame_orders_the_overlay_out() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
     let tick = tracker.tick(Err(DockError::ApiDisabled), None);
 
@@ -598,7 +602,7 @@ fn rates_are_60_hz_and_2_hz() {
 
 #[test]
 fn set_display_reports_whether_the_display_changed() {
-    let mut tracker = Tracker::new(PRIMARY_2X);
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
     let external = Display {
         physical_x: 0,
         physical_y: 0,
@@ -610,4 +614,15 @@ fn set_display_reports_whether_the_display_changed() {
     assert!(!tracker.set_display(PRIMARY_2X), "same display");
     assert!(tracker.set_display(external), "new display");
     assert!(!tracker.set_display(external), "same again");
+}
+
+#[test]
+fn tracker_started_hidden_orders_the_overlay_in_only_for_a_full_frame() {
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Hidden);
+
+    let empty = tracker.tick(Err(DockError::ApiDisabled), None);
+    let full = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+
+    assert_eq!(empty.overlay, None, "already hidden");
+    assert_eq!(full.overlay, Some(Visibility::Shown));
 }

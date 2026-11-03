@@ -72,7 +72,12 @@ pub fn run() {
                 "overlay pinned above the dock"
             );
             overlay.show()?;
-            spawn_dock_tracker(app.handle().clone(), messages, display)?;
+            let shown = if overlay.is_visible()? {
+                Visibility::Shown
+            } else {
+                Visibility::Hidden
+            };
+            spawn_dock_tracker(app.handle().clone(), messages, display, shown)?;
             macos::screen::on_screen_parameters_change(
                 move || {
                     if screen_changes
@@ -124,20 +129,26 @@ fn spawn_dock_tracker(
     app: AppHandle,
     messages: Receiver<TrackerMessage>,
     display: Display,
+    overlay: Visibility,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("dock-tracker".into())
-        .spawn(move || track_dock(&app, &messages, display))?;
+        .spawn(move || track_dock(&app, &messages, display, overlay))?;
     Ok(())
 }
 
-fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Display) {
+fn track_dock(
+    app: &AppHandle,
+    messages: &Receiver<TrackerMessage>,
+    display: Display,
+    overlay: Visibility,
+) {
     let Some(trust) = app.try_state::<TrustState>() else {
         tracing::warn!("dock tracker started before the trust state; not tracking");
         return;
     };
     let mut reader = macos::dock::DockReader::new();
-    let mut tracker = Tracker::new(display);
+    let mut tracker = Tracker::new(display, overlay);
     let mut watcher = None;
     let mut rate = PollRate::Slow;
     let mut screen_changed = false;
@@ -164,7 +175,7 @@ fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Dis
             match messages.recv_timeout(left) {
                 Ok(TrackerMessage::Watch(channel)) => {
                     watcher = Some(channel);
-                    tracker.resubscribe();
+                    tracker.resend_on_next_tick();
                 }
                 Ok(TrackerMessage::ScreenParametersChanged) => screen_changed = true,
                 Err(RecvTimeoutError::Timeout) => break,

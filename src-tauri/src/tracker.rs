@@ -3,7 +3,9 @@ use std::time::Duration;
 use crate::dock::{self, DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, ScreenPoint, ScreenRect};
 
-const TOLERANCE: f64 = 0.5;
+/// Overlay-local logical pixels a rect field must move, from the last frame
+/// sent, to count as a change.
+const MIN_RECT_CHANGE_PX: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
 
@@ -52,12 +54,14 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    pub fn new(display: Display) -> Self {
+    /// `overlay` is the window's visibility when tracking starts, so the first
+    /// tick orders it only if the Dock disagrees.
+    pub fn new(display: Display, overlay: Visibility) -> Self {
         Self {
             display,
             last_sent: None,
             last_error: None,
-            overlay: Visibility::Shown,
+            overlay,
         }
     }
 
@@ -69,7 +73,7 @@ impl Tracker {
         changed
     }
 
-    pub fn resubscribe(&mut self) {
+    pub fn resend_on_next_tick(&mut self) {
         self.last_sent = None;
     }
 
@@ -133,7 +137,7 @@ pub fn changed(sent: Option<&[DockItem]>, next: &[DockItem]) -> bool {
 }
 
 fn moved(old: f64, new: f64) -> bool {
-    (new - old).abs() >= TOLERANCE
+    (new - old).abs() >= MIN_RECT_CHANGE_PX
 }
 
 /// The union of every finite child rect (apps, folders, Trash, separators),

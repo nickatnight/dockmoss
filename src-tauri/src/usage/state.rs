@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use super::log::{LaunchLog, Recorded};
 use super::running::AppEventKind;
-use super::spotlight::{SpotlightSeed, sane_seeds};
+use super::spotlight::{SaneSeeds, SpotlightSeed, sane_seeds};
 use crate::bundle_id::BundleId;
 use crate::growth::{
     self, FastForward, LastUsedSources, Overgrowth, Stage, Thresholds, effective_last_used,
@@ -126,9 +126,12 @@ impl UsageState {
         }
         let dock_apps = readings.len();
         let dates_read = readings.iter().filter(|(_, date)| date.is_some()).count();
-        let sane = sane_seeds(readings, now);
-        let seeds_kept = sane.seeds.len();
-        for (bundle_id, seed) in sane.seeds {
+        let (seeds, migration_batch) = match sane_seeds(readings, now) {
+            SaneSeeds::Kept(seeds) => (seeds, false),
+            SaneSeeds::MigrationBatch => (Vec::new(), true),
+        };
+        let seeds_kept = seeds.len();
+        for (bundle_id, seed) in seeds {
             self.log.set_spotlight_seed(bundle_id, seed);
         }
         self.log.set_baseline_at(now);
@@ -138,7 +141,7 @@ impl UsageState {
             dock_apps,
             dates_read,
             seeds_kept,
-            migration_batch: sane.migration_batch,
+            migration_batch,
         })
     }
 

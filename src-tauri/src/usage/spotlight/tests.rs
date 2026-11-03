@@ -118,11 +118,17 @@ fn five_dates_within_five_seconds_are_a_migration_batch() {
     }
 }
 
-fn seeds(sane: &SaneSeeds) -> Vec<(&str, Timestamp)> {
-    sane.seeds
-        .iter()
-        .map(|(bundle_id, seed)| (bundle_id.as_str(), seed.at()))
-        .collect()
+/// The kept seeds as (bundle ID, date), or `None` for a migration batch.
+fn kept(sane: &SaneSeeds) -> Option<Vec<(&str, Timestamp)>> {
+    let SaneSeeds::Kept(seeds) = sane else {
+        return None;
+    };
+    Some(
+        seeds
+            .iter()
+            .map(|(bundle_id, seed)| (bundle_id.as_str(), seed.at()))
+            .collect(),
+    )
 }
 
 #[test]
@@ -136,13 +142,12 @@ fn sane_seeds_keeps_every_past_date_when_there_is_no_batch() {
     let sane = sane_seeds(readings, at(NOW));
 
     assert_eq!(
-        seeds(&sane),
-        vec![
+        kept(&sane),
+        Some(vec![
             ("com.apple.TextEdit", at("2026-10-03T06:45:44Z")),
             ("com.apple.Safari", at("2026-10-29T01:37:04Z")),
-        ]
+        ])
     );
-    assert!(!sane.migration_batch);
 }
 
 #[test]
@@ -156,8 +161,8 @@ fn sane_seeds_skips_dates_after_now() {
     let sane = sane_seeds(readings, at(NOW));
 
     assert_eq!(
-        seeds(&sane),
-        vec![("com.apple.TextEdit", at("2026-11-03T08:00:00Z"))],
+        kept(&sane),
+        Some(vec![("com.apple.TextEdit", at("2026-11-03T08:00:00Z"))]),
         "now itself is kept; one second later is not"
     );
 }
@@ -175,8 +180,7 @@ fn a_migration_batch_drops_every_seed_including_those_outside_it() {
 
     let sane = sane_seeds(readings, at(NOW));
 
-    assert_eq!(seeds(&sane), Vec::new());
-    assert!(sane.migration_batch);
+    assert!(matches!(sane, SaneSeeds::MigrationBatch), "{sane:?}");
 }
 
 #[test]
@@ -190,6 +194,5 @@ fn future_dates_do_not_count_toward_a_batch() {
 
     let sane = sane_seeds(readings, at(NOW));
 
-    assert_eq!(sane.seeds.len(), 4);
-    assert!(!sane.migration_batch);
+    assert_eq!(kept(&sane).map(|seeds| seeds.len()), Some(4));
 }

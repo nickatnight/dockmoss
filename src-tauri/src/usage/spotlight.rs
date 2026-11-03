@@ -42,9 +42,10 @@ pub fn is_migration_batch(dates: &[Timestamp]) -> bool {
 }
 
 #[derive(Debug)]
-pub struct SaneSeeds {
-    pub seeds: Vec<(BundleId, SpotlightSeed)>,
-    pub migration_batch: bool,
+pub enum SaneSeeds {
+    Kept(Vec<(BundleId, SpotlightSeed)>),
+    /// The dates formed a migration batch, so none is kept.
+    MigrationBatch,
 }
 
 pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) -> SaneSeeds {
@@ -54,18 +55,13 @@ pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) 
         .collect();
     let dates: Vec<Timestamp> = past.iter().map(|(_, date)| *date).collect();
     if is_migration_batch(&dates) {
-        return SaneSeeds {
-            seeds: Vec::new(),
-            migration_batch: true,
-        };
+        return SaneSeeds::MigrationBatch;
     }
-    SaneSeeds {
-        seeds: past
-            .into_iter()
+    SaneSeeds::Kept(
+        past.into_iter()
             .map(|(bundle_id, date)| (bundle_id, SpotlightSeed(date)))
             .collect(),
-        migration_batch: false,
-    }
+    )
 }
 
 #[cfg(test)]

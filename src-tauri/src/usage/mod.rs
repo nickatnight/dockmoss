@@ -12,6 +12,14 @@ mod schedule;
     )
 )]
 mod spotlight;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the usage thread holds a UsageState once slice 8 wires it"
+    )
+)]
+mod state;
 mod store;
 
 pub use log::{LaunchLog, Recorded};

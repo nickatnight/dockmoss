@@ -1,0 +1,475 @@
+use std::path::PathBuf;
+
+use jiff::{SignedDuration, Timestamp};
+
+use super::{Change, DockApp, DockUpdate, SeedReport, UsageState};
+use crate::bundle_id::BundleId;
+use crate::growth::{FastForward, Stage, Thresholds};
+use crate::usage::spotlight::SpotlightSeed;
+use crate::usage::{AppEventKind, LaunchLog};
+
+const TOLERANCE: f32 = 1e-5;
+const NOW: &str = "2026-11-03T08:00:00Z";
+
+fn at(text: &str) -> Timestamp {
+    text.parse().expect("test timestamps are valid RFC 3339")
+}
+
+fn now() -> Timestamp {
+    at(NOW)
+}
+
+fn ago(duration: SignedDuration) -> Timestamp {
+    now()
+        .checked_sub(duration)
+        .expect("test times stay in range")
+}
+
+fn days(n: i64) -> SignedDuration {
+    SignedDuration::from_hours(n * 24)
+}
+
+fn id(text: &str) -> BundleId {
+    BundleId::new(text).expect("non-empty bundle id")
+}
+
+fn app(bundle_id: &str) -> DockApp {
+    DockApp {
+        bundle_id: id(bundle_id),
+        app_path: PathBuf::from(format!("/Applications/{bundle_id}.app")),
+    }
+}
+
+fn baselined() -> LaunchLog {
+    let mut log = LaunchLog::default();
+    log.set_baseline_at(at("2026-10-01T00:00:00Z"));
+    log
+}
+
+/// Runs the first run to the end with no Spotlight dates.
+fn seeded_with_no_dates(apps: Vec<DockApp>, at: Timestamp) -> UsageState {
+    let mut state = UsageState::new(LaunchLog::default());
+    let DockUpdate::Seed(to_read) = state.dock_apps(apps, at) else {
+        panic!("a first non-empty Dock list starts seeding");
+    };
+    state.seeded(
+        to_read
+            .into_iter()
+            .map(|app| (app.bundle_id, None))
+            .collect(),
+        at,
+    );
+    state
+}
+
+fn stage_of(state: &UsageState, bundle_id: &str, at: Timestamp, ff: FastForward) -> (f32, Stage) {
+    let growth = state.growth(at, &Thresholds::default(), ff);
+    let entry = growth
+        .iter()
+        .find(|entry| entry.bundle_id == id(bundle_id))
+        .expect("the app is in the Dock");
+    (entry.overgrowth.get(), entry.stage)
+}
+
+// First run
+
+#[test]
+fn the_first_non_empty_dock_list_starts_seeding_once() {
+    let mut state = UsageState::new(LaunchLog::default());
+
+    let first = state.dock_apps(vec![app("com.apple.Safari"), app("com.apple.Chess")], now());
+    let again = state.dock_apps(vec![app("com.apple.Safari"), app("com.apple.Chess")], now());
+
+    assert_eq!(
+        first,
+        DockUpdate::Seed(vec![app("com.apple.Safari"), app("com.apple.Chess")])
+    );
+    assert_eq!(again, DockUpdate::Applied(Change::Unchanged));
+    assert_eq!(state.log().baseline_at(), None, "not until seeded");
+}
+
+#[test]
+fn an_empty_dock_list_never_starts_seeding() {
+    let mut state = UsageState::new(LaunchLog::default());
+
+    let empty = state.dock_apps(Vec::new(), now());
+    let full = state.dock_apps(vec![app("com.apple.Safari")], now());
+
+    assert_eq!(empty, DockUpdate::Applied(Change::Unchanged));
+    assert_eq!(full, DockUpdate::Seed(vec![app("com.apple.Safari")]));
+}
+
+#[test]
+fn seeded_stores_sane_dates_as_seeds_and_gives_the_rest_first_seen() {
+    let mut state = UsageState::new(LaunchLog::default());
+    state.dock_apps(
+        vec![
+            app("com.apple.TextEdit"),
+            app("com.apple.Chess"),
+            app("com.apple.Notes"),
+        ],
+        now(),
+    );
+
+    let report = state.seeded(
+        vec![
+            (id("com.apple.TextEdit"), Some(at("2026-10-03T06:45:44Z"))),
+            (id("com.apple.Chess"), None),
+            (id("com.apple.Notes"), Some(at("2026-11-04T00:00:00Z"))),
+        ],
+        now(),
+    );
+
+    let log = state.log();
+    assert_eq!(
+        log.spotlight_seed(&id("com.apple.TextEdit"))
+            .map(SpotlightSeed::at),
+        Some(at("2026-10-03T06:45:44Z"))
+    );
+    assert_eq!(log.first_seen(&id("com.apple.TextEdit")), None, "Q1 (A)");
+    assert_eq!(log.spotlight_seed(&id("com.apple.Chess")), None);
+    assert_eq!(log.first_seen(&id("com.apple.Chess")), Some(now()));
+    assert_eq!(
+        log.spotlight_seed(&id("com.apple.Notes")),
+        None,
+        "future date"
+    );
+    assert_eq!(log.first_seen(&id("com.apple.Notes")), Some(now()));
+    assert_eq!(log.baseline_at(), Some(now()));
+    assert_eq!(
+        report,
+        Some(SeedReport {
+            dock_apps: 3,
+            dates_read: 2,
+            seeds_kept: 1,
+            migration_batch: false,
+        })
+    );
+}
+
+#[test]
+fn after_a_migration_batch_every_app_is_first_seen_now_with_no_seed() {
+    let names: Vec<String> = (0..6).map(|n| format!("com.example.app{n}")).collect();
+    let mut state = UsageState::new(LaunchLog::default());
+    state.dock_apps(names.iter().map(|name| app(name)).collect(), now());
+    let batch = at("2026-09-01T10:00:00Z");
+    let mut readings: Vec<_> = names
+        .iter()
+        .take(5)
+        .map(|name| (id(name), Some(batch)))
+        .collect();
+    readings.push((id("com.example.app5"), Some(at("2026-10-03T06:45:44Z"))));
+
+    let report = state.seeded(readings, now());
+
+    for name in &names {
+        assert_eq!(state.log().spotlight_seed(&id(name)), None, "{name}");
+        assert_eq!(state.log().first_seen(&id(name)), Some(now()), "{name}");
+    }
+    assert_eq!(report.map(|report| report.migration_batch), Some(true));
+}
+
+#[test]
+fn an_app_that_arrives_while_seeding_is_first_seen_when_seeding_ends() {
+    let mut state = UsageState::new(LaunchLog::default());
+    state.dock_apps(vec![app("com.apple.Safari")], now());
+    let arrived = state.dock_apps(vec![app("com.apple.Safari"), app("com.apple.Chess")], now());
+    assert_eq!(
+        arrived,
+        DockUpdate::Applied(Change::Growth),
+        "no first-seen yet"
+    );
+    assert_eq!(state.log().first_seen(&id("com.apple.Chess")), None);
+
+    let later = at("2026-11-03T08:00:02Z");
+    state.seeded(vec![(id("com.apple.Safari"), None)], later);
+
+    assert_eq!(state.log().first_seen(&id("com.apple.Chess")), Some(later));
+    assert_eq!(state.log().first_seen(&id("com.apple.Safari")), Some(later));
+}
+
+#[test]
+fn seeded_without_a_seeding_in_flight_changes_nothing() {
+    let mut state = UsageState::new(baselined());
+    state.dock_apps(vec![app("com.apple.Safari")], now());
+    let before = state.log().clone();
+
+    let report = state.seeded(vec![(id("com.apple.Safari"), Some(ago(days(40))))], now());
+
+    assert_eq!(report, None);
+    assert_eq!(state.log(), &before);
+}
+
+#[test]
+fn a_job_007_log_with_launches_keeps_them_through_the_first_run() {
+    let mut log = LaunchLog::default();
+    log.record(id("com.apple.Safari"), at("2026-11-02T09:14:03Z"));
+    let mut state = UsageState::new(log);
+    state.dock_apps(vec![app("com.apple.Safari"), app("com.apple.Chess")], now());
+
+    state.seeded(
+        vec![
+            (id("com.apple.Safari"), None),
+            (id("com.apple.Chess"), None),
+        ],
+        now(),
+    );
+
+    let log = state.log();
+    assert_eq!(
+        log.last_launched(&id("com.apple.Safari")),
+        Some(at("2026-11-02T09:14:03Z"))
+    );
+    assert_eq!(
+        log.first_seen(&id("com.apple.Safari")),
+        None,
+        "it has a launch"
+    );
+    assert_eq!(log.first_seen(&id("com.apple.Chess")), Some(now()));
+    assert_eq!(log.baseline_at(), Some(now()));
+}
+
+// Later
+
+#[test]
+fn after_the_first_run_a_new_app_is_first_seen_now() {
+    let mut state = UsageState::new(baselined());
+
+    let update = state.dock_apps(vec![app("com.apple.Chess")], now());
+
+    assert_eq!(update, DockUpdate::Applied(Change::Log));
+    assert_eq!(state.log().first_seen(&id("com.apple.Chess")), Some(now()));
+    assert_eq!(state.log().spotlight_seed(&id("com.apple.Chess")), None);
+}
+
+#[test]
+fn an_app_with_any_data_gets_nothing_new() {
+    let mut log = baselined();
+    log.record(id("com.apple.Safari"), at("2026-11-01T00:00:00Z"));
+    log.set_first_seen(id("com.apple.Chess"), at("2026-10-20T00:00:00Z"));
+    let mut state = UsageState::new(log);
+
+    let update = state.dock_apps(vec![app("com.apple.Safari"), app("com.apple.Chess")], now());
+
+    assert_eq!(
+        update,
+        DockUpdate::Applied(Change::Growth),
+        "only the list changed"
+    );
+    assert_eq!(state.log().first_seen(&id("com.apple.Safari")), None);
+    assert_eq!(
+        state.log().first_seen(&id("com.apple.Chess")),
+        Some(at("2026-10-20T00:00:00Z"))
+    );
+}
+
+#[test]
+fn an_app_with_a_spotlight_seed_gets_no_first_seen_later() {
+    let mut state = UsageState::new(LaunchLog::default());
+    state.dock_apps(vec![app("com.apple.TextEdit")], ago(days(1)));
+    state.seeded(
+        vec![(id("com.apple.TextEdit"), Some(ago(days(30))))],
+        ago(days(1)),
+    );
+    state.dock_apps(Vec::new(), now());
+
+    let update = state.dock_apps(vec![app("com.apple.TextEdit")], now());
+
+    assert_eq!(update, DockUpdate::Applied(Change::Growth));
+    assert_eq!(state.log().first_seen(&id("com.apple.TextEdit")), None);
+}
+
+#[test]
+fn the_same_dock_list_again_changes_nothing() {
+    let mut state = UsageState::new(baselined());
+    state.dock_apps(vec![app("com.apple.Chess")], now());
+    let before = state.log().clone();
+
+    let update = state.dock_apps(vec![app("com.apple.Chess")], at("2026-11-03T09:00:00Z"));
+
+    assert_eq!(update, DockUpdate::Applied(Change::Unchanged));
+    assert_eq!(state.log(), &before);
+}
+
+// Running and growth
+
+#[test]
+fn used_records_the_time_and_reports_what_changed() {
+    let mut state = UsageState::new(baselined());
+    let launched = at("2026-11-03T07:00:00Z");
+
+    let first = state.used(id("com.apple.Safari"), launched, AppEventKind::Launched);
+    let repeat = state.used(id("com.apple.Safari"), launched, AppEventKind::Activated);
+    let quit = state.used(id("com.apple.Safari"), launched, AppEventKind::Terminated);
+
+    assert_eq!(first, Change::Log);
+    assert_eq!(repeat, Change::Unchanged, "same time, still running");
+    assert_eq!(quit, Change::Growth, "same time, but no longer running");
+    assert_eq!(
+        state.log().last_launched(&id("com.apple.Safari")),
+        Some(launched)
+    );
+}
+
+#[test]
+fn a_running_app_is_clean_whatever_its_dates() {
+    let mut log = baselined();
+    log.set_first_seen(id("com.apple.Safari"), ago(days(60)));
+    let mut state = UsageState::new(log);
+    state.dock_apps(vec![app("com.apple.Safari")], now());
+    assert_eq!(
+        stage_of(&state, "com.apple.Safari", now(), FastForward::X1).1,
+        Stage::Overgrown,
+        "control: 60 days unused"
+    );
+
+    state.used(
+        id("com.apple.Safari"),
+        ago(days(60)),
+        AppEventKind::Launched,
+    );
+
+    assert_eq!(
+        stage_of(&state, "com.apple.Safari", now(), FastForward::X1000),
+        (0.0, Stage::Clean)
+    );
+}
+
+#[test]
+fn a_quit_app_grows_from_the_quit_time() {
+    let mut state = UsageState::new(baselined());
+    state.dock_apps(vec![app("com.apple.Safari")], ago(days(20)));
+    state.used(
+        id("com.apple.Safari"),
+        ago(days(20)),
+        AppEventKind::Launched,
+    );
+
+    state.used(
+        id("com.apple.Safari"),
+        ago(days(6)),
+        AppEventKind::Terminated,
+    );
+
+    // 6 days + Safari's jitter (+38,842 s, growth/jitter/tests.rs) is
+    // 6.4496 days: Fuzz, 0.5 * 1.4496 / 5 of the way from 5 to 10 days.
+    let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1);
+    assert_eq!(reached, Stage::Fuzz);
+    assert!((overgrowth - 0.144_956).abs() < TOLERANCE, "{overgrowth}");
+}
+
+#[test]
+fn an_app_first_seen_6_days_ago_is_in_fuzz() {
+    let state = seeded_with_no_dates(vec![app("com.apple.Safari")], ago(days(6)));
+
+    let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1);
+
+    assert_eq!(reached, Stage::Fuzz);
+    assert!((overgrowth - 0.144_956).abs() < TOLERANCE, "{overgrowth}");
+}
+
+#[test]
+fn at_1000x_an_app_first_seen_8_6_minutes_ago_is_in_fuzz() {
+    let state = seeded_with_no_dates(
+        vec![app("com.apple.Safari")],
+        ago(SignedDuration::from_secs(516)),
+    );
+
+    // 516 s * 1000 = 5.9722 days, plus 0.4496 days of jitter = 6.4218 days.
+    let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1000);
+
+    assert_eq!(reached, Stage::Fuzz);
+    assert!((overgrowth - 0.142_178).abs() < TOLERANCE, "{overgrowth}");
+    assert_eq!(
+        stage_of(&state, "com.apple.Safari", now(), FastForward::X1).1,
+        Stage::Clean,
+        "control: the same 8.6 minutes at 1x"
+    );
+}
+
+#[test]
+fn a_spotlight_seed_drives_growth_on_day_one() {
+    let mut state = UsageState::new(LaunchLog::default());
+    state.dock_apps(vec![app("com.apple.finder"), app("com.apple.Chess")], now());
+    state.seeded(
+        vec![
+            (id("com.apple.finder"), Some(ago(days(40)))),
+            (id("com.apple.Chess"), None),
+        ],
+        now(),
+    );
+
+    assert_eq!(
+        stage_of(&state, "com.apple.finder", now(), FastForward::X1),
+        (1.0, Stage::Overgrown)
+    );
+    assert_eq!(
+        stage_of(&state, "com.apple.Chess", now(), FastForward::X1),
+        (0.0, Stage::Clean)
+    );
+}
+
+#[test]
+fn growth_lists_the_dock_apps_in_dock_order() {
+    let mut state = UsageState::new(baselined());
+    state.dock_apps(
+        vec![
+            app("com.microsoft.VSCode"),
+            app("com.apple.Safari"),
+            app("com.apple.finder"),
+        ],
+        now(),
+    );
+
+    let order: Vec<String> = state
+        .growth(now(), &Thresholds::default(), FastForward::X1)
+        .into_iter()
+        .map(|entry| entry.bundle_id.as_str().to_owned())
+        .collect();
+
+    assert_eq!(
+        order,
+        [
+            "com.microsoft.VSCode",
+            "com.apple.Safari",
+            "com.apple.finder"
+        ]
+    );
+}
+
+#[test]
+fn an_app_with_no_data_at_all_is_clean() {
+    let mut state = UsageState::new(LaunchLog::default());
+    state.dock_apps(vec![app("com.apple.Chess")], now());
+
+    assert_eq!(
+        stage_of(
+            &state,
+            "com.apple.Chess",
+            at("2027-11-03T08:00:00Z"),
+            FastForward::X1000
+        ),
+        (0.0, Stage::Clean),
+        "seeding still in flight"
+    );
+}
+
+#[test]
+fn growth_serializes_in_camel_case_with_a_lowercase_stage() {
+    let state = seeded_with_no_dates(vec![app("com.apple.Safari")], ago(days(6)));
+
+    let json = serde_json::to_value(state.growth(now(), &Thresholds::default(), FastForward::X1))
+        .expect("growth serializes to JSON");
+
+    let entry = json.get(0).expect("one entry");
+    assert_eq!(
+        entry.get("bundleId"),
+        Some(&serde_json::json!("com.apple.Safari"))
+    );
+    assert_eq!(entry.get("stage"), Some(&serde_json::json!("fuzz")));
+    assert!(
+        entry
+            .get("overgrowth")
+            .is_some_and(serde_json::Value::is_f64)
+    );
+}

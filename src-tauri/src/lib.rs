@@ -7,8 +7,7 @@ mod geometry;
     not(test),
     expect(
         dead_code,
-        unused_imports,
-        reason = "growth and its re-exports are wired to the tracker in slice 8"
+        reason = "growth is computed on the usage thread once slice 8 wires it"
     )
 )]
 mod growth;

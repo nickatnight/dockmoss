@@ -77,5 +77,5 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 ## Usage data rules (code-level)
 
 - The launch log is the source of truth (see `SUMMARY.md`). It lives at `app.path().app_data_dir()/launch_log.json`. Write it atomically (temp file in the same directory, then `rename`), so a crash mid-write can't destroy history.
-- **Jitter must be stable across runs and Rust versions.** Derive it from a fixed hash of the bundle ID (e.g. `xxhash-rust` or FNV), not `std::hash::DefaultHasher` and not an RNG. Otherwise moss shifts on every launch.
+- **Jitter must be stable across runs and Rust versions.** It is FNV-1a 64 of the bundle ID's UTF-8 bytes, mapped to whole seconds in ±1 day (`growth/jitter.rs`). Never use `std::hash::DefaultHasher` or an RNG. Changing the hash or the mapping moves every user's moss, and the golden-value tests in `growth/jitter/tests.rs` fail by design.
 - Test migration detection and the growth curve with table-driven tests over fixed timestamps, including the edge cases from `SUMMARY.md`: null Spotlight dates, 5+ apps within seconds, first-run grace, and apps running at startup.

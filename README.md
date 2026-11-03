@@ -4,13 +4,15 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 5 of 13 (tracking loop). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
+MVP slice 6 of 13 (growth model). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden), and at 2 Hz otherwise;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 
 The overlay draws a 1 px debug outline around each application icon, alternating magenta and cyan; folders, Trash and separators get none. The outlines follow magnification, auto-hide and Dock restarts. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. There is no moss yet. Clicks, hovers and magnification pass through to the Dock.
+
+The growth model in `growth/` computes each app's moss without drawing it yet. It takes an app's last-used sources, its bundle ID, the stage thresholds and the fast-forward factor, and returns an overgrowth from 0 to 1 and a stage. The rules are in SUMMARY.md, "Growth curve". Nothing outside its tests calls it yet. Slice 8 connects it to the tracker.
 
 ## Requirements
 
@@ -65,7 +67,7 @@ src-tauri/src/
   bundle_id.rs      # BundleId newtype
   tray.rs           # menu-bar icon, Quit, and the Accessibility grant item
   trust.rs          # Trust (trusted or not) and the shared latest reading
-  growth/           # pure growth model (slice 6)
+  growth/           # pure: last-used sources, jitter and the curve -> overgrowth and stage
   usage/            # launch log and Spotlight seed (slices 7-8)
   macos/            # all objc2 / AppKit / AX code and every unsafe block
     overlay.rs      # raises the overlay NSWindow above the Dock, on every Space

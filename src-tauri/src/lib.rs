@@ -50,11 +50,7 @@ const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
 ///
 /// Panics if the Tauri runtime fails to build.
 pub fn run() {
-    #[expect(
-        clippy::expect_used,
-        reason = "startup invariant: the runtime builds with the context built into the binary"
-    )]
-    let app = tauri::Builder::default()
+    let built = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)
@@ -108,8 +104,12 @@ pub fn run() {
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("tauri runtime builds with the bundled context");
+        .build(tauri::generate_context!());
+    #[expect(
+        clippy::expect_used,
+        reason = "startup invariant: the runtime builds with the context built into the binary"
+    )]
+    let app = built.expect("tauri runtime builds with the bundled context");
     app.run(|app, event| {
         if let RunEvent::Exit = event {
             flush_launch_log(app);

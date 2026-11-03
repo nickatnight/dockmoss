@@ -23,10 +23,10 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 **Rules**
 
 1. **Own launch log is the source of truth.** Listen for `NSWorkspace` launch, activation and quit notifications and store a per-app timestamp (keyed by bundle ID) in our own app data. Quitting an app counts as using it, so "last used" is the last time the app was running or frontmost, and moss starts growing from when it quit. Apps already running when DockMoss starts count as used at that moment. The log survives OS updates and can't be silently rewritten.
-2. **Effective last-used** is the latest of: our launch log, `kMDItemLastUsedDate`, and the first-run baseline below.
-3. **First-run grace period.** On first run, treat every app with no launch history as "last seen today" and let moss grow from there, so the Dock isn't green on day one.
-4. **Spotlight as a seed only.** Use `kMDItemLastUsedDate` to seed the initial state when it looks sane. Ignore `kMDItemDateAdded` and Spotlight dates entirely when many apps share an identical timestamp (a migration signature, e.g. 5+ apps within a few seconds).
-5. **Unknown is gentle.** Apps with no data never jump straight to overgrown; they start young and grow on the normal curve.
+2. **Effective last-used** is the latest of: our launch log, the app's Spotlight seed, and its first-seen time (rules 3 to 5). An app has a Spotlight seed or a first-seen time, never both.
+3. **First run.** The first time DockMoss reads a Dock that lists apps, and its log has no `baseline_at`, each Dock app gets one of two things. An app with a sane `kMDItemLastUsedDate` (rule 4) keeps that date as its Spotlight seed, so an app unused for weeks shows moss on day one. Every other Dock app with no launch history is first seen at that moment and grows from there, so the Dock isn't green on day one. DockMoss then sets `baseline_at` to that moment. It only marks that the first run is done and is not a last-used time. A missing log, a log set aside as corrupt, and a log from before slice 8 all lead to a first run. Without the Accessibility grant, or while the Dock stays hidden, the first run waits.
+4. **Spotlight as a seed only.** `kMDItemLastUsedDate` is read once per Dock app, at the first run only. A date later than now is ignored. If 5 or more of the remaining dates fall within 5 seconds of each other (a migration signature), every Spotlight date is thrown out and every Dock app is first seen at the first run. `kMDItemDateAdded` is never read.
+5. **Unknown is gentle.** An app that first appears in the Dock after the first run, with no launch, seed or first-seen time, is first seen when DockMoss first lists it. It starts clean and grows on the normal curve, and Spotlight is not read for it: a single date can't be checked against a migration batch.
 6. **Jitter.** Add a per-app offset of up to ±1 day to the growth curve so apps with similar baselines don't all change stage on the same day. It comes from a fixed hash of the bundle ID, so an app's offset is the same on every run.
 7. **Check periodically.** Quick test: `mdls -name kMDItemLastUsedDate /Applications/Safari.app`.
 
@@ -36,7 +36,8 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 - **Linear growth.** From Fuzz, overgrowth rises linearly to 0.5 at Patchy (10 days) and to 1.0 at Overgrown (30 days), then stays at 1.0. It never jumps at a stage boundary.
 - **Fast-forward** (1x, 10x, 100x, 1000x) multiplies the time since last use. The jitter is added afterwards and never scaled. Scaled, it would be worth ±1,000 days at 1000x.
 - **Threshold limits.** Thresholds are whole days with 2 ≤ Fuzz < Patchy < Overgrown ≤ 3650. Fuzz is at least one day more than the largest jitter, so jitter alone never puts moss on an app that was just used.
-- **Running or just launched** means clean, whatever the jitter. An app with no last-used time at all shows no moss. Rule 3's baseline gives every app present at first run a time. Slice 8 is to give apps that first appear later a first-seen time, so they grow as rule 5 says.
+- **Running or just launched** means clean, whatever the jitter. An app with no last-used time at all shows no moss. After the first run every Dock app has a time (rules 3 and 5), so that happens only before the first run, for example while the Dock has never been visible.
+- **Recompute.** Growth is recomputed after every launch, activation, quit and Dock change, and on a timer: every 5 minutes at 1x, and 5 minutes divided by the fast-forward factor otherwise, never more often than once a second.
 
 ## Stack (leading option)
 

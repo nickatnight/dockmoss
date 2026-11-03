@@ -4,17 +4,27 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 7 of 13 (launch log). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
+MVP slice 8 of 13 (Spotlight seed and growth per icon). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden), and at 2 Hz otherwise;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 
-The overlay draws a 1 px debug outline around each application icon, alternating magenta and cyan; folders, Trash and separators get none. The outlines follow magnification, auto-hide and Dock restarts. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. There is no moss yet. Clicks, hovers and magnification pass through to the Dock.
+The overlay draws a 1 px debug outline around each application icon, alternating magenta and cyan; folders, Trash and separators get none. The outlines follow magnification, auto-hide and Dock restarts. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
 
-The growth model in `growth/` computes each app's moss without drawing it yet. It takes an app's last-used sources, its bundle ID, the stage thresholds and the fast-forward factor, and returns an overgrowth from 0 to 1 and a stage. The rules are in SUMMARY.md, "Growth curve". Nothing outside its tests calls it yet. Slice 8 connects it to the tracker.
+Each outlined icon carries a debug label with the app's overgrowth (0.00 to 1.00) and stage, for example `0.66 patchy`. Every second label sits one line higher, so neighbouring labels don't cover each other at the default Dock size. While the Dock is magnified, labels near the pointer can still overlap. The labels sit above macOS's own Dock tooltip (the app name that appears on hover) and can hide part of it; that is expected, because the overlay window is above the Dock. There is no moss yet: slice 9 draws it from the same numbers.
 
-DockMoss keeps its own launch log of when each app was last used (see "Launch log" below). Nothing reads it for moss yet; slice 8 adds the Spotlight seed and the first-run baseline, and feeds the log to the growth model.
+Growth comes from DockMoss's own launch log, a Spotlight seed taken once at the first run, and a first-seen time for apps with neither (see "Launch log" below; the rules are in SUMMARY.md, "Last-used data" and "Growth curve"). The usage thread recomputes it after every launch, activation, quit and Dock change, and every 5 minutes, and sends it to the overlay over the `watch_growth` channel only when it changes. A running app is always clean.
+
+### Fast-forward (debug builds)
+
+To watch moss grow without waiting days, start a debug build with a speed factor:
+
+```sh
+DOCKMOSS_FAST_FORWARD=1000 pnpm tauri dev
+```
+
+The factor multiplies the time since each app was last used. `1`, `10`, `100` and `1000` are accepted; any other value logs a warning and runs at 1x. At 1000x an app quit at time t reaches Fuzz about 6 to 9 minutes later, depending on its jitter, and growth is recomputed every second. Release builds ignore the variable. A fast-forward setting arrives with the settings window in slices 12 and 13.
 
 ## Requirements
 
@@ -48,13 +58,26 @@ While it runs, the app re-checks every 5 s without prompting and rebuilds the tr
 
 DockMoss records the last time each app was used in `~/Library/Application Support/com.dockmoss.app/launch_log.json`. An app counts as used when it launches, becomes frontmost or quits, and every app already running when DockMoss starts counts as used at that moment. Only regular apps with a bundle ID are recorded (the apps that can have a Dock icon), so agents, background helpers and DockMoss itself are left out. The rule is in SUMMARY.md, "Last-used data", rule 1.
 
-- **Format.** Version 1 JSON: `{ "version": 1, "baseline_at": null, "last_launched": { "<bundle ID>": "<RFC 3339 UTC time>" } }`, with entries sorted by bundle ID. `baseline_at` stays `null` until slice 8.
-- **Writes.** A change reaches the disk about half a second after the event: changes within 500 ms of the first one are written together. Quitting DockMoss from the menu bar writes anything still pending first. Each save writes a temp file beside the log (`launch_log.json.tmp`, mode 0600), syncs it and renames it over the log, so a crash leaves either the old file or the new one.
-- **A bad entry.** An empty bundle ID, a time that does not parse, or a time more than 5 minutes in the future is left out with a warning, and the rest of the file loads. The next save writes the log without it.
-- **A bad file.** If the file cannot be read, is larger than 1 MiB, is not JSON of this shape, or has another `version`, DockMoss renames it to `launch_log.json.corrupt` (replacing an older one), logs a warning naming both paths, and starts from an empty log. The history is still in `launch_log.json.corrupt` for recovery by hand. A read error that would have cleared up on its own is treated the same way.
-- **Logs.** Startup logs `launch log started` with the path, the entry count and how many running apps were recorded. Bundle IDs appear only at debug level (`tauri dev`), apart from the warning for a dropped entry.
+- **Format.** Version 1 JSON with four fields, each map sorted by bundle ID, and every time an RFC 3339 UTC string:
 
-To start over, quit DockMoss and delete the file.
+  ```json
+  {
+    "version": 1,
+    "baseline_at": "2026-11-03T08:00:57Z",
+    "last_launched": { "com.apple.Safari": "2026-11-03T09:14:03Z" },
+    "first_seen":    { "com.apple.Chess": "2026-11-03T08:00:57Z" },
+    "spotlight_seed": { "com.hnc.Discord": "2026-10-18T17:49:11Z" }
+  }
+  ```
+
+  `last_launched` is the last launch, activation or quit. `spotlight_seed` holds the Spotlight last-used dates kept at the first run. `first_seen` holds the time DockMoss first listed an app that had no launch and no seed. `baseline_at` is when the first run happened. A file written before slice 8, without the two new maps and with `baseline_at: null`, still loads, and the next Dock read runs the first run.
+- **First run.** The first time DockMoss reads a Dock that lists apps, it runs `mdls -name kMDItemLastUsedDate` once per Dock app. A date later than now is ignored. If 5 or more dates fall within 5 seconds of each other (an OS update or migration re-stamped them), all of them are thrown out. Startup then logs `first run: dock apps seeded and baselined` with the number of Dock apps, dates read and seeds kept, and whether a migration batch was thrown out. Apps not running whose Spotlight date is more than about 5 days old show moss right away; every other app starts clean. If the Dock is hidden (for example in a full-screen Space), the first run waits until it is shown.
+- **Writes.** A change reaches the disk about half a second after the event: changes within 500 ms of the first one are written together. Quitting DockMoss from the menu bar writes anything still pending first. Each save writes a temp file beside the log (`launch_log.json.tmp`, mode 0600), syncs it and renames it over the log, so a crash leaves either the old file or the new one.
+- **A bad entry.** A value that is not a string, a bundle ID that is empty or longer than 255 bytes, a time that does not parse, or a time more than 5 minutes in the future is left out with a warning, and the rest of the file loads. DockMoss first copies the file as read to `launch_log.json.dropped` (mode 0600, replacing an older copy), so the next save, which writes the log without the bad entry, loses nothing.
+- **A bad file.** If the file cannot be read, is larger than 1 MiB, is not JSON of this shape, or has another `version`, DockMoss renames it to `launch_log.json.corrupt` (replacing an older one), logs a warning naming both paths, and starts from an empty log. The history is still in `launch_log.json.corrupt` for recovery by hand. A read error that would have cleared up on its own is treated the same way.
+- **Logs.** Startup logs `launch log started` with the path, the entry count, how many running apps were recorded, whether a first run is still to come (`first_run`) and the fast-forward factor. Bundle IDs appear only at debug level (`tauri dev`), apart from the warning for a dropped entry.
+
+To start over, quit DockMoss and delete the file. The next start runs the first run again. `launch_log.json.corrupt` and `launch_log.json.dropped` are only kept for recovery by hand and can be deleted too.
 
 ## Commands
 
@@ -73,9 +96,11 @@ To start over, quit DockMoss and delete the file.
 src-tauri/src/
   main.rs, lib.rs   # entry point; Tauri builder, plugins, setup(); lib.rs also holds
                     #   mod dock_tracker, the thread that reads, decides and sends, and
-                    #   mod launch_log_writer, the thread that owns and saves the launch log
+                    #   mod launch_log_writer, the usage thread that owns and saves the
+                    #   launch log, runs the first-run Spotlight read and sends growth
   error.rs          # crate Error, serialized as { kind, message }
-  commands.rs       # Tauri command watch_dock: hands the overlay's Channel to the tracker
+  commands.rs       # Tauri commands watch_dock and watch_growth: hand the overlay's
+                    #   Channels to the tracker and to the usage thread
   tracker.rs        # pure: per read, what to send, log and show, and the poll rate
   geometry.rs       # pure: AX rects to overlay-local logical pixels
   dock.rs           # pure: raw Dock children to DockItems (apps only), the trust gate
@@ -83,11 +108,13 @@ src-tauri/src/
   tray.rs           # menu-bar icon, Quit, and the Accessibility grant item
   trust.rs          # Trust (trusted or not) and the shared latest reading
   growth/           # pure: last-used sources, jitter and the curve -> overgrowth and stage
-  usage/            # pure apart from std file I/O: the launch log
+  usage/            # pure apart from std file I/O: the launch log and growth per Dock app
     log.rs          #   LaunchLog, and the version 1 file format (encode, decode)
-    store.rs        #   load_or_set_aside and the atomic save
-    schedule.rs     #   when the writer saves (500 ms debounce, 5 s retry)
+    store.rs        #   load_or_set_aside, the .dropped copy and the atomic save
+    schedule.rs     #   when the writer saves (500 ms debounce, 5 s retry) and recomputes
     running.rs      #   which running apps are recorded
+    spotlight.rs    #   mdls output parsing, the migration-batch check, SpotlightSeed
+    state.rs        #   UsageState: first run, first-seen apps, running set, growth
   macos/            # all objc2 / AppKit / AX code and every unsafe block
     overlay.rs      # raises the overlay NSWindow above the Dock, on every Space
     ax.rs           # Accessibility trust check (AXIsProcessTrustedWithOptions)
@@ -96,12 +123,15 @@ src-tauri/src/
     screen.rs       # observes display changes (NSApplicationDidChangeScreenParameters)
     workspace.rs    # running apps, app launch/activate/quit notifications, and
                     #   opening the Accessibility list in System Settings
+    spotlight.rs    # runs /usr/bin/mdls for one app, 2 s timeout
 src-tauri/capabilities/
-  overlay.json      # overlay window may listen for events and call watch_dock
+  overlay.json      # overlay window may listen for events and call watch_dock and watch_growth
 src-tauri/icons/
   source/           # SVG masters for the app icon and the tray glyph
 overlay.html        # Vite entry for the overlay window
-src/                # webview frontend: overlay.ts / overlay.css, ipc.ts (every invoke call, watchDock's Channel), debug.ts (outlines; renderer from slice 9)
+src/                # webview frontend: overlay.ts / overlay.css, ipc.ts (every invoke call,
+                    #   the watchDock and watchGrowth Channels), debug.ts (outlines and
+                    #   growth labels; renderer from slice 9)
 ```
 
 ## Icons

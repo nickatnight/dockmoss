@@ -94,11 +94,13 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
 
 fn primary_display(app: &AppHandle) -> Result<Display, Error> {
     let monitor = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
+    let origin = monitor.position();
+    let size = monitor.size();
     Ok(Display {
-        physical_x: monitor.position().x,
-        physical_y: monitor.position().y,
-        physical_width: monitor.size().width,
-        physical_height: monitor.size().height,
+        physical_x: origin.x,
+        physical_y: origin.y,
+        physical_width: size.width,
+        physical_height: size.height,
         scale_factor: monitor.scale_factor(),
     })
 }

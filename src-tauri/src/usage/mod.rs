@@ -4,6 +4,7 @@ use std::path::PathBuf;
 mod log;
 mod running;
 mod schedule;
+mod spotlight;
 mod store;
 
 pub use log::{LaunchLog, Recorded};

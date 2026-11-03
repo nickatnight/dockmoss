@@ -5,6 +5,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use super::spotlight::SpotlightSeed;
 use crate::bundle_id::BundleId;
 
 const VERSION: u64 = 1;
@@ -14,6 +15,8 @@ pub const FUTURE_TOLERANCE: SignedDuration = SignedDuration::from_mins(5);
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchLog {
     last_launched: BTreeMap<BundleId, Timestamp>,
+    first_seen: BTreeMap<BundleId, Timestamp>,
+    spotlight_seed: BTreeMap<BundleId, SpotlightSeed>,
     baseline_at: Option<Timestamp>,
 }
 
@@ -21,12 +24,20 @@ pub struct LaunchLog {
     not(test),
     expect(
         dead_code,
-        reason = "slice 8 reads the log for growth and applies the first-run baseline"
+        reason = "the usage thread reads these for growth once it is wired in slice 8"
     )
 )]
 impl LaunchLog {
     pub fn last_launched(&self, bundle_id: &BundleId) -> Option<Timestamp> {
         self.last_launched.get(bundle_id).copied()
+    }
+
+    pub fn first_seen(&self, bundle_id: &BundleId) -> Option<Timestamp> {
+        self.first_seen.get(bundle_id).copied()
+    }
+
+    pub fn spotlight_seed(&self, bundle_id: &BundleId) -> Option<SpotlightSeed> {
+        self.spotlight_seed.get(bundle_id).copied()
     }
 
     pub fn baseline_at(&self) -> Option<Timestamp> {
@@ -35,6 +46,14 @@ impl LaunchLog {
 
     pub fn set_baseline_at(&mut self, at: Timestamp) {
         self.baseline_at = Some(at);
+    }
+
+    pub fn set_first_seen(&mut self, bundle_id: BundleId, at: Timestamp) {
+        self.first_seen.insert(bundle_id, at);
+    }
+
+    pub fn set_spotlight_seed(&mut self, bundle_id: BundleId, seed: SpotlightSeed) {
+        self.spotlight_seed.insert(bundle_id, seed);
     }
 }
 
@@ -72,18 +91,24 @@ pub enum Dropped {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropReason {
-    EmptyBundleId,
+    InvalidBundleId,
+    NotAString,
     UnparseableTimestamp,
     InFuture,
 }
 
 impl fmt::Display for DropReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::EmptyBundleId => "the bundle ID is empty",
-            Self::UnparseableTimestamp => "the timestamp is not RFC 3339",
-            Self::InFuture => "the timestamp is more than 5 minutes in the future",
-        })
+        match self {
+            Self::InvalidBundleId => f.write_str("the bundle ID is empty or longer than 255 bytes"),
+            Self::NotAString => f.write_str("the value is not a string"),
+            Self::UnparseableTimestamp => f.write_str("the timestamp is not RFC 3339"),
+            Self::InFuture => write!(
+                f,
+                "the timestamp is more than {} minutes in the future",
+                FUTURE_TOLERANCE.as_mins()
+            ),
+        }
     }
 }
 
@@ -106,24 +131,43 @@ struct FileVersion {
     version: u64,
 }
 
+/// Every value is read as a `Value` and checked on its own, so one bad
+/// entry is dropped instead of failing the file.
 #[derive(Deserialize)]
 struct FileV1 {
-    baseline_at: Option<String>,
-    last_launched: BTreeMap<String, String>,
+    #[serde(default)]
+    baseline_at: Value,
+    last_launched: BTreeMap<String, Value>,
+    #[serde(default)]
+    first_seen: BTreeMap<String, Value>,
+    #[serde(default)]
+    spotlight_seed: BTreeMap<String, Value>,
 }
 
 pub fn encode(log: &LaunchLog) -> String {
-    let entries: Map<String, Value> = log
-        .last_launched
-        .iter()
-        .map(|(bundle_id, at)| (bundle_id.as_str().to_owned(), Value::String(at.to_string())))
-        .collect();
     let file = json!({
         "version": VERSION,
         "baseline_at": log.baseline_at.map(|at| at.to_string()),
-        "last_launched": entries,
+        "last_launched": encode_map(&log.last_launched, |at| *at),
+        "first_seen": encode_map(&log.first_seen, |at| *at),
+        "spotlight_seed": encode_map(&log.spotlight_seed, |seed| seed.at()),
     });
     format!("{file:#}\n")
+}
+
+fn encode_map<T>(
+    entries: &BTreeMap<BundleId, T>,
+    at: impl Fn(&T) -> Timestamp,
+) -> Map<String, Value> {
+    entries
+        .iter()
+        .map(|(bundle_id, value)| {
+            (
+                bundle_id.as_str().to_owned(),
+                Value::String(at(value).to_string()),
+            )
+        })
+        .collect()
 }
 
 pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
@@ -134,11 +178,37 @@ pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
     let file: FileV1 = serde_json::from_str(text)?;
     let latest = now.checked_add(FUTURE_TOLERANCE).unwrap_or(Timestamp::MAX);
     let mut dropped = Vec::new();
-    let mut log = LaunchLog::default();
-    for (key, value) in file.last_launched {
+    let log = LaunchLog {
+        last_launched: decode_map(file.last_launched, latest, &mut dropped),
+        first_seen: decode_map(file.first_seen, latest, &mut dropped),
+        spotlight_seed: decode_map(file.spotlight_seed, latest, &mut dropped)
+            .into_iter()
+            .map(|(bundle_id, at)| (bundle_id, SpotlightSeed::from_log(at)))
+            .collect(),
+        baseline_at: match file.baseline_at {
+            Value::Null => None,
+            value => match timestamp(&value, latest) {
+                Ok(at) => Some(at),
+                Err(reason) => {
+                    dropped.push(Dropped::Baseline { reason });
+                    None
+                }
+            },
+        },
+    };
+    Ok(Decoded { log, dropped })
+}
+
+fn decode_map(
+    entries: BTreeMap<String, Value>,
+    latest: Timestamp,
+    dropped: &mut Vec<Dropped>,
+) -> BTreeMap<BundleId, Timestamp> {
+    let mut decoded = BTreeMap::new();
+    for (key, value) in entries {
         match entry(&key, &value, latest) {
             Ok((bundle_id, at)) => {
-                log.last_launched.insert(bundle_id, at);
+                decoded.insert(bundle_id, at);
             }
             Err(reason) => dropped.push(Dropped::Entry {
                 bundle_id: key,
@@ -146,21 +216,16 @@ pub fn decode(text: &str, now: Timestamp) -> Result<Decoded, DecodeError> {
             }),
         }
     }
-    if let Some(value) = file.baseline_at {
-        match timestamp(&value, latest) {
-            Ok(at) => log.baseline_at = Some(at),
-            Err(reason) => dropped.push(Dropped::Baseline { reason }),
-        }
-    }
-    Ok(Decoded { log, dropped })
+    decoded
 }
 
-fn entry(key: &str, value: &str, latest: Timestamp) -> Result<(BundleId, Timestamp), DropReason> {
-    let bundle_id = BundleId::new(key).ok_or(DropReason::EmptyBundleId)?;
+fn entry(key: &str, value: &Value, latest: Timestamp) -> Result<(BundleId, Timestamp), DropReason> {
+    let bundle_id = BundleId::new(key).ok_or(DropReason::InvalidBundleId)?;
     Ok((bundle_id, timestamp(value, latest)?))
 }
 
-fn timestamp(text: &str, latest: Timestamp) -> Result<Timestamp, DropReason> {
+fn timestamp(value: &Value, latest: Timestamp) -> Result<Timestamp, DropReason> {
+    let text = value.as_str().ok_or(DropReason::NotAString)?;
     let at: Timestamp = text.parse().map_err(|_| DropReason::UnparseableTimestamp)?;
     if at > latest {
         return Err(DropReason::InFuture);

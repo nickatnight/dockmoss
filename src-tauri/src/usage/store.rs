@@ -33,22 +33,22 @@ pub fn load_or_set_aside(path: &Path, now: Timestamp) -> LaunchLog {
     };
     match decoded {
         Ok(Decoded { log, dropped }) => {
-            for entry in dropped {
-                match entry {
-                    Dropped::Entry { bundle_id, reason } => {
-                        tracing::warn!(bundle_id, %reason, "launch log entry dropped");
-                    }
-                    Dropped::Baseline { reason } => {
-                        tracing::warn!(%reason, "launch log baseline dropped");
-                    }
-                }
-            }
+            dropped.into_iter().for_each(warn_dropped);
             log
         }
         Err(error) => {
             set_aside(path, &error);
             LaunchLog::default()
         }
+    }
+}
+
+fn warn_dropped(entry: Dropped) {
+    match entry {
+        Dropped::Entry { bundle_id, reason } => {
+            tracing::warn!(bundle_id, %reason, "launch log entry dropped");
+        }
+        Dropped::Baseline { reason } => tracing::warn!(%reason, "launch log baseline dropped"),
     }
 }
 

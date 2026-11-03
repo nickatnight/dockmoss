@@ -26,8 +26,10 @@ export function isCommandError(error: unknown): error is CommandError {
   return (
     typeof error === "object" &&
     error !== null &&
-    typeof (error as Record<string, unknown>).kind === "string" &&
-    typeof (error as Record<string, unknown>).message === "string"
+    "kind" in error &&
+    typeof error.kind === "string" &&
+    "message" in error &&
+    typeof error.message === "string"
   );
 }
 

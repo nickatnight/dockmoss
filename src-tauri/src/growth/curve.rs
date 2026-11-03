@@ -17,15 +17,16 @@ pub fn growth(
     thresholds: &Thresholds,
     fast_forward: FastForward,
 ) -> Growth {
-    let Some(last_used) = last_used else {
+    let Some(unused) = time_unused(now, last_used) else {
         return CLEAN;
     };
-    let elapsed = now.duration_since(last_used);
-    if elapsed <= SignedDuration::ZERO {
-        return CLEAN;
-    }
-    let seconds = elapsed.as_secs_f64() * f64::from(fast_forward.factor()) + jitter.as_secs_f64();
+    let seconds = unused.as_secs_f64() * f64::from(fast_forward.factor()) + jitter.as_secs_f64();
     at_day(seconds / SECONDS_PER_DAY, thresholds)
+}
+
+fn time_unused(now: Timestamp, last_used: Option<Timestamp>) -> Option<SignedDuration> {
+    let elapsed = now.duration_since(last_used?);
+    elapsed.is_positive().then_some(elapsed)
 }
 
 #[expect(

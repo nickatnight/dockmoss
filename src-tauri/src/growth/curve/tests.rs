@@ -46,7 +46,11 @@ fn just_used_is_clean_whatever_the_jitter() {
     let thresholds = Thresholds::default();
     let cases = [
         ("elapsed 0, jitter +1 d", ZERO, PLUS_DAY),
-        ("elapsed 0, jitter +30 d", ZERO, days(30)),
+        (
+            "elapsed 0, jitter +30 d, beyond any real jitter",
+            ZERO,
+            days(30),
+        ),
         ("last used 1 h after now, jitter +1 d", hours(-1), PLUS_DAY),
         ("last used 1 h after now, jitter +30 d", hours(-1), days(30)),
     ];

@@ -8,7 +8,7 @@ pub enum Error {
     #[error("macOS reports no main display")]
     NoMainDisplay,
     #[error(transparent)]
-    Overlay(#[from] crate::macos::OverlayError),
+    Overlay(#[from] crate::macos::overlay::OverlayError),
 }
 
 impl Error {

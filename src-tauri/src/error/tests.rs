@@ -24,7 +24,7 @@ fn missing_main_display_has_its_own_kind() {
 
 #[test]
 fn overlay_failures_have_the_overlay_kind_and_message() {
-    let json = serde_json::to_value(Error::from(crate::macos::OverlayError::NullWindow))
+    let json = serde_json::to_value(Error::from(crate::macos::overlay::OverlayError::NullWindow))
         .expect("Error serializes to JSON");
 
     assert_eq!(

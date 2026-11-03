@@ -7,8 +7,6 @@ use crate::trust::Trust;
 
 const QUIT_ID: &str = "quit";
 const GRANT_ID: &str = "grant-accessibility";
-const ACCESSIBILITY_SETTINGS_URL: &str =
-    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
 pub fn build(app: &AppHandle, trust: Trust) -> Result<TrayIcon, crate::Error> {
     let tray = TrayIconBuilder::with_id("main")
@@ -60,7 +58,7 @@ fn menu(app: &AppHandle, trust: Trust) -> tauri::Result<Menu<Wry>> {
 fn open_accessibility_settings() {
     let mtm =
         macos::MainThreadMarker::new().expect("tauri delivers tray menu events on the main thread");
-    match macos::open_url(ACCESSIBILITY_SETTINGS_URL, mtm) {
+    match macos::workspace::open_accessibility_settings(mtm) {
         Ok(()) => tracing::info!("accessibility settings opened from tray"),
         Err(error) => tracing::warn!(%error, "accessibility settings did not open"),
     }

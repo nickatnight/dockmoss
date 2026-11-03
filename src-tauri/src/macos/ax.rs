@@ -3,6 +3,8 @@ use objc2_core_foundation::{CFBoolean, CFDictionary, CFString};
 
 use crate::trust::Trust;
 
+/// Reads Accessibility trust, prompting if untrusted.
+///
 /// When untrusted, macOS also shows its own Accessibility dialog
 /// asynchronously and adds the app to the list in System Settings. The
 /// result does not wait for the user's answer.

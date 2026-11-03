@@ -41,7 +41,7 @@ pub fn run() {
             let overlay = build_overlay(app.handle())?;
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
-            let levels = macos::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
+            let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
                 dock_level = levels.dock,
                 overlay_level = levels.overlay,

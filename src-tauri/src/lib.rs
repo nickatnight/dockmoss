@@ -1,5 +1,19 @@
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the dock_items command is the first caller")
+)]
+mod bundle_id;
 mod commands;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the dock_items command is the first caller")
+)]
+mod dock;
 mod error;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the dock_items command is the first caller")
+)]
 mod geometry;
 mod growth;
 mod macos;

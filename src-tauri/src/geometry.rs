@@ -28,10 +28,6 @@ pub struct Display {
 /// A rect in the overlay webview's logical pixels, with a top-left origin
 /// at the overlay's top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the Dock item assembly is the first caller")
-)]
 pub struct LogicalRect {
     pub x: f64,
     pub y: f64,
@@ -57,10 +53,6 @@ impl Display {
 /// Returns `None` when `rect` has no area inside the display, as for an
 /// auto-hidden Dock or a Dock on another display. A rect that is only
 /// partly inside is kept whole, so a half-shown icon keeps its real size.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the Dock item assembly is the first caller")
-)]
 pub fn to_overlay_local(rect: ScreenRect, display: Display) -> Option<LogicalRect> {
     let frame = display.frame();
     let overlap_width = (rect.x + rect.width).min(frame.x + frame.width) - rect.x.max(frame.x);

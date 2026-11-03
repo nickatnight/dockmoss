@@ -8,7 +8,13 @@ use crate::growth::{FastForward, Stage, Thresholds};
 use crate::usage::spotlight::SpotlightSeed;
 use crate::usage::{AppEventKind, LaunchLog};
 
-const TOLERANCE: f32 = 1e-5;
+const TOLERANCE: f64 = 1e-5;
+/// Safari's jitter, from the golden table in growth/jitter/tests.rs.
+const SAFARI_JITTER_SECONDS: f64 = 38_842.0;
+const SECONDS_PER_DAY: f64 = 86_400.0;
+const DEFAULT_FUZZ_DAYS: f64 = 5.0;
+const DEFAULT_PATCHY_DAYS: f64 = 10.0;
+const OVERGROWTH_AT_PATCHY: f64 = 0.5;
 const NOW: &str = "2026-11-03T08:00:00Z";
 
 fn at(text: &str) -> Timestamp {
@@ -27,6 +33,14 @@ fn ago(duration: SignedDuration) -> Timestamp {
 
 fn days(n: i64) -> SignedDuration {
     SignedDuration::from_hours(n * 24)
+}
+
+/// Safari's overgrowth inside Fuzz after `unused` at `speed`: linear from
+/// 0 at Fuzz to 0.5 at Patchy (SUMMARY.md "Growth curve").
+fn safari_in_fuzz(unused: SignedDuration, speed: f64) -> f64 {
+    let curve_days = (unused.as_secs_f64() * speed + SAFARI_JITTER_SECONDS) / SECONDS_PER_DAY;
+    OVERGROWTH_AT_PATCHY * (curve_days - DEFAULT_FUZZ_DAYS)
+        / (DEFAULT_PATCHY_DAYS - DEFAULT_FUZZ_DAYS)
 }
 
 fn id(text: &str) -> BundleId {
@@ -346,7 +360,11 @@ fn a_quit_app_grows_from_the_quit_time() {
 
     let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1);
     assert_eq!(reached, Stage::Fuzz);
-    assert!((overgrowth - 0.144_956).abs() < TOLERANCE, "{overgrowth}");
+    let expected = safari_in_fuzz(days(6), 1.0);
+    assert!(
+        (f64::from(overgrowth) - expected).abs() < TOLERANCE,
+        "{overgrowth}, expected {expected}"
+    );
 }
 
 #[test]
@@ -356,7 +374,11 @@ fn an_app_first_seen_6_days_ago_is_in_fuzz() {
     let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1);
 
     assert_eq!(reached, Stage::Fuzz);
-    assert!((overgrowth - 0.144_956).abs() < TOLERANCE, "{overgrowth}");
+    let expected = safari_in_fuzz(days(6), 1.0);
+    assert!(
+        (f64::from(overgrowth) - expected).abs() < TOLERANCE,
+        "{overgrowth}, expected {expected}"
+    );
 }
 
 #[test]
@@ -369,7 +391,11 @@ fn at_1000x_an_app_first_seen_8_6_minutes_ago_is_in_fuzz() {
     let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1000);
 
     assert_eq!(reached, Stage::Fuzz);
-    assert!((overgrowth - 0.142_178).abs() < TOLERANCE, "{overgrowth}");
+    let expected = safari_in_fuzz(SignedDuration::from_secs(516), 1000.0);
+    assert!(
+        (f64::from(overgrowth) - expected).abs() < TOLERANCE,
+        "{overgrowth}, expected {expected}"
+    );
     assert_eq!(
         stage_of(&state, "com.apple.Safari", now(), FastForward::X1).1,
         Stage::Clean,

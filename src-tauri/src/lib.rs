@@ -697,10 +697,12 @@ mod dock_tracker {
     fn order_overlay(app: &AppHandle, visibility: Visibility) {
         let main = app.clone();
         let scheduled = app.run_on_main_thread(move || {
+            // No retry: run_on_main_thread always runs this on the main thread.
             let Some(mtm) = macos::MainThreadMarker::new() else {
                 tracing::warn!("overlay ordering ran off the main thread");
                 return;
             };
+            // No retry: with the window gone there is nothing left to order.
             let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
                 tracing::warn!("overlay window is gone");
                 return;

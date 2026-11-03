@@ -119,7 +119,7 @@ pub fn run() {
 
 fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
     let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
-    let log = usage::load(&path, Timestamp::now());
+    let log = usage::load_or_set_aside(&path, Timestamp::now());
     let entries = log.len();
     let inbox = launch_log_writer::spawn(path.clone(), log)?;
     let now = Timestamp::now();

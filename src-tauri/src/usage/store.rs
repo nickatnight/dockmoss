@@ -22,7 +22,7 @@ enum Unreadable {
     Decode(#[from] DecodeError),
 }
 
-pub fn load(path: &Path, now: Timestamp) -> LaunchLog {
+pub fn load_or_set_aside(path: &Path, now: Timestamp) -> LaunchLog {
     let decoded = match read_capped(path) {
         Ok(None) => {
             tracing::info!(path = %path.display(), "no launch log yet; starting empty");

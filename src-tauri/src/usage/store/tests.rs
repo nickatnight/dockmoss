@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
 
-use super::{MAX_FILE_BYTES, load, save};
+use super::{MAX_FILE_BYTES, load_or_set_aside, save};
 use crate::bundle_id::BundleId;
 use crate::usage::LaunchLog;
 
@@ -39,7 +39,7 @@ fn two_apps() -> LaunchLog {
 fn a_missing_file_loads_as_an_empty_log() {
     let dir = tempfile::tempdir().expect("temp dir");
 
-    let log = load(&log_path(&dir), at(NOW));
+    let log = load_or_set_aside(&log_path(&dir), at(NOW));
 
     assert_eq!(log, LaunchLog::default());
     assert!(!log_path(&dir).exists(), "loading creates nothing");
@@ -52,7 +52,7 @@ fn save_then_load_round_trips() {
 
     save(&path, &two_apps()).expect("save succeeds");
 
-    assert_eq!(load(&path, at(NOW)), two_apps());
+    assert_eq!(load_or_set_aside(&path, at(NOW)), two_apps());
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn a_corrupt_file_loads_empty_and_is_kept_as_corrupt() {
     fs::write(&path, "not json").expect("write corrupt file");
     fs::write(sibling(&path, ".corrupt"), "an older corrupt file").expect("write old corrupt");
 
-    let log = load(&path, at(NOW));
+    let log = load_or_set_aside(&path, at(NOW));
 
     assert_eq!(log, LaunchLog::default());
     assert_eq!(
@@ -83,7 +83,7 @@ fn a_file_with_some_bad_entries_loads_the_rest_in_place() {
     }}"#;
     fs::write(&path, text).expect("write file");
 
-    let log = load(&path, at(NOW));
+    let log = load_or_set_aside(&path, at(NOW));
 
     assert_eq!(log.len(), 1);
     assert_eq!(
@@ -113,7 +113,7 @@ fn a_file_over_1_mib_is_treated_as_corrupt() {
         let bytes = padded_log(usize::try_from(len).expect("1 MiB fits in usize"));
         fs::write(&path, &bytes).expect("write padded file");
 
-        let log = load(&path, at(NOW));
+        let log = load_or_set_aside(&path, at(NOW));
 
         if loads {
             assert_eq!(log, two_apps(), "{case}");
@@ -139,7 +139,7 @@ fn a_stale_temp_file_is_replaced_and_the_saved_file_is_private() {
 
     save(&path, &two_apps()).expect("save succeeds");
 
-    assert_eq!(load(&path, at(NOW)), two_apps());
+    assert_eq!(load_or_set_aside(&path, at(NOW)), two_apps());
     assert!(!tmp.exists(), "the temp file is renamed into place");
     let mode = fs::metadata(&path)
         .expect("saved file")
@@ -185,5 +185,5 @@ fn save_creates_a_missing_parent_directory() {
 
     save(&path, &two_apps()).expect("save succeeds");
 
-    assert_eq!(load(&path, at(NOW)), two_apps());
+    assert_eq!(load_or_set_aside(&path, at(NOW)), two_apps());
 }

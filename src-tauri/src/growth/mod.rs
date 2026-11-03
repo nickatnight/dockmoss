@@ -100,6 +100,13 @@ impl Default for Thresholds {
     }
 }
 
+#[cfg_attr(
+    not(any(test, debug_assertions)),
+    expect(
+        dead_code,
+        reason = "release builds run at 1x until the settings window (slice 12) picks a speed"
+    )
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FastForward {
     #[default]
@@ -110,6 +117,13 @@ pub enum FastForward {
 }
 
 impl FastForward {
+    #[cfg_attr(
+        not(any(test, debug_assertions)),
+        expect(
+            dead_code,
+            reason = "release builds run at 1x until the settings window (slice 12) picks a speed"
+        )
+    )]
     pub fn from_factor(factor: u32) -> Option<Self> {
         match factor {
             1 => Some(Self::X1),

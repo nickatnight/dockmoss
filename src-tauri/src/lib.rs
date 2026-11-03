@@ -3,14 +3,21 @@ mod error;
 mod growth;
 mod macos;
 mod tray;
+mod trust;
 mod usage;
 
 pub use error::Error;
 
-use tauri::{AppHandle, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use std::time::Duration;
+
+use tauri::tray::TrayIcon;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
+use trust::TrustState;
+
 const OVERLAY_LABEL: &str = "overlay";
+const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Builds and runs the Tauri application.
 ///
@@ -26,7 +33,11 @@ pub fn run() {
         )
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            tray::build(app.handle())?;
+            let trust = macos::ax::request_trust();
+            tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
+            let tray = tray::build(app.handle(), trust)?;
+            app.manage(TrustState::new(trust));
+            spawn_trust_watcher(tray)?;
             let overlay = build_overlay(app.handle())?;
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
@@ -42,6 +53,35 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("tauri runtime starts with the bundled context");
+}
+
+fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("ax-trust".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(TRUST_POLL_INTERVAL);
+                let trust = macos::ax::check_trust();
+                if tray.app_handle().state::<TrustState>().replace(trust) != trust {
+                    tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
+                    refresh_tray_on_main_thread(&tray);
+                }
+            }
+        })?;
+    Ok(())
+}
+
+fn refresh_tray_on_main_thread(tray: &TrayIcon) {
+    let main_tray = tray.clone();
+    let scheduled = tray.app_handle().run_on_main_thread(move || {
+        let trust = main_tray.app_handle().state::<TrustState>().current();
+        if let Err(error) = tray::show_trust(&main_tray, trust) {
+            tracing::warn!(%error, "tray update after a trust change failed");
+        }
+    });
+    if let Err(error) = scheduled {
+        tracing::warn!(%error, "could not schedule the tray update");
+    }
 }
 
 fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {

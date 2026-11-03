@@ -4,7 +4,7 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 2 of 13 (the overlay window). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. The tray menu has one item, Quit DockMoss. A transparent, click-through window covers the main display one level above the Dock, on every Space. For now it draws only a 2 px magenta debug band around the bottom 120 px; there is no moss yet. Clicks, hovers and magnification pass through to the Dock.
+MVP slice 3 of 13 (Accessibility trust). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone. Nothing reads the Dock yet. A transparent, click-through window covers the main display one level above the Dock, on every Space. For now it draws only a 2 px magenta debug band around the bottom 120 px; there is no moss yet. Clicks, hovers and magnification pass through to the Dock.
 
 ## Requirements
 
@@ -24,6 +24,16 @@ pnpm tauri dev
 
 `tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dockmoss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
 
+## Accessibility access
+
+DockMoss needs the Accessibility grant to read the Dock. macOS gives the grant to the *responsible process*, so which app needs it depends on how DockMoss starts:
+
+- `pnpm tauri dev` uses the grant of the terminal you start it from. If your terminal is in System Settings → Privacy & Security → Accessibility, DockMoss runs trusted and the tray shows only Quit DockMoss.
+- An app bundle launched from Finder or with `open` is its own responsible process. Build one with `pnpm tauri build --debug --bundles app` and run `open src-tauri/target/debug/bundle/macos/DockMoss.app`. Without a grant, macOS shows its Accessibility dialog once at launch, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list. macOS 27 titles that list "Device Control and Data Access".
+- Local bundles are ad-hoc signed, so each rebuild has a new signature and macOS treats it as a different app: a grant does not carry over. Signing with a stable identity is milestone 7.
+
+While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
+
 ## Commands
 
 | Command | What it runs |
@@ -42,11 +52,14 @@ src-tauri/src/
   main.rs, lib.rs   # entry point; Tauri builder, plugins, setup()
   error.rs          # crate Error, serialized as { kind, message }
   commands.rs       # Tauri commands (none yet)
-  tray.rs           # menu-bar icon and Quit
+  tray.rs           # menu-bar icon, Quit, and the Accessibility grant item
+  trust.rs          # Trust (trusted or not) and the shared latest reading
   growth/           # pure growth model (slice 6)
   usage/            # launch log and Spotlight seed (slices 7-8)
   macos/            # all objc2 / AppKit / AX code and every unsafe block
     overlay.rs      # raises the overlay NSWindow above the Dock, on every Space
+    ax.rs           # Accessibility trust check (AXIsProcessTrustedWithOptions)
+    workspace.rs    # opens URLs through NSWorkspace
 src-tauri/capabilities/
   overlay.json      # overlay window may only listen for events
 src-tauri/icons/

@@ -22,8 +22,11 @@ thiserror = "2"
 tauri-plugin-log = "2"
 tracing = { version = "0.1", features = ["log"] }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSWorkspace"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindowLevel"] }
+objc2-application-services = { version = "0.3", default-features = false, features = ["std", "HIServices", "AXUIElement"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL"] }
 
 [lints.rust]
 unsafe_code = "deny"

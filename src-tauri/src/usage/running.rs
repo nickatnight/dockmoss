@@ -3,7 +3,7 @@ use crate::bundle_id::BundleId;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningApp {
     pub bundle_id: Option<String>,
-    pub regular: bool,
+    pub can_have_dock_icon: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub struct AppEvent {
 }
 
 pub fn tracked_bundle_id(app: RunningApp) -> Option<BundleId> {
-    if !app.regular {
+    if !app.can_have_dock_icon {
         return None;
     }
     BundleId::new(app.bundle_id?)

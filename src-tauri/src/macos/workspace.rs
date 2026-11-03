@@ -118,6 +118,6 @@ fn notified_app(notification: &NSNotification) -> Option<RunningApp> {
 fn running_app(app: &NSRunningApplication) -> RunningApp {
     RunningApp {
         bundle_id: app.bundleIdentifier().map(|id| id.to_string()),
-        regular: app.activationPolicy() == NSApplicationActivationPolicy::Regular,
+        can_have_dock_icon: app.activationPolicy() == NSApplicationActivationPolicy::Regular,
     }
 }

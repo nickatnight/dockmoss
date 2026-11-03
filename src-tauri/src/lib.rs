@@ -177,6 +177,7 @@ mod dock_tracker {
             return;
         };
         let mut reader = macos::dock::DockReader::new();
+        let mut gate = dock::ReadGate::default();
         let mut tracker = Tracker::new(display, overlay);
         let mut watcher = None;
         let mut rate = PollRate::Slow;
@@ -187,7 +188,7 @@ mod dock_tracker {
                 follow_display(app, &mut tracker);
             }
             let cursor = macos::cursor::location();
-            let read = dock::read(trust.current(), || reader.read());
+            let read = gate.read(trust.current(), macos::ax::check_trust, || reader.read());
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
             let tick = tracker.tick(read, cursor);
             if tick.rate != rate {

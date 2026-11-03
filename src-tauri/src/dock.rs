@@ -49,13 +49,36 @@ pub struct RawDockChild {
 /// Runs the Dock read only when trusted. On macOS 27 an untrusted AX read
 /// raises the system Accessibility dialog by itself, so a poll must never
 /// reach `read` while untrusted.
-pub fn read(
-    trust: Trust,
-    read: impl FnOnce() -> Result<Vec<RawDockChild>, DockError>,
-) -> Result<Vec<RawDockChild>, DockError> {
-    match trust {
-        Trust::Trusted => read(),
-        Trust::Untrusted => Err(DockError::ApiDisabled),
+///
+/// `TrustState` is refreshed only every few seconds, so trust revoked while
+/// running shows up first as a read that returns `ApiDisabled`. From then on
+/// the gate skips the read and calls `recheck` (a trust query that never
+/// prompts) each tick, until it or `TrustState` reports trust again.
+#[derive(Debug, Default)]
+pub struct ReadGate {
+    revoked: bool,
+}
+
+impl ReadGate {
+    pub fn read(
+        &mut self,
+        trust: Trust,
+        recheck: impl FnOnce() -> Trust,
+        read: impl FnOnce() -> Result<Vec<RawDockChild>, DockError>,
+    ) -> Result<Vec<RawDockChild>, DockError> {
+        match trust {
+            Trust::Untrusted => {
+                self.revoked = false;
+                return Err(DockError::ApiDisabled);
+            }
+            Trust::Trusted if self.revoked && recheck() == Trust::Untrusted => {
+                return Err(DockError::ApiDisabled);
+            }
+            Trust::Trusted => {}
+        }
+        let result = read();
+        self.revoked = result == Err(DockError::ApiDisabled);
+        result
     }
 }
 
@@ -72,6 +95,10 @@ fn app_item(child: RawDockChild, display: Display) -> Option<DockItem> {
         tracing::debug!(bundle_id = child.bundle_id, "dock app item has no URL");
         return None;
     };
+    if app_path.to_str().is_none() {
+        tracing::debug!(path = %app_path.display(), "dock app item path is not UTF-8");
+        return None;
+    }
     let Some(bundle_id) = child.bundle_id.and_then(BundleId::new) else {
         tracing::debug!(path = %app_path.display(), "dock app item has no bundle id");
         return None;

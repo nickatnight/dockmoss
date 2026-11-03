@@ -51,8 +51,8 @@ pub struct DockReader {
 }
 
 impl DockReader {
+    /// Makes no AX call; the first read does, once the trust gate lets it.
     pub fn new() -> Self {
-        set_global_messaging_timeout();
         let names = CHILD_ATTRIBUTE_NAMES.map(CFString::from_static_str);
         Self {
             dock: None,
@@ -71,6 +71,7 @@ impl DockReader {
 
     fn read_in_pool(&mut self) -> Result<Vec<RawDockChild>, DockError> {
         if self.dock.is_none() {
+            set_global_messaging_timeout();
             self.dock = Some(find_dock()?);
         }
         let dock = self.dock.as_ref().ok_or(DockError::NotRunning)?;
@@ -190,7 +191,9 @@ fn is_system_dock(app: &NSRunningApplication) -> bool {
 fn application(pid: i32) -> CFRetained<AXUIElement> {
     // SAFETY: AXUIElementCreateApplication accepts any pid and only builds a
     // new element for it (no IPC happens until an attribute is read). The
-    // binding wraps the +1 result in `CFRetained`.
+    // binding wraps the +1 result in `CFRetained`; it returns null only when
+    // allocation fails, where the binding panics (an abort in release builds,
+    // as any out-of-memory would be).
     unsafe { AXUIElement::new_application(pid) }
 }
 

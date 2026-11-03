@@ -13,15 +13,20 @@ use objc2_foundation::{NSNotification, NSNotificationCenter, NSOperationQueue};
     unsafe_code,
     reason = "the notification name is an AppKit extern static and the observer API takes a block"
 )]
-pub fn on_screen_parameters_change(on_change: impl Fn() + 'static, _mtm: MainThreadMarker) {
+pub fn on_screen_parameters_change(
+    on_change: impl Fn() + Send + Sync + 'static,
+    _mtm: MainThreadMarker,
+) {
     let block = RcBlock::new(move |_notification: NonNull<NSNotification>| on_change());
     // SAFETY: the name is an immutable NSString constant that AppKit
     // initialises before any Rust code runs.
     let name = unsafe { NSApplicationDidChangeScreenParametersNotification };
     let queue = NSOperationQueue::mainQueue();
-    // SAFETY: `obj` is None (any sender), the main queue runs the block on
-    // the main thread, where `_mtm` shows this registration also happens, and
-    // the block only runs `on_change`, which needs no other thread.
+    // SAFETY: `obj` is None (any sender). The block is sendable, as the
+    // binding requires: it only calls `on_change`, which is `Send + Sync +
+    // 'static`, so Foundation may copy, call or release it on any thread. The
+    // main queue runs it on the main thread, where `_mtm` shows the
+    // registration also happens.
     let observer = unsafe {
         NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
             Some(name),

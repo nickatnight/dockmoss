@@ -49,6 +49,22 @@ pub enum SaneSeeds {
 }
 
 pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) -> SaneSeeds {
+    let past = latest_past_date_per_app(readings, now);
+    let dates: Vec<Timestamp> = past.iter().map(|(_, date)| *date).collect();
+    if is_migration_batch(&dates) {
+        return SaneSeeds::MigrationBatch;
+    }
+    SaneSeeds::Kept(
+        past.into_iter()
+            .map(|(bundle_id, date)| (bundle_id, SpotlightSeed(date)))
+            .collect(),
+    )
+}
+
+fn latest_past_date_per_app(
+    readings: Vec<(BundleId, Option<Timestamp>)>,
+    now: Timestamp,
+) -> Vec<(BundleId, Timestamp)> {
     let mut past: Vec<(BundleId, Timestamp)> = Vec::new();
     for (bundle_id, date) in readings {
         let Some(past_date) = date.filter(|date| *date <= now) else {
@@ -59,15 +75,7 @@ pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) 
             None => past.push((bundle_id, past_date)),
         }
     }
-    let dates: Vec<Timestamp> = past.iter().map(|(_, date)| *date).collect();
-    if is_migration_batch(&dates) {
-        return SaneSeeds::MigrationBatch;
-    }
-    SaneSeeds::Kept(
-        past.into_iter()
-            .map(|(bundle_id, date)| (bundle_id, SpotlightSeed(date)))
-            .collect(),
-    )
+    past
 }
 
 #[cfg(test)]

@@ -1,8 +1,10 @@
 use serde::Serialize;
 
+mod curve;
 mod jitter;
 mod last_used;
 
+pub use curve::growth;
 pub use jitter::jitter;
 pub use last_used::{LastUsedSources, effective_last_used};
 
@@ -115,6 +117,24 @@ pub enum GrowthError {
         patchy: u32,
         overgrown: u32,
     },
+}
+
+/// An icon's overgrowth and stage. Both come from the same day count, so
+/// they never disagree.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Growth {
+    overgrowth: Overgrowth,
+    stage: Stage,
+}
+
+impl Growth {
+    pub fn overgrowth(self) -> Overgrowth {
+        self.overgrowth
+    }
+
+    pub fn stage(self) -> Stage {
+        self.stage
+    }
 }
 
 #[cfg(test)]

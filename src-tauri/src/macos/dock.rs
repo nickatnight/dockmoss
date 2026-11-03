@@ -46,6 +46,7 @@ enum Reading {
 
 pub struct DockReader {
     dock: Option<CFRetained<AXUIElement>>,
+    timeout_set: bool,
     child_attributes: CFRetained<CFArray<CFString>>,
     bundle_ids: BundleIdCache,
 }
@@ -56,6 +57,7 @@ impl DockReader {
         let names = CHILD_ATTRIBUTE_NAMES.map(CFString::from_static_str);
         Self {
             dock: None,
+            timeout_set: false,
             child_attributes: CFArray::from_retained_objects(&names),
             bundle_ids: BundleIdCache::default(),
         }
@@ -71,7 +73,9 @@ impl DockReader {
 
     fn read_in_pool(&mut self) -> Result<Vec<RawDockChild>, DockError> {
         if self.dock.is_none() {
-            set_global_messaging_timeout();
+            if !self.timeout_set {
+                self.timeout_set = set_global_messaging_timeout();
+            }
             self.dock = Some(find_dock()?);
         }
         let dock = self.dock.as_ref().ok_or(DockError::NotRunning)?;
@@ -201,9 +205,11 @@ fn application(pid: i32) -> CFRetained<AXUIElement> {
     unsafe_code,
     reason = "the AX system-wide constructor and timeout setter are C functions"
 )]
-fn set_global_messaging_timeout() {
+fn set_global_messaging_timeout() -> bool {
     // SAFETY: AXUIElementCreateSystemWide takes no arguments and returns a
-    // new +1 element, which the binding wraps in `CFRetained`.
+    // new +1 element, which the binding wraps in `CFRetained`. It returns
+    // null only when allocation fails, where the binding panics (an abort in
+    // release builds, as any out-of-memory would be).
     let system_wide = unsafe { AXUIElement::new_system_wide() };
     // SAFETY: `system_wide` is a live AX element and the timeout is positive,
     // as the function requires. Setting it is local to this process (no IPC).
@@ -213,8 +219,10 @@ fn set_global_messaging_timeout() {
             seconds = MESSAGING_TIMEOUT_SECONDS,
             "ax messaging timeout set"
         );
+        true
     } else {
         tracing::warn!(code = code.0, "ax messaging timeout not set");
+        false
     }
 }
 

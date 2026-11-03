@@ -22,7 +22,7 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 
 **Rules**
 
-1. **Own launch log is the source of truth.** Listen for `NSWorkspace` launch/activation notifications and store a per-app last-launched timestamp (keyed by bundle ID) in our own app data. It survives OS updates and can't be silently rewritten.
+1. **Own launch log is the source of truth.** Listen for `NSWorkspace` launch, activation and quit notifications and store a per-app timestamp (keyed by bundle ID) in our own app data. Quitting an app counts as using it, so "last used" is the last time the app was running or frontmost, and moss starts growing from when it quit. Apps already running when DockMoss starts count as used at that moment. The log survives OS updates and can't be silently rewritten.
 2. **Effective last-used** is the latest of: our launch log, `kMDItemLastUsedDate`, and the first-run baseline below.
 3. **First-run grace period.** On first run, treat every app with no launch history as "last seen today" and let moss grow from there, so the Dock isn't green on day one.
 4. **Spotlight as a seed only.** Use `kMDItemLastUsedDate` to seed the initial state when it looks sane. Ignore `kMDItemDateAdded` and Spotlight dates entirely when many apps share an identical timestamp (a migration signature, e.g. 5+ apps within a few seconds).

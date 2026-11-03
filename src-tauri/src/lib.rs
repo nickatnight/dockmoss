@@ -1,17 +1,7 @@
 mod bundle_id;
 mod commands;
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod dock;
 mod error;
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod geometry;
 #[cfg_attr(
     not(test),
@@ -21,18 +11,8 @@ mod geometry;
         reason = "growth and its re-exports are wired to the tracker in slice 8"
     )
 )]
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "growth is recomputed on the tracker thread from slice 8, and release builds abort on panic"
-)]
 mod growth;
 mod macos;
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod tracker;
 mod tray;
 mod trust;
@@ -43,16 +23,20 @@ pub use error::Error;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use jiff::Timestamp;
 use tauri::tray::TrayIcon;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
 use commands::{TrackerInbox, TrackerMessage};
 use geometry::Display;
+use launch_log_writer::{LaunchLogInbox, WriterMessage};
 use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
+const LAUNCH_LOG_FILE: &str = "launch_log.json";
+const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
     LevelFilter::Debug
@@ -64,9 +48,9 @@ const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
 ///
 /// # Panics
 ///
-/// Panics if the Tauri runtime fails to start.
+/// Panics if the Tauri runtime fails to build.
 pub fn run() {
-    tauri::Builder::default()
+    let built = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)
@@ -86,8 +70,13 @@ pub fn run() {
             let screen_changes = inbox.clone();
             app.manage(TrackerInbox(inbox));
             let overlay = build_overlay(app.handle(), display)?;
+            #[expect(
+                clippy::expect_used,
+                reason = "startup invariant: tauri runs setup() on the main thread"
+            )]
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
+            start_launch_log(app.handle(), mtm)?;
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
                 dock_level = levels.dock,
@@ -115,8 +104,164 @@ pub fn run() {
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("tauri runtime starts with the bundled context");
+        .build(tauri::generate_context!());
+    #[expect(
+        clippy::expect_used,
+        reason = "startup invariant: the runtime builds with the context built into the binary"
+    )]
+    let app = built.expect("tauri runtime builds with the bundled context");
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            flush_launch_log(app);
+        }
+    });
+}
+
+fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
+    let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
+    let log = usage::load_or_set_aside(&path, Timestamp::now());
+    let entries = log.len();
+    let inbox = launch_log_writer::spawn(path.clone(), log)?;
+    let now = Timestamp::now();
+    let mut running = 0_usize;
+    for bundle_id in macos::workspace::running_apps(mtm)
+        .into_iter()
+        .filter_map(usage::tracked_bundle_id)
+    {
+        tracing::debug!(bundle_id = bundle_id.as_str(), "running at startup");
+        if inbox
+            .send(WriterMessage::Used { bundle_id, at: now })
+            .is_err()
+        {
+            tracing::warn!("running apps not recorded: the launch log writer stopped");
+            break;
+        }
+        running += 1;
+    }
+    let events = inbox.clone();
+    macos::workspace::on_app_events(move |event| record_app_event(&events, event), mtm);
+    app.manage(LaunchLogInbox(inbox));
+    tracing::info!(
+        path = %path.display(),
+        entries,
+        running_apps = running,
+        "launch log started"
+    );
+    Ok(())
+}
+
+fn record_app_event(inbox: &mpsc::Sender<WriterMessage>, event: usage::AppEvent) {
+    let kind = event.kind;
+    let Some(bundle_id) = usage::tracked_bundle_id(event.app) else {
+        return;
+    };
+    tracing::debug!(bundle_id = bundle_id.as_str(), ?kind, "app used");
+    let used = WriterMessage::Used {
+        bundle_id,
+        at: Timestamp::now(),
+    };
+    if inbox.send(used).is_err() {
+        tracing::warn!(?kind, "app use not recorded: the launch log writer stopped");
+    }
+}
+
+fn flush_launch_log(app: &AppHandle) {
+    let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
+        return;
+    };
+    let (ack, acked) = mpsc::channel();
+    if inbox.0.send(WriterMessage::Flush(ack)).is_err() {
+        tracing::warn!("launch log not flushed on quit: the writer stopped");
+        return;
+    }
+    match acked.recv_timeout(FLUSH_TIMEOUT) {
+        Ok(()) => tracing::debug!("launch log flushed on quit"),
+        Err(error) => tracing::warn!(%error, "launch log flush on quit not confirmed"),
+    }
+}
+
+mod launch_log_writer {
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+    use std::time::Instant;
+
+    use jiff::Timestamp;
+
+    use crate::bundle_id::BundleId;
+    use crate::usage::{self, LaunchLog, Recorded, SaveSchedule};
+
+    pub enum WriterMessage {
+        Used { bundle_id: BundleId, at: Timestamp },
+        Flush(Sender<()>),
+    }
+
+    pub struct LaunchLogInbox(pub Sender<WriterMessage>);
+
+    pub fn spawn(path: PathBuf, log: LaunchLog) -> std::io::Result<Sender<WriterMessage>> {
+        let (inbox, messages) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("launch-log".into())
+            .spawn(move || write_launch_log(&path, log, &messages))?;
+        Ok(inbox)
+    }
+
+    fn write_launch_log(path: &Path, mut log: LaunchLog, messages: &Receiver<WriterMessage>) {
+        let mut schedule = SaveSchedule::default();
+        loop {
+            let message = match schedule.deadline() {
+                None => messages.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                Some(deadline) => {
+                    messages.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                }
+            };
+            match message {
+                Ok(WriterMessage::Used { bundle_id, at }) => {
+                    if log.record(bundle_id, at) == Recorded::Changed {
+                        schedule.changed(Instant::now());
+                    }
+                }
+                Ok(WriterMessage::Flush(ack)) => {
+                    if schedule.deadline().is_some() {
+                        save(path, &log, &mut schedule, SaveTrigger::Flush);
+                    }
+                    if ack.send(()).is_err() {
+                        tracing::debug!("launch log flushed after the quit stopped waiting");
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    if schedule.deadline().is_some() {
+                        save(path, &log, &mut schedule, SaveTrigger::Disconnected);
+                    }
+                    tracing::debug!("launch log writer stopped: no senders left");
+                    return;
+                }
+            }
+            if schedule.is_due(Instant::now()) {
+                save(path, &log, &mut schedule, SaveTrigger::Deadline);
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum SaveTrigger {
+        Deadline,
+        Flush,
+        Disconnected,
+    }
+
+    fn save(path: &Path, log: &LaunchLog, schedule: &mut SaveSchedule, trigger: SaveTrigger) {
+        match usage::save(path, log) {
+            Ok(()) => {
+                schedule.saved();
+                tracing::debug!(entries = log.len(), ?trigger, "launch log saved");
+            }
+            Err(error) => {
+                schedule.save_failed(Instant::now());
+                tracing::warn!(%error, ?trigger, "launch log not saved; retrying in 5 s");
+            }
+        }
+    }
 }
 
 fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
@@ -148,11 +293,6 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
     }
 }
 
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 mod dock_tracker {
     use std::sync::mpsc::{Receiver, RecvTimeoutError};
     use std::time::{Duration, Instant};
@@ -160,7 +300,7 @@ mod dock_tracker {
     use tauri::ipc::Channel;
     use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
 
-    use crate::commands::TrackerMessage;
+    use crate::commands::{TrackerInbox, TrackerMessage};
     use crate::dock::{self, DockItem};
     use crate::geometry::Display;
     use crate::tracker::{self, PollRate, Tick, TickLog, Tracker, Visibility};
@@ -242,6 +382,7 @@ mod dock_tracker {
                     tracker.resend_on_next_tick();
                 }
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
+                Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
                 Err(RecvTimeoutError::Timeout) => return,
                 Err(RecvTimeoutError::Disconnected) => {
                     std::thread::sleep(left);
@@ -331,11 +472,25 @@ mod dock_tracker {
                     collection_behavior = state.collection_behavior,
                     "overlay ordered"
                 ),
-                Err(error) => tracing::warn!(%error, ?visibility, "overlay not ordered"),
+                Err(error) => {
+                    tracing::warn!(%error, ?visibility, "overlay not ordered");
+                    report_order_failed(&main);
+                }
             }
         });
         if let Err(error) = scheduled {
             tracing::warn!(%error, "could not schedule the overlay ordering");
+            report_order_failed(app);
+        }
+    }
+
+    fn report_order_failed(app: &AppHandle) {
+        let Some(inbox) = app.try_state::<TrackerInbox>() else {
+            tracing::warn!("overlay ordering not retried: no tracker inbox");
+            return;
+        };
+        if inbox.0.send(TrackerMessage::OverlayOrderFailed).is_err() {
+            tracing::warn!("overlay ordering not retried: the dock tracker stopped");
         }
     }
 
@@ -347,11 +502,6 @@ mod dock_tracker {
     mod tests;
 }
 
-#[deny(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    reason = "polling path: release builds abort on panic"
-)]
 fn primary_display(app: &AppHandle) -> Result<Display, Error> {
     let monitor = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
     let origin = monitor.position();

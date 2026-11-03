@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 /// A macOS bundle identifier such as `com.apple.Safari`. Never empty.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct BundleId(String);
 

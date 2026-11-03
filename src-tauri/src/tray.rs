@@ -56,8 +56,10 @@ fn menu(app: &AppHandle, trust: Trust) -> tauri::Result<Menu<Wry>> {
 }
 
 fn open_accessibility_settings() {
-    let mtm =
-        macos::MainThreadMarker::new().expect("tauri delivers tray menu events on the main thread");
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        tracing::warn!("tray menu event arrived off the main thread; settings not opened");
+        return;
+    };
     match macos::workspace::open_accessibility_settings(mtm) {
         Ok(()) => tracing::info!("accessibility settings opened from tray"),
         Err(error) => tracing::warn!(%error, "accessibility settings did not open"),

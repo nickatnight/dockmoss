@@ -9,6 +9,7 @@ use crate::dock::DockItem;
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
     ScreenParametersChanged,
+    OverlayOrderFailed,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);

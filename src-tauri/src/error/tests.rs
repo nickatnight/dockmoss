@@ -24,11 +24,25 @@ fn missing_main_display_has_its_own_kind() {
 
 #[test]
 fn overlay_failures_have_the_overlay_kind_and_message() {
-    let json = serde_json::to_value(Error::from(crate::macos::OverlayError::NullWindow))
+    let json = serde_json::to_value(Error::from(crate::macos::overlay::OverlayError::NullWindow))
         .expect("Error serializes to JSON");
 
     assert_eq!(
         json,
         serde_json::json!({ "kind": "overlay", "message": "overlay's native window pointer is null" })
+    );
+}
+
+#[test]
+fn dock_failures_have_the_dock_kind_and_message() {
+    let json = serde_json::to_value(Error::from(crate::macos::dock::DockError::ApiDisabled))
+        .expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "dock",
+            "message": "Accessibility access is not granted, so the Dock cannot be read"
+        })
     );
 }

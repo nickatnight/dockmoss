@@ -1,3 +1,3 @@
-const band = document.createElement("div");
-band.className = "debug-dock-band";
-document.body.append(band);
+import { outlineDockItems } from "./debug";
+
+void outlineDockItems(document.body);

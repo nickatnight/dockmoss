@@ -25,6 +25,9 @@ src-tauri/src/
   lib.rs         # Builder, plugins, setup(), command registration
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules
+  geometry.rs    # pure: AX rects -> overlay-local logical pixels (the one conversion)
+  dock.rs        # pure: raw Dock children -> DockItems (application items only)
+  bundle_id.rs   # pure: BundleId newtype
   growth/        # pure: effective last-used -> 0..1 overgrowth, jitter, stages
   usage/         # launch log persistence, Spotlight seeding, migration detection
   macos/         # every objc2 / AppKit / AX call, and every `unsafe` block
@@ -32,7 +35,7 @@ src-tauri/capabilities/   # one capability file per window
 src/                      # webview: canvas/WebGL moss renderer, settings UI
 ```
 
-The boundary that matters is between `macos/` and everything else. `growth/` and `usage/` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks. `macos/` exposes safe functions that return plain Rust types such as `DockItem { bundle_id, rect }`, so the rest of the crate never sees a raw pointer.
+The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
 
 ## Rust conventions
 
@@ -58,7 +61,7 @@ The boundary that matters is between `macos/` and everything else. `growth/` and
 - **Commands:** use `async fn` with owned arguments. Shared state goes in through `app.manage(...)` and comes out as `State<'_, T>`. Use `std::sync::Mutex` when the lock never crosses an `.await`; use `tokio::sync::Mutex` only when it does.
 - **Spawning:** use `tauri::async_runtime::spawn`. A bare `tokio::spawn` panics inside `setup()` because no runtime context exists there yet.
 - **Rust → webview:** send discrete updates (growth changed, app launched) with `Emitter::emit_to("overlay", ...)`. Stream Dock geometry over a `tauri::ipc::Channel` and send only when rects actually change, so the webview render loop can stay idle (see Battery in `SUMMARY.md`).
-- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events. The settings window gets the plugin permissions it uses.
+- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-dock-items`. The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
 - **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures.
 
 ## macOS overlay gotchas
@@ -66,7 +69,7 @@ The boundary that matters is between `macos/` and everything else. `growth/` and
 - **Transparency** needs `"macOSPrivateApi": true` under `app` in `tauri.conf.json`, plus `transparent: true` on the window and a transparent `body` background in CSS. Private API rules out the Mac App Store. Distribution is Developer ID only.
 - **Overlay window:** `decorations: false`, `shadow: false`, `focus: false`, `skipTaskbar: true`, then `set_ignore_cursor_events(true)` and `set_visible_on_all_workspaces(true)`. Set the `NSWindow` level above the Dock (`kCGDockWindowLevel + 1`) and the collection behavior to `canJoinAllSpaces | stationary | fullScreenAuxiliary | ignoresCycle` through objc2. Tauri's `always_on_top` level sits below the Dock.
 - **No Dock icon of our own:** call `app.set_activation_policy(ActivationPolicy::Accessory)` in `setup()`. Settings live in the menu-bar tray (`TrayIconBuilder`, `tray-icon` feature).
-- **Coordinates:** AX reports global points with a top-left origin on the primary display. Cocoa uses a bottom-left origin. Tauri distinguishes `Logical` from `Physical` sizes. Do all conversions in one function in `macos/`, and test it with multi-display and Retina fixtures.
+- **Coordinates:** AX reports global points with a top-left origin on the primary display. Cocoa uses a bottom-left origin. Tauri distinguishes `Logical` from `Physical` sizes. The one conversion function is the pure `geometry::to_overlay_local` in `src-tauri/src/geometry.rs`, outside `macos/` so the coverage gate counts it. `macos/` only supplies the raw AX rects, and `lib.rs` supplies the display values Tauri reports. Its tests use multi-display and Retina fixtures, and the overlay's own frame comes from the same `Display::frame`.
 - **Accessibility grant:** TCC ties the grant to the code signature and to the *responsible process*. Under `tauri dev` started from a terminal, the grant goes to the terminal app. An ad-hoc-signed bundle loses the grant on every rebuild. Check with `AXIsProcessTrustedWithOptions` at startup and show a clear prompt instead of failing silently. Test the real flow with a bundle signed by a stable identity.
 - **Bundle identifier** (`identifier` in `tauri.conf.json`) is permanent once chosen. Changing it resets the Accessibility grant and moves the app data directory.
 

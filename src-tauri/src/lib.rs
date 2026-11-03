@@ -1,5 +1,8 @@
+mod bundle_id;
 mod commands;
+mod dock;
 mod error;
+mod geometry;
 mod growth;
 mod macos;
 mod tray;
@@ -14,6 +17,8 @@ use tauri::tray::TrayIcon;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
+use commands::OverlayDisplay;
+use geometry::Display;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
@@ -31,6 +36,7 @@ pub fn run() {
                 .level(LevelFilter::Info)
                 .build(),
         )
+        .invoke_handler(tauri::generate_handler![commands::dock_items])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let trust = macos::ax::request_trust();
@@ -38,10 +44,12 @@ pub fn run() {
             let tray = tray::build(app.handle(), trust)?;
             app.manage(TrustState::new(trust));
             spawn_trust_watcher(tray)?;
-            let overlay = build_overlay(app.handle())?;
+            let display = primary_display(app.handle())?;
+            app.manage(OverlayDisplay(display));
+            let overlay = build_overlay(app.handle(), display)?;
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
-            let levels = macos::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
+            let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
                 dock_level = levels.dock,
                 overlay_level = levels.overlay,
@@ -61,8 +69,8 @@ fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
         .spawn(move || {
             loop {
                 std::thread::sleep(TRUST_POLL_INTERVAL);
-                let trust = macos::ax::check_trust();
-                if tray.app_handle().state::<TrustState>().replace(trust) != trust {
+                let state = tray.app_handle().state::<TrustState>();
+                if let Some(trust) = state.replace_if_changed(macos::ax::check_trust()) {
                     tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
                     refresh_tray_on_main_thread(&tray);
                 }
@@ -84,17 +92,27 @@ fn refresh_tray_on_main_thread(tray: &TrayIcon) {
     }
 }
 
-fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {
-    let display = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
-    let scale = display.scale_factor();
-    let origin = display.position().to_logical::<f64>(scale);
-    let size = display.size().to_logical::<f64>(scale);
+fn primary_display(app: &AppHandle) -> Result<Display, Error> {
+    let monitor = app.primary_monitor()?.ok_or(Error::NoMainDisplay)?;
+    let origin = monitor.position();
+    let size = monitor.size();
+    Ok(Display {
+        physical_x: origin.x,
+        physical_y: origin.y,
+        physical_width: size.width,
+        physical_height: size.height,
+        scale_factor: monitor.scale_factor(),
+    })
+}
 
+fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Error> {
+    let frame = display.frame();
+    let scale = display.scale_factor;
     let window =
         WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
             .title("DockMoss Overlay")
-            .position(origin.x, origin.y)
-            .inner_size(size.width, size.height)
+            .position(frame.x, frame.y)
+            .inner_size(frame.width, frame.height)
             .transparent(true)
             .decorations(false)
             .shadow(false)
@@ -108,10 +126,10 @@ fn build_overlay(app: &AppHandle) -> Result<WebviewWindow, Error> {
     window.set_ignore_cursor_events(true)?;
 
     tracing::info!(
-        x = origin.x,
-        y = origin.y,
-        width = size.width,
-        height = size.height,
+        x = frame.x,
+        y = frame.y,
+        width = frame.width,
+        height = frame.height,
         scale,
         "overlay window created"
     );

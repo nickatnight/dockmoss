@@ -8,7 +8,9 @@ pub enum Error {
     #[error("macOS reports no main display")]
     NoMainDisplay,
     #[error(transparent)]
-    Overlay(#[from] crate::macos::OverlayError),
+    Overlay(#[from] crate::macos::overlay::OverlayError),
+    #[error(transparent)]
+    Dock(#[from] crate::macos::dock::DockError),
 }
 
 impl Error {
@@ -17,6 +19,7 @@ impl Error {
             Self::Tauri(_) => "tauri",
             Self::NoMainDisplay => "no_main_display",
             Self::Overlay(_) => "overlay",
+            Self::Dock(_) => "dock",
         }
     }
 }

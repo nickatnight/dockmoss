@@ -5,12 +5,8 @@ body {
   background: transparent;
 }
 
-.debug-dock-band {
+.debug-dock-item {
   position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
   box-sizing: border-box;
-  height: 120px;
-  border: 2px solid #ff2bd6;
+  border: 1px solid #ff2bd6;
 }

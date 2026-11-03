@@ -16,6 +16,13 @@ mod macos;
 mod tracker;
 mod tray;
 mod trust;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the launch log is wired to the workspace observers in task 5 of job 007"
+    )
+)]
 mod usage;
 
 pub use error::Error;

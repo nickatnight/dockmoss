@@ -683,3 +683,27 @@ fn a_failed_ordering_is_issued_again_on_the_next_tick() {
         );
     }
 }
+
+#[test]
+fn a_failed_ordering_after_a_successful_one_is_issued_again() {
+    let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+    let full = || Ok(vec![raw_app("Safari", 700.0)]);
+    assert_eq!(
+        tracker.tick(Err(DockError::CannotComplete), None).overlay,
+        Some(Visibility::Hidden),
+        "the first ordering, out, succeeds"
+    );
+    assert_eq!(
+        tracker.tick(full(), None).overlay,
+        Some(Visibility::Shown),
+        "the second ordering, in, is issued"
+    );
+
+    tracker.order_failed();
+
+    assert_eq!(
+        tracker.tick(full(), None).overlay,
+        Some(Visibility::Shown),
+        "the failed ordering in is issued again"
+    );
+}

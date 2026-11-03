@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -186,4 +187,25 @@ fn save_creates_a_missing_parent_directory() {
     save(&path, &two_apps()).expect("save succeeds");
 
     assert_eq!(load_or_set_aside(&path, at(NOW)), two_apps());
+}
+
+#[test]
+fn a_save_over_an_existing_log_replaces_it_atomically() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = log_path(&dir);
+    save(&path, &two_apps()).expect("first save succeeds");
+    let before = fs::read(&path).expect("saved file");
+    let mut reader = fs::File::open(&path).expect("open the first file");
+    let mut changed = two_apps();
+    changed.record(id("com.apple.Notes"), at("2026-11-02T11:00:00Z"));
+
+    save(&path, &changed).expect("second save succeeds");
+
+    assert_eq!(load_or_set_aside(&path, at(NOW)), changed);
+    let mut seen = Vec::new();
+    reader.read_to_end(&mut seen).expect("read the first file");
+    assert_eq!(
+        seen, before,
+        "a reader of the old file still sees all of it, never a partial write"
+    );
 }

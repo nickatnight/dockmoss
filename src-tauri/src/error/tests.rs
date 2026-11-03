@@ -85,7 +85,8 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
         Error::TrackerStopped,
     ];
     for error in &errors {
-        // A new variant stops this compiling until it is added to `errors`.
+        // A new variant must be added here and to `errors`; the `declared`
+        // check below fails if `errors` misses the variant's kind.
         match error {
             Error::Tauri(_)
             | Error::NoMainDisplay
@@ -105,5 +106,21 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
     let typescript: std::collections::BTreeSet<&str> =
         union.split('"').skip(1).step_by(2).collect();
 
-    assert_eq!(typescript, rust);
+    let source = include_str!("../error.rs");
+    let kind_body = source
+        .split("fn kind(&self)")
+        .nth(1)
+        .and_then(|rest| rest.split("\n    }\n").next())
+        .expect("src/error.rs defines Error::kind");
+    let declared: std::collections::BTreeSet<&str> = kind_body
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|arm| arm.split('"').next())
+        .collect();
+
+    assert_eq!(
+        rust, declared,
+        "`errors` misses a kind that Error::kind() returns"
+    );
+    assert_eq!(typescript, declared, "ErrorKind in src/ipc.ts");
 }

@@ -329,6 +329,9 @@ mod dock_tracker {
     fn micros(duration: Duration) -> u64 {
         u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
     }
+
+    #[cfg(test)]
+    mod tests;
 }
 
 #[deny(

@@ -265,6 +265,18 @@ fn hidden_dock_measures_the_band_from_the_display_bottom_edge() {
             PollRate::Slow,
         ),
         (
+            "Dock bounds off the display to the right, measured from the bottom edge",
+            Some(rect(1600.0, 920.0, 630.0, 56.0)),
+            Some(point(700.0, 882.0)),
+            PollRate::Fast,
+        ),
+        (
+            "Dock top exactly on the bottom edge counts as off the display",
+            Some(rect(440.0, 982.0, 630.0, 56.0)),
+            Some(point(100.0, 900.0)),
+            PollRate::Fast,
+        ),
+        (
             "hidden, at the bottom edge",
             hidden,
             Some(point(700.0, 982.0)),

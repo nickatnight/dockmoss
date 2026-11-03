@@ -14,8 +14,10 @@ pub async fn dock_items(
 ) -> Result<Vec<DockItem>, Error> {
     let display = overlay.0;
     let trust = trust.current();
-    let read =
-        tauri::async_runtime::spawn_blocking(move || dock::read(trust, macos::dock::items)).await?;
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        dock::read(trust, || macos::dock::DockReader::new().read())
+    })
+    .await?;
     match read {
         Ok(children) => {
             let items = dock::app_items(children, display);

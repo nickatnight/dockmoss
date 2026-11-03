@@ -4,6 +4,13 @@ use std::path::PathBuf;
 mod log;
 mod running;
 mod schedule;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the usage thread seeds the first run once slice 8 wires it"
+    )
+)]
 mod spotlight;
 mod store;
 

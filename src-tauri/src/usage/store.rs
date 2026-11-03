@@ -89,12 +89,7 @@ pub fn save(path: &Path, log: &LaunchLog) -> Result<(), UsageError> {
         fs::create_dir_all(parent).map_err(io_error("create the directory", parent))?;
     }
     let tmp = sibling(path, ".tmp");
-    match fs::remove_file(&tmp) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => {
-            return Err(io_error("remove the stale temp file", &tmp)(error));
-        }
-        _ => {}
-    }
+    remove_stale_temp(&tmp)?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -105,6 +100,17 @@ pub fn save(path: &Path, log: &LaunchLog) -> Result<(), UsageError> {
         .and_then(|()| file.sync_all())
         .map_err(io_error("write", &tmp))?;
     fs::rename(&tmp, path).map_err(io_error("rename the temp file over", path))
+}
+
+/// A temp file left by a crash is removed, not reopened, so `create_new`
+/// makes the new one with `FILE_MODE` and follows no existing link.
+fn remove_stale_temp(tmp: &Path) -> Result<(), UsageError> {
+    match fs::remove_file(tmp) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            Err(io_error("remove the stale temp file", tmp)(error))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn io_error(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> UsageError {

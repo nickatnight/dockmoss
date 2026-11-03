@@ -46,7 +46,6 @@ fn baselined() -> LaunchLog {
     log
 }
 
-/// Runs the first run to the end with no Spotlight dates.
 fn seeded_with_no_dates(apps: Vec<DockApp>, at: Timestamp) -> UsageState {
     let mut state = UsageState::new(LaunchLog::default());
     let DockUpdate::Seed(to_read) = state.dock_apps(apps, at) else {
@@ -70,8 +69,6 @@ fn stage_of(state: &UsageState, bundle_id: &str, at: Timestamp, ff: FastForward)
         .expect("the app is in the Dock");
     (entry.overgrowth.get(), entry.stage)
 }
-
-// First run
 
 #[test]
 fn the_first_non_empty_dock_list_starts_seeding_once() {
@@ -229,8 +226,6 @@ fn a_job_007_log_with_launches_keeps_them_through_the_first_run() {
     assert_eq!(log.baseline_at(), Some(now()));
 }
 
-// Later
-
 #[test]
 fn after_the_first_run_a_new_app_is_first_seen_now() {
     let mut state = UsageState::new(baselined());
@@ -291,8 +286,6 @@ fn the_same_dock_list_again_changes_nothing() {
     assert_eq!(state.log(), &before);
 }
 
-// Running and growth
-
 #[test]
 fn used_records_the_time_and_reports_what_changed() {
     let mut state = UsageState::new(baselined());
@@ -351,8 +344,6 @@ fn a_quit_app_grows_from_the_quit_time() {
         AppEventKind::Terminated,
     );
 
-    // 6 days + Safari's jitter (+38,842 s, growth/jitter/tests.rs) is
-    // 6.4496 days: Fuzz, 0.5 * 1.4496 / 5 of the way from 5 to 10 days.
     let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1);
     assert_eq!(reached, Stage::Fuzz);
     assert!((overgrowth - 0.144_956).abs() < TOLERANCE, "{overgrowth}");
@@ -375,7 +366,6 @@ fn at_1000x_an_app_first_seen_8_6_minutes_ago_is_in_fuzz() {
         ago(SignedDuration::from_secs(516)),
     );
 
-    // 516 s * 1000 = 5.9722 days, plus 0.4496 days of jitter = 6.4218 days.
     let (overgrowth, reached) = stage_of(&state, "com.apple.Safari", now(), FastForward::X1000);
 
     assert_eq!(reached, Stage::Fuzz);

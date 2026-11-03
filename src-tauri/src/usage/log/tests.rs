@@ -14,8 +14,6 @@ fn id(text: &str) -> BundleId {
 
 const NOW: &str = "2026-11-02T12:00:00Z";
 
-/// A version 1 file whose `map` holds `entries` (a JSON object), with an
-/// empty `last_launched` when `map` is another one.
 fn file_with(map: &str, entries: &str) -> String {
     let last_launched = if map == "last_launched" {
         ""

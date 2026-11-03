@@ -2,11 +2,8 @@ use jiff::{SignedDuration, Timestamp};
 
 use crate::bundle_id::BundleId;
 
-/// `mdls -raw` prints dates as `2026-11-03 06:45:44 +0000`.
 const MDLS_DATE_FORMAT: &str = "%Y-%m-%d %H:%M:%S %z";
 const MDLS_NULL: &str = "(null)";
-/// SUMMARY.md rule 4: this many Spotlight dates within `MIGRATION_WINDOW`
-/// mark an OS update or migration that re-stamped them.
 const MIGRATION_BATCH_SIZE: usize = 5;
 const MIGRATION_WINDOW: SignedDuration = SignedDuration::from_secs(5);
 
@@ -16,7 +13,6 @@ const MIGRATION_WINDOW: SignedDuration = SignedDuration::from_secs(5);
 pub struct SpotlightSeed(Timestamp);
 
 impl SpotlightSeed {
-    /// For `log::decode`, which applies the per-entry checks itself.
     pub(super) fn from_log(at: Timestamp) -> Self {
         Self(at)
     }
@@ -34,8 +30,6 @@ pub fn parse_mdls(stdout: &str) -> Option<Timestamp> {
     Timestamp::strptime(MDLS_DATE_FORMAT, text).ok()
 }
 
-/// True when `MIGRATION_BATCH_SIZE` dates fall within `MIGRATION_WINDOW`,
-/// both ends included.
 pub fn is_migration_batch(dates: &[Timestamp]) -> bool {
     let mut sorted = dates.to_vec();
     sorted.sort_unstable();
@@ -50,12 +44,9 @@ pub fn is_migration_batch(dates: &[Timestamp]) -> bool {
 #[derive(Debug)]
 pub struct SaneSeeds {
     pub seeds: Vec<(BundleId, SpotlightSeed)>,
-    /// The surviving dates formed a migration batch, so all were dropped.
     pub migration_batch: bool,
 }
 
-/// Drops dates after `now`, then drops every date if the rest form a
-/// migration batch (SUMMARY.md rule 4 says "entirely").
 pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) -> SaneSeeds {
     let past: Vec<(BundleId, Timestamp)> = readings
         .into_iter()

@@ -154,7 +154,6 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-/// Debug builds read `DOCKMOSS_FAST_FORWARD` (1, 10, 100 or 1000).
 #[cfg(debug_assertions)]
 fn fast_forward() -> FastForward {
     const VARIABLE: &str = "DOCKMOSS_FAST_FORWARD";
@@ -174,7 +173,6 @@ fn fast_forward() -> FastForward {
     parsed.unwrap_or_default()
 }
 
-/// Release builds never read the environment for this.
 #[cfg(not(debug_assertions))]
 fn fast_forward() -> FastForward {
     FastForward::X1
@@ -247,9 +245,6 @@ mod launch_log_writer {
         fast_forward: FastForward,
     ) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
-        // Only a first run sends to this thread from within it (the Spotlight
-        // read's reply). Holding no sender otherwise lets the thread see
-        // Disconnected once every other sender is gone.
         let seed_reply = log.baseline_at().is_none().then(|| inbox.clone());
         let writer = Writer {
             path,
@@ -268,8 +263,6 @@ mod launch_log_writer {
         Ok(inbox)
     }
 
-    /// The only owner of the launch log. Saves it on a debounce, and
-    /// recomputes growth on every change and on a timer.
     struct Writer {
         path: PathBuf,
         state: UsageState,
@@ -278,7 +271,6 @@ mod launch_log_writer {
         fast_forward: FastForward,
         thresholds: Thresholds,
         watcher: Option<Channel<Vec<AppGrowth>>>,
-        /// The last frame sent to `watcher`.
         last_sent: Option<Vec<AppGrowth>>,
         next_recompute: Instant,
     }
@@ -419,7 +411,6 @@ mod launch_log_writer {
         }
     }
 
-    /// `bundle.id=0.14/Fuzz ...`, for the debug log.
     fn summarize(frame: &[AppGrowth]) -> String {
         frame
             .iter()
@@ -435,8 +426,6 @@ mod launch_log_writer {
             .join(" ")
     }
 
-    /// Reads each app's Spotlight date on its own thread, so the usage
-    /// thread keeps recording while `mdls` runs.
     fn spawn_seed_read(apps: Vec<DockApp>, reply: Sender<WriterMessage>) -> std::io::Result<()> {
         std::thread::Builder::new()
             .name("spotlight-seed".into())
@@ -692,12 +681,10 @@ mod dock_tracker {
     fn order_overlay(app: &AppHandle, visibility: Visibility) {
         let main = app.clone();
         let scheduled = app.run_on_main_thread(move || {
-            // No retry: run_on_main_thread always runs this on the main thread.
             let Some(mtm) = macos::MainThreadMarker::new() else {
                 tracing::warn!("overlay ordering ran off the main thread");
                 return;
             };
-            // No retry: with the window gone there is nothing left to order.
             let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
                 tracing::warn!("overlay window is gone");
                 return;

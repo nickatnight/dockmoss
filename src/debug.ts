@@ -12,11 +12,6 @@ interface Outline {
   label: HTMLSpanElement;
 }
 
-/**
- * Outlines each Dock icon and labels it with its overgrowth and stage.
- * Bundle IDs come from other apps' Info.plist files, so they are used only
- * as map keys, and labels are set through `textContent`.
- */
 export async function outlineDockItems(root: HTMLElement): Promise<void> {
   const layer = document.createElement("div");
   layer.className = "debug-layer";

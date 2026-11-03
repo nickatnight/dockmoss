@@ -1,6 +1,5 @@
 use serde::Serialize;
 
-/// Longer IDs are refused where they enter, so the log never holds one.
 const MAX_BYTES: usize = 255;
 
 /// A macOS bundle identifier such as `com.apple.Safari`: 1 to 255 bytes.

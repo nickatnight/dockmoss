@@ -122,8 +122,6 @@ struct FileVersion {
     version: u64,
 }
 
-/// Every value is read as a `Value` and checked on its own, so one bad
-/// entry is dropped instead of failing the file.
 #[derive(Deserialize)]
 struct FileV1 {
     #[serde(default)]

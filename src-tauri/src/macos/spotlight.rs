@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 const MDLS: &str = "/usr/bin/mdls";
 const TIMEOUT: Duration = Duration::from_secs(2);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-/// A date line is 25 bytes; anything longer than this is not one.
 const MAX_STDOUT_BYTES: u64 = 4096;
 
 /// Runs `mdls -raw -name kMDItemLastUsedDate <path>` and returns its stdout:

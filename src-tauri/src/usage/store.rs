@@ -49,8 +49,6 @@ pub fn load_or_set_aside(path: &Path, now: Timestamp) -> LaunchLog {
     }
 }
 
-/// The next save rewrites the file without the dropped entries, so the
-/// bytes as read are copied to `.dropped` first.
 fn keep_as_read(path: &Path, bytes: &[u8]) {
     let copy = sibling(path, ".dropped");
     match write_private(&copy, bytes) {

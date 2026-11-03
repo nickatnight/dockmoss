@@ -26,13 +26,10 @@ pub struct AppGrowth {
     pub stage: Stage,
 }
 
-/// What an update changed. A log change can always move growth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Change {
     Unchanged,
-    /// Growth may have moved, but the log is the same.
     Growth,
-    /// The log changed, so it needs saving, and growth may have moved.
     Log,
 }
 
@@ -53,7 +50,6 @@ pub enum DockUpdate {
     Applied(Change),
 }
 
-/// Counts for the first-run log line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SeedReport {
     pub dock_apps: usize,
@@ -62,7 +58,6 @@ pub struct SeedReport {
     pub migration_batch: bool,
 }
 
-/// Everything the usage thread knows. Only that thread holds one.
 #[derive(Debug)]
 pub struct UsageState {
     log: LaunchLog,
@@ -85,8 +80,6 @@ impl UsageState {
         &self.log
     }
 
-    /// Records a launch, activation or quit at `at`. Apps running at
-    /// startup are passed as `Launched`.
     pub fn used(&mut self, bundle_id: BundleId, at: Timestamp, kind: AppEventKind) -> Change {
         let running_changed = match kind {
             AppEventKind::Launched | AppEventKind::Activated => {
@@ -178,8 +171,6 @@ impl UsageState {
             .collect()
     }
 
-    /// SUMMARY.md rule 5: a listed app with no launch, seed or first-seen
-    /// time is first seen `now`. Returns whether any was.
     fn first_see_new_apps(&mut self, now: Timestamp) -> bool {
         let mut added = false;
         for app in &self.dock {

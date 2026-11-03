@@ -102,6 +102,14 @@ fn five_dates_within_five_seconds_are_a_migration_batch() {
             true,
         ),
         (
+            "unsorted, an hour apart",
+            seconds_after(
+                start,
+                &[4 * 3_600_000, 0, 3 * 3_600_000, 3_600_000, 2 * 3_600_000],
+            ),
+            false,
+        ),
+        (
             "a cluster of 5 inside 20 spread dates",
             cluster_in_spread,
             true,
@@ -185,14 +193,14 @@ fn a_migration_batch_drops_every_seed_including_those_outside_it() {
 
 #[test]
 fn future_dates_do_not_count_toward_a_batch() {
-    let mut readings: Vec<_> = seconds_after("2026-09-01T10:00:00Z", &[0, 1_000, 2_000, 3_000])
+    let mut readings: Vec<_> = seconds_after("2026-11-03T07:59:56Z", &[0, 1_000, 2_000, 3_000])
         .into_iter()
         .enumerate()
         .map(|(n, date)| (id(&format!("com.example.app{n}")), Some(date)))
         .collect();
-    readings.push((id("com.example.future"), Some(at("2027-09-01T10:00:00Z"))));
+    readings.push((id("com.example.future"), Some(at("2026-11-03T08:00:01Z"))));
 
     let sane = sane_seeds(readings, at(NOW));
 
-    assert_eq!(kept(&sane).map(|seeds| seeds.len()), Some(4));
+    assert_eq!(kept(&sane).map(|seeds| seeds.len()), Some(4), "{sane:?}");
 }

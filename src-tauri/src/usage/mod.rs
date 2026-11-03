@@ -7,6 +7,9 @@ mod schedule;
 mod store;
 
 pub use log::LaunchLog;
+pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
+pub use schedule::SaveSchedule;
+pub use store::{load, save};
 
 #[derive(Debug, thiserror::Error)]
 pub enum UsageError {

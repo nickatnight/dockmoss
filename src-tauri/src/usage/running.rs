@@ -8,6 +8,20 @@ pub struct RunningApp {
     pub regular: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppEventKind {
+    Launched,
+    Activated,
+    Terminated,
+}
+
+/// An `NSWorkspace` notification about one app. Each kind counts as use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppEvent {
+    pub kind: AppEventKind,
+    pub app: RunningApp,
+}
+
 /// The bundle ID to record for `app`, or `None` for an app that cannot be a
 /// Dock app item: one without a bundle ID, or an agent or background helper
 /// (this app runs as an accessory, so it is skipped too).

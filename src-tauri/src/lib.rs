@@ -16,14 +16,6 @@ mod macos;
 mod tracker;
 mod tray;
 mod trust;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        unused_imports,
-        reason = "the launch log is wired to the workspace observers in task 5 of job 007"
-    )
-)]
 mod usage;
 
 pub use error::Error;
@@ -31,16 +23,21 @@ pub use error::Error;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use jiff::Timestamp;
 use tauri::tray::TrayIcon;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_log::log::LevelFilter;
 
 use commands::{TrackerInbox, TrackerMessage};
 use geometry::Display;
+use launch_log_writer::{LaunchLogInbox, WriterMessage};
 use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
+const LAUNCH_LOG_FILE: &str = "launch_log.json";
+/// How long quitting waits for the launch log's last save.
+const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
     LevelFilter::Debug
@@ -52,13 +49,13 @@ const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
 ///
 /// # Panics
 ///
-/// Panics if the Tauri runtime fails to start.
+/// Panics if the Tauri runtime fails to build.
 pub fn run() {
     #[expect(
         clippy::expect_used,
-        reason = "startup invariant: the runtime starts with the context built into the binary"
+        reason = "startup invariant: the runtime builds with the context built into the binary"
     )]
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)
@@ -84,6 +81,7 @@ pub fn run() {
             )]
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
+            start_launch_log(app.handle(), mtm)?;
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
                 dock_level = levels.dock,
@@ -111,8 +109,165 @@ pub fn run() {
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("tauri runtime starts with the bundled context");
+        .build(tauri::generate_context!())
+        .expect("tauri runtime builds with the bundled context");
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            flush_launch_log(app);
+        }
+    });
+}
+
+/// Loads the launch log, starts its writer, records every app running now
+/// as used now, then records each launch, activation and quit from here on.
+fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
+    let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
+    let log = usage::load(&path, Timestamp::now());
+    let entries = log.len();
+    let inbox = launch_log_writer::spawn(path.clone(), log)?;
+    let now = Timestamp::now();
+    let mut running = 0_usize;
+    for bundle_id in macos::workspace::running_apps(mtm)
+        .into_iter()
+        .filter_map(usage::tracked_bundle_id)
+    {
+        tracing::debug!(bundle_id = bundle_id.as_str(), "running at startup");
+        if inbox
+            .send(WriterMessage::Used { bundle_id, at: now })
+            .is_err()
+        {
+            tracing::warn!("running apps not recorded: the launch log writer stopped");
+            break;
+        }
+        running += 1;
+    }
+    let events = inbox.clone();
+    macos::workspace::on_app_events(move |event| record_app_event(&events, event), mtm);
+    app.manage(LaunchLogInbox(inbox));
+    tracing::info!(
+        path = %path.display(),
+        entries,
+        running_apps = running,
+        "launch log started"
+    );
+    Ok(())
+}
+
+fn record_app_event(inbox: &mpsc::Sender<WriterMessage>, event: usage::AppEvent) {
+    let kind = event.kind;
+    let Some(bundle_id) = usage::tracked_bundle_id(event.app) else {
+        return;
+    };
+    tracing::debug!(bundle_id = bundle_id.as_str(), ?kind, "app used");
+    let used = WriterMessage::Used {
+        bundle_id,
+        at: Timestamp::now(),
+    };
+    if inbox.send(used).is_err() {
+        tracing::warn!(?kind, "app use not recorded: the launch log writer stopped");
+    }
+}
+
+/// Saves any unsaved launch log change before the process exits, waiting at
+/// most `FLUSH_TIMEOUT`, so the last half second of app switches survives a
+/// quit from the tray.
+fn flush_launch_log(app: &AppHandle) {
+    let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
+        return;
+    };
+    let (ack, acked) = mpsc::channel();
+    if inbox.0.send(WriterMessage::Flush(ack)).is_err() {
+        tracing::warn!("launch log not flushed on quit: the writer stopped");
+        return;
+    }
+    match acked.recv_timeout(FLUSH_TIMEOUT) {
+        Ok(()) => tracing::debug!("launch log flushed on quit"),
+        Err(error) => tracing::warn!(%error, "launch log flush on quit not confirmed"),
+    }
+}
+
+mod launch_log_writer {
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+    use std::time::Instant;
+
+    use jiff::Timestamp;
+
+    use crate::bundle_id::BundleId;
+    use crate::usage::{self, LaunchLog, SaveSchedule};
+
+    pub enum WriterMessage {
+        Used {
+            bundle_id: BundleId,
+            at: Timestamp,
+        },
+        /// Save now if anything is unsaved, then acknowledge.
+        Flush(Sender<()>),
+    }
+
+    pub struct LaunchLogInbox(pub Sender<WriterMessage>);
+
+    /// Starts the `launch-log` thread, the only owner of `log`.
+    pub fn spawn(path: PathBuf, log: LaunchLog) -> std::io::Result<Sender<WriterMessage>> {
+        let (inbox, messages) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("launch-log".into())
+            .spawn(move || write_launch_log(&path, log, &messages))?;
+        Ok(inbox)
+    }
+
+    /// Blocks while nothing is unsaved, so an idle log costs no wakeups.
+    fn write_launch_log(path: &Path, mut log: LaunchLog, messages: &Receiver<WriterMessage>) {
+        let mut schedule = SaveSchedule::default();
+        loop {
+            let message = match schedule.deadline() {
+                None => messages.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                Some(deadline) => {
+                    messages.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                }
+            };
+            match message {
+                Ok(WriterMessage::Used { bundle_id, at }) => {
+                    if log.record(bundle_id, at) {
+                        schedule.changed(Instant::now());
+                    }
+                }
+                Ok(WriterMessage::Flush(ack)) => {
+                    if schedule.deadline().is_some() {
+                        save(path, &log, &mut schedule, "flush");
+                    }
+                    if ack.send(()).is_err() {
+                        tracing::debug!("launch log flushed after the quit stopped waiting");
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    if schedule.deadline().is_some() {
+                        save(path, &log, &mut schedule, "disconnected");
+                    }
+                    tracing::debug!("launch log writer stopped: no senders left");
+                    return;
+                }
+            }
+            if schedule.is_due(Instant::now()) {
+                save(path, &log, &mut schedule, "deadline");
+            }
+        }
+    }
+
+    /// `trigger` names what asked for the save, for the debug log.
+    fn save(path: &Path, log: &LaunchLog, schedule: &mut SaveSchedule, trigger: &'static str) {
+        match usage::save(path, log) {
+            Ok(()) => {
+                schedule.saved();
+                tracing::debug!(entries = log.len(), trigger, "launch log saved");
+            }
+            Err(error) => {
+                schedule.save_failed(Instant::now());
+                tracing::warn!(%error, trigger, "launch log not saved; retrying in 5 s");
+            }
+        }
+    }
 }
 
 fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {

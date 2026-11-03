@@ -23,6 +23,13 @@ pub struct LaunchLog {
     baseline_at: Option<Timestamp>,
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "slice 8 reads the log for growth and applies the first-run baseline"
+    )
+)]
 impl LaunchLog {
     pub fn last_launched(&self, bundle_id: &BundleId) -> Option<Timestamp> {
         self.last_launched.get(bundle_id).copied()
@@ -35,7 +42,9 @@ impl LaunchLog {
     pub fn set_baseline_at(&mut self, at: Timestamp) {
         self.baseline_at = Some(at);
     }
+}
 
+impl LaunchLog {
     pub fn len(&self) -> usize {
         self.last_launched.len()
     }

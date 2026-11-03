@@ -51,7 +51,10 @@ pub enum SaneSeeds {
 pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) -> SaneSeeds {
     let past: Vec<(BundleId, Timestamp)> = readings
         .into_iter()
-        .filter_map(|(bundle_id, date)| Some((bundle_id, date.filter(|date| *date <= now)?)))
+        .filter_map(|(bundle_id, date)| {
+            let past_date = date.filter(|date| *date <= now)?;
+            Some((bundle_id, past_date))
+        })
         .collect();
     let dates: Vec<Timestamp> = past.iter().map(|(_, date)| *date).collect();
     if is_migration_batch(&dates) {

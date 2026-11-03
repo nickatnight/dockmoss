@@ -46,9 +46,10 @@ export async function outlineDockItems(root: HTMLElement): Promise<void> {
       box.style.width = `${rect.width}px`;
       box.style.height = `${rect.height}px`;
       const app = growth.get(bundleId);
-      label.textContent = app
-        ? `${app.overgrowth.toFixed(2)} ${app.stage}`
-        : "";
+      const text = app ? `${app.overgrowth.toFixed(2)} ${app.stage}` : "";
+      if (label.textContent !== text) {
+        label.textContent = text;
+      }
     });
   };
 

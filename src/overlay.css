@@ -37,6 +37,12 @@ body {
   background: rgb(0 0 0 / 0.7);
 }
 
+/* Every second label sits one line higher, so labels on one row are two
+   tiles apart, wider than the longest label ("1.00 overgrown"). */
+.debug-dock-item:nth-child(even) .debug-dock-item-label {
+  margin-bottom: calc(2px + 1.3em);
+}
+
 .debug-dock-item-label:empty {
   display: none;
 }

@@ -212,7 +212,8 @@ fn flush_launch_log(app: &AppHandle) {
 mod launch_log_writer {
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-    use std::time::Instant;
+    use std::thread::JoinHandle;
+    use std::time::{Duration, Instant};
 
     use jiff::Timestamp;
     use tauri::ipc::Channel;
@@ -232,12 +233,17 @@ mod launch_log_writer {
             kind: AppEventKind,
         },
         DockApps(Vec<DockApp>),
-        SpotlightRead(Vec<(BundleId, Option<Timestamp>)>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
         Flush(Sender<()>),
     }
 
     pub struct LaunchLogInbox(pub Sender<WriterMessage>);
+
+    type Readings = Vec<(BundleId, Option<Timestamp>)>;
+
+    /// How often the writer checks whether the first-run Spotlight read has
+    /// finished, while one is running.
+    const SEED_READ_POLL: Duration = Duration::from_millis(100);
 
     pub fn spawn(
         path: PathBuf,
@@ -245,12 +251,11 @@ mod launch_log_writer {
         fast_forward: FastForward,
     ) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
-        let seed_reply = log.baseline_at().is_none().then(|| inbox.clone());
         let writer = Writer {
             path,
             state: UsageState::new(log),
             schedule: SaveSchedule::default(),
-            seed_reply,
+            seed_read: None,
             fast_forward,
             thresholds: Thresholds::default(),
             watcher: None,
@@ -267,7 +272,7 @@ mod launch_log_writer {
         path: PathBuf,
         state: UsageState,
         schedule: SaveSchedule,
-        seed_reply: Option<Sender<WriterMessage>>,
+        seed_read: Option<JoinHandle<Readings>>,
         fast_forward: FastForward,
         thresholds: Thresholds,
         watcher: Option<Channel<Vec<AppGrowth>>>,
@@ -278,10 +283,14 @@ mod launch_log_writer {
     impl Writer {
         fn run(mut self, messages: &Receiver<WriterMessage>) {
             loop {
-                let deadline = self
+                let mut deadline = self
                     .schedule
                     .deadline()
                     .map_or(self.next_recompute, |save| save.min(self.next_recompute));
+                if self.seed_read.is_some() {
+                    let now = Instant::now();
+                    deadline = deadline.min(now.checked_add(SEED_READ_POLL).unwrap_or(now));
+                }
                 match messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                     Ok(message) => self.handle(message),
                     Err(RecvTimeoutError::Timeout) => {}
@@ -293,6 +302,7 @@ mod launch_log_writer {
                         return;
                     }
                 }
+                self.collect_seed_read();
                 let now = Instant::now();
                 if self.schedule.is_due(now) {
                     self.save(SaveTrigger::Deadline);
@@ -319,7 +329,6 @@ mod launch_log_writer {
                         DockUpdate::Applied(change) => self.apply(change),
                     }
                 }
-                WriterMessage::SpotlightRead(readings) => self.finish_seeding(readings),
                 WriterMessage::WatchGrowth(channel) => {
                     self.watcher = Some(channel);
                     self.last_sent = None;
@@ -348,12 +357,11 @@ mod launch_log_writer {
 
         fn start_seed_read(&mut self, apps: Vec<DockApp>) {
             let bundle_ids: Vec<BundleId> = apps.iter().map(|app| app.bundle_id.clone()).collect();
-            let started = match self.seed_reply.take() {
-                Some(reply) => spawn_seed_read(apps, reply),
-                None => Err(std::io::Error::other("the reply channel was already used")),
-            };
-            match started {
-                Ok(()) => tracing::debug!(apps = bundle_ids.len(), "spotlight read started"),
+            match spawn_seed_read(apps) {
+                Ok(read) => {
+                    self.seed_read = Some(read);
+                    tracing::debug!(apps = bundle_ids.len(), "spotlight read started");
+                }
                 Err(error) => {
                     tracing::warn!(%error, "spotlight read not started; every Dock app starts now");
                     self.finish_seeding(bundle_ids.into_iter().map(|id| (id, None)).collect());
@@ -362,7 +370,23 @@ mod launch_log_writer {
             self.recompute();
         }
 
-        fn finish_seeding(&mut self, readings: Vec<(BundleId, Option<Timestamp>)>) {
+        fn collect_seed_read(&mut self) {
+            if !self.seed_read.as_ref().is_some_and(JoinHandle::is_finished) {
+                return;
+            }
+            let Some(read) = self.seed_read.take() else {
+                return;
+            };
+            let readings = read.join().unwrap_or_else(|_| {
+                tracing::warn!(
+                    "spotlight read stopped without a result; every Dock app starts now"
+                );
+                Vec::new()
+            });
+            self.finish_seeding(readings);
+        }
+
+        fn finish_seeding(&mut self, readings: Readings) {
             let Some(report) = self.state.seeded(readings, Timestamp::now()) else {
                 tracing::warn!("spotlight dates arrived with no first run in flight; ignored");
                 return;
@@ -426,12 +450,11 @@ mod launch_log_writer {
             .join(" ")
     }
 
-    fn spawn_seed_read(apps: Vec<DockApp>, reply: Sender<WriterMessage>) -> std::io::Result<()> {
+    fn spawn_seed_read(apps: Vec<DockApp>) -> std::io::Result<JoinHandle<Readings>> {
         std::thread::Builder::new()
             .name("spotlight-seed".into())
             .spawn(move || {
-                let readings = apps
-                    .into_iter()
+                apps.into_iter()
                     .map(|app| {
                         let date = macos::spotlight::last_used_date(&app.app_path)
                             .as_deref()
@@ -444,12 +467,8 @@ mod launch_log_writer {
                         );
                         (app.bundle_id, date)
                     })
-                    .collect();
-                if reply.send(WriterMessage::SpotlightRead(readings)).is_err() {
-                    tracing::warn!("spotlight dates not passed on: the usage thread stopped");
-                }
-            })?;
-        Ok(())
+                    .collect()
+            })
     }
 
     #[derive(Debug, Clone, Copy)]

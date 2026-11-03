@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+mod jitter;
+
+pub use jitter::jitter;
+
 /// The smallest Fuzz threshold, in days. It is larger than the largest
 /// jitter (1 day), so jitter alone never puts moss on a just-used app.
 const MIN_FUZZ_DAYS: u32 = 2;

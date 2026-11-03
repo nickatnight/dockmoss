@@ -15,7 +15,11 @@ mod error;
 mod geometry;
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "growth is wired to the tracker in slice 8")
+    expect(
+        dead_code,
+        unused_imports,
+        reason = "growth and its re-exports are wired to the tracker in slice 8"
+    )
 )]
 #[deny(
     clippy::expect_used,

@@ -21,6 +21,17 @@ fn overgrowth_clamps_to_zero_one_and_maps_nan_to_zero() {
 }
 
 #[test]
+fn overgrowth_of_negative_zero_is_positive_zero() {
+    let zero = Overgrowth::new(-0.0);
+
+    assert!(zero.get().is_sign_positive(), "{:?}", zero.get());
+    assert_eq!(
+        serde_json::to_string(&zero).expect("Overgrowth serializes to JSON"),
+        "0.0"
+    );
+}
+
+#[test]
 fn overgrowth_serializes_as_a_bare_number() {
     let json = serde_json::to_value(Overgrowth::new(0.5)).expect("Overgrowth serializes to JSON");
 

@@ -16,11 +16,13 @@ const MAX_OVERGROWN_DAYS: u32 = 3650;
 pub struct Overgrowth(f32);
 
 impl Overgrowth {
+    /// Clamps to 0..=1. NaN and every value at or below zero, `-0.0`
+    /// included, become `+0.0`.
     pub fn new(value: f32) -> Self {
-        if value.is_nan() {
+        if value.is_nan() || value <= 0.0 {
             Self(0.0)
         } else {
-            Self(value.clamp(0.0, 1.0))
+            Self(value.min(1.0))
         }
     }
 

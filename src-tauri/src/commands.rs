@@ -1,10 +1,12 @@
 use std::sync::mpsc::Sender;
 
-use tauri::State;
 use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
 
 use crate::Error;
 use crate::dock::DockItem;
+use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
+use crate::usage::AppGrowth;
 
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
@@ -26,5 +28,21 @@ pub async fn watch_dock(
         .send(TrackerMessage::Watch(on_items))
         .map_err(|_| Error::TrackerStopped)?;
     tracing::debug!("dock watcher subscribed");
+    Ok(())
+}
+
+/// Streams each Dock app's growth to `on_growth`, starting with the current
+/// frame. A later call replaces the channel. `usage_stopped` when usage
+/// tracking did not start or its thread has stopped.
+#[tauri::command]
+pub async fn watch_growth(on_growth: Channel<Vec<AppGrowth>>, app: AppHandle) -> Result<(), Error> {
+    let inbox = app
+        .try_state::<LaunchLogInbox>()
+        .ok_or(Error::UsageStopped)?;
+    inbox
+        .0
+        .send(WriterMessage::WatchGrowth(on_growth))
+        .map_err(|_| Error::UsageStopped)?;
+    tracing::debug!("growth watcher subscribing");
     Ok(())
 }

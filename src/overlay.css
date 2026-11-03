@@ -23,3 +23,20 @@ body {
 .debug-dock-item:nth-child(even) {
   border-color: #00e0ff;
 }
+
+.debug-dock-item-label {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 2px;
+  padding: 0 3px;
+  white-space: nowrap;
+  font: 10px/1.3 ui-monospace, monospace;
+  color: #fff;
+  background: rgb(0 0 0 / 0.7);
+}
+
+.debug-dock-item-label:empty {
+  display: none;
+}

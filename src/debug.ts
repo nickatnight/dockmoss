@@ -1,19 +1,41 @@
-import { type DockItem, isCommandError, watchDock } from "./ipc";
+import {
+  type AppGrowth,
+  type BundleId,
+  type DockItem,
+  isCommandError,
+  watchDock,
+  watchGrowth,
+} from "./ipc";
 
+interface Outline {
+  box: HTMLDivElement;
+  label: HTMLSpanElement;
+}
+
+/**
+ * Outlines each Dock icon and labels it with its overgrowth and stage.
+ * Bundle IDs come from other apps' Info.plist files, so they are used only
+ * as map keys, and labels are set through `textContent`.
+ */
 export async function outlineDockItems(root: HTMLElement): Promise<void> {
   const layer = document.createElement("div");
   layer.className = "debug-layer";
   layer.setAttribute("aria-hidden", "true");
   root.append(layer);
 
-  const outlines: HTMLDivElement[] = [];
+  const outlines: Outline[] = [];
   let latest: DockItem[] = [];
+  let growth = new Map<BundleId, AppGrowth>();
   let frameRequested = false;
 
-  const addOutline = (): HTMLDivElement => {
-    const outline = document.createElement("div");
-    outline.className = "debug-dock-item";
-    layer.append(outline);
+  const addOutline = (): Outline => {
+    const box = document.createElement("div");
+    box.className = "debug-dock-item";
+    const label = document.createElement("span");
+    label.className = "debug-dock-item-label";
+    box.append(label);
+    layer.append(box);
+    const outline = { box, label };
     outlines.push(outline);
     return outline;
   };
@@ -21,26 +43,46 @@ export async function outlineDockItems(root: HTMLElement): Promise<void> {
   const draw = (): void => {
     frameRequested = false;
     while (outlines.length > latest.length) {
-      outlines.pop()?.remove();
+      outlines.pop()?.box.remove();
     }
-    latest.forEach(({ rect }, index) => {
-      const outline = outlines[index] ?? addOutline();
-      outline.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
-      outline.style.width = `${rect.width}px`;
-      outline.style.height = `${rect.height}px`;
+    latest.forEach(({ bundleId, rect }, index) => {
+      const { box, label } = outlines[index] ?? addOutline();
+      box.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
+      const app = growth.get(bundleId);
+      label.textContent = app
+        ? `${app.overgrowth.toFixed(2)} ${app.stage}`
+        : "";
     });
   };
 
-  try {
-    await watchDock((items) => {
+  const requestDraw = (): void => {
+    if (!frameRequested) {
+      frameRequested = true;
+      requestAnimationFrame(draw);
+    }
+  };
+
+  const [dock, growthWatch] = await Promise.allSettled([
+    watchDock((items) => {
       latest = items;
-      if (!frameRequested) {
-        frameRequested = true;
-        requestAnimationFrame(draw);
-      }
-    });
-  } catch (error) {
-    const kind = isCommandError(error) ? error.kind : "unknown";
-    console.warn("dock items not watched", kind, error);
+      requestDraw();
+    }),
+    watchGrowth((frame) => {
+      growth = new Map(frame.map((app) => [app.bundleId, app]));
+      requestDraw();
+    }),
+  ]);
+  if (dock.status === "rejected") {
+    warnNotWatched("dock items", dock.reason);
   }
+  if (growthWatch.status === "rejected") {
+    warnNotWatched("growth", growthWatch.reason);
+  }
+}
+
+function warnNotWatched(what: string, error: unknown): void {
+  const kind = isCommandError(error) ? error.kind : "unknown";
+  console.warn(`${what} not watched`, kind, error);
 }

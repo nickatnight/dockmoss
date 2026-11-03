@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlay",
-  "description": "The overlay only renders. It may listen for events from Rust and subscribe to the Dock's items, and nothing else.",
+  "description": "The overlay only renders. It may listen for events from Rust and subscribe to the Dock's items and their growth, and nothing else.",
   "windows": ["overlay"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-watch-dock"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-watch-dock", "allow-watch-growth"]
 }

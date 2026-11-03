@@ -15,13 +15,22 @@ export interface DockItem {
   rect: LogicalRect;
 }
 
+/** Mirrors `usage::AppGrowth`: one entry per Dock app, in Dock order. */
+export interface AppGrowth {
+  bundleId: BundleId;
+  /** 0 to 1. */
+  overgrowth: number;
+  stage: "clean" | "fuzz" | "patchy" | "overgrown";
+}
+
 // error/tests.rs fails when this list and Error::kind() disagree.
 export type ErrorKind =
   | "tauri"
   | "no_main_display"
   | "overlay"
   | "dock"
-  | "tracker_stopped";
+  | "tracker_stopped"
+  | "usage_stopped";
 
 export interface CommandError {
   kind: ErrorKind;
@@ -46,4 +55,13 @@ export function watchDock(
   const channel = new Channel<DockItem[]>();
   channel.onmessage = onItems;
   return invoke<void>("watch_dock", { onItems: channel });
+}
+
+/** Calls `onGrowth` with every Dock app's growth, then again on every change. */
+export function watchGrowth(
+  onGrowth: (growth: AppGrowth[]) => void,
+): Promise<void> {
+  const channel = new Channel<AppGrowth[]>();
+  channel.onmessage = onGrowth;
+  return invoke<void>("watch_growth", { onGrowth: channel });
 }

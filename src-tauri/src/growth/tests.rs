@@ -129,3 +129,20 @@ fn fast_forward_factors_are_1_10_100_1000() {
 fn fast_forward_defaults_to_real_time() {
     assert_eq!(FastForward::default(), FastForward::X1);
 }
+
+#[test]
+fn fast_forward_from_factor_accepts_only_the_four_speeds() {
+    let cases = [
+        (1, Some(FastForward::X1)),
+        (10, Some(FastForward::X10)),
+        (100, Some(FastForward::X100)),
+        (1000, Some(FastForward::X1000)),
+        (0, None),
+        (2, None),
+        (50, None),
+        (10_000, None),
+    ];
+    for (factor, expected) in cases {
+        assert_eq!(FastForward::from_factor(factor), expected, "{factor}");
+    }
+}

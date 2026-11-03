@@ -36,6 +36,16 @@ pub enum Change {
     Log,
 }
 
+impl Change {
+    pub fn saves(self) -> bool {
+        self == Self::Log
+    }
+
+    pub fn moves_growth(self) -> bool {
+        self != Self::Unchanged
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DockUpdate {
     /// First run: read these apps' Spotlight dates, then call `seeded`.

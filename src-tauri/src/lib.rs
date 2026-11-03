@@ -3,13 +3,6 @@ mod commands;
 mod dock;
 mod error;
 mod geometry;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "growth is computed on the usage thread once slice 8 wires it"
-    )
-)]
 mod growth;
 mod macos;
 mod tracker;
@@ -29,6 +22,7 @@ use tauri_plugin_log::log::LevelFilter;
 
 use commands::{TrackerInbox, TrackerMessage};
 use geometry::Display;
+use growth::FastForward;
 use launch_log_writer::{LaunchLogInbox, WriterMessage};
 use tracker::Visibility;
 use trust::TrustState;
@@ -56,7 +50,10 @@ pub fn run() {
                 .level_for("dockmoss_lib", APP_LOG_LEVEL)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![commands::watch_dock])
+        .invoke_handler(tauri::generate_handler![
+            commands::watch_dock,
+            commands::watch_growth
+        ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let trust = macos::ax::request_trust();
@@ -75,7 +72,9 @@ pub fn run() {
             )]
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
-            start_launch_log(app.handle(), mtm)?;
+            if let Err(error) = start_launch_log(app.handle(), mtm) {
+                tracing::warn!(%error, "usage tracking not started; running without growth");
+            }
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
                 dock_level = levels.dock,
@@ -120,7 +119,9 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
     let log = usage::load_or_set_aside(&path, Timestamp::now());
     let entries = log.len();
-    let inbox = launch_log_writer::spawn(path.clone(), log)?;
+    let first_run = log.baseline_at().is_none();
+    let fast_forward = fast_forward();
+    let inbox = launch_log_writer::spawn(path.clone(), log, fast_forward)?;
     let now = Timestamp::now();
     let mut running = 0_usize;
     for bundle_id in macos::workspace::running_apps(mtm)
@@ -128,10 +129,12 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
         .filter_map(usage::tracked_bundle_id)
     {
         tracing::debug!(bundle_id = bundle_id.as_str(), "running at startup");
-        if inbox
-            .send(WriterMessage::Used { bundle_id, at: now })
-            .is_err()
-        {
+        let used = WriterMessage::Used {
+            bundle_id,
+            at: now,
+            kind: usage::AppEventKind::Launched,
+        };
+        if inbox.send(used).is_err() {
             tracing::warn!("running apps not recorded: the launch log writer stopped");
             break;
         }
@@ -144,9 +147,37 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
         path = %path.display(),
         entries,
         running_apps = running,
+        first_run,
+        fast_forward = fast_forward.factor(),
         "launch log started"
     );
     Ok(())
+}
+
+/// Debug builds read `DOCKMOSS_FAST_FORWARD` (1, 10, 100 or 1000).
+#[cfg(debug_assertions)]
+fn fast_forward() -> FastForward {
+    const VARIABLE: &str = "DOCKMOSS_FAST_FORWARD";
+    let Some(value) = std::env::var_os(VARIABLE) else {
+        return FastForward::X1;
+    };
+    let parsed = value
+        .to_str()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .and_then(FastForward::from_factor);
+    if parsed.is_none() {
+        tracing::warn!(
+            value = %value.to_string_lossy(),
+            "{VARIABLE} is not 1, 10, 100 or 1000; using 1x"
+        );
+    }
+    parsed.unwrap_or_default()
+}
+
+/// Release builds never read the environment for this.
+#[cfg(not(debug_assertions))]
+fn fast_forward() -> FastForward {
+    FastForward::X1
 }
 
 fn record_app_event(inbox: &mpsc::Sender<WriterMessage>, event: usage::AppEvent) {
@@ -158,6 +189,7 @@ fn record_app_event(inbox: &mpsc::Sender<WriterMessage>, event: usage::AppEvent)
     let used = WriterMessage::Used {
         bundle_id,
         at: Timestamp::now(),
+        kind,
     };
     if inbox.send(used).is_err() {
         tracing::warn!(?kind, "app use not recorded: the launch log writer stopped");
@@ -185,61 +217,250 @@ mod launch_log_writer {
     use std::time::Instant;
 
     use jiff::Timestamp;
+    use tauri::ipc::Channel;
 
     use crate::bundle_id::BundleId;
-    use crate::usage::{self, LaunchLog, Recorded, SaveSchedule};
+    use crate::growth::{FastForward, Thresholds};
+    use crate::macos;
+    use crate::usage::{
+        self, AppEventKind, AppGrowth, Change, DockApp, DockUpdate, LaunchLog, SaveSchedule,
+        UsageState,
+    };
 
     pub enum WriterMessage {
-        Used { bundle_id: BundleId, at: Timestamp },
+        Used {
+            bundle_id: BundleId,
+            at: Timestamp,
+            kind: AppEventKind,
+        },
+        DockApps(Vec<DockApp>),
+        SpotlightRead(Vec<(BundleId, Option<Timestamp>)>),
+        WatchGrowth(Channel<Vec<AppGrowth>>),
         Flush(Sender<()>),
     }
 
     pub struct LaunchLogInbox(pub Sender<WriterMessage>);
 
-    pub fn spawn(path: PathBuf, log: LaunchLog) -> std::io::Result<Sender<WriterMessage>> {
+    pub fn spawn(
+        path: PathBuf,
+        log: LaunchLog,
+        fast_forward: FastForward,
+    ) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
+        // Only a first run sends to this thread from within it (the Spotlight
+        // read's reply). Holding no sender otherwise lets the thread see
+        // Disconnected once every other sender is gone.
+        let seed_reply = log.baseline_at().is_none().then(|| inbox.clone());
+        let writer = Writer {
+            path,
+            state: UsageState::new(log),
+            schedule: SaveSchedule::default(),
+            seed_reply,
+            fast_forward,
+            thresholds: Thresholds::default(),
+            watcher: None,
+            last_sent: None,
+            next_recompute: Instant::now(),
+        };
         std::thread::Builder::new()
             .name("launch-log".into())
-            .spawn(move || write_launch_log(&path, log, &messages))?;
+            .spawn(move || writer.run(&messages))?;
         Ok(inbox)
     }
 
-    fn write_launch_log(path: &Path, mut log: LaunchLog, messages: &Receiver<WriterMessage>) {
-        let mut schedule = SaveSchedule::default();
-        loop {
-            let message = match schedule.deadline() {
-                None => messages.recv().map_err(|_| RecvTimeoutError::Disconnected),
-                Some(deadline) => {
-                    messages.recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                }
-            };
-            match message {
-                Ok(WriterMessage::Used { bundle_id, at }) => {
-                    if log.record(bundle_id, at) == Recorded::Changed {
-                        schedule.changed(Instant::now());
+    /// The only owner of the launch log. Saves it on a debounce, and
+    /// recomputes growth on every change and on a timer.
+    struct Writer {
+        path: PathBuf,
+        state: UsageState,
+        schedule: SaveSchedule,
+        seed_reply: Option<Sender<WriterMessage>>,
+        fast_forward: FastForward,
+        thresholds: Thresholds,
+        watcher: Option<Channel<Vec<AppGrowth>>>,
+        /// The last frame sent to `watcher`.
+        last_sent: Option<Vec<AppGrowth>>,
+        next_recompute: Instant,
+    }
+
+    impl Writer {
+        fn run(mut self, messages: &Receiver<WriterMessage>) {
+            loop {
+                let deadline = self
+                    .schedule
+                    .deadline()
+                    .map_or(self.next_recompute, |save| save.min(self.next_recompute));
+                match messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    Ok(message) => self.handle(message),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => {
+                        if self.schedule.deadline().is_some() {
+                            self.save(SaveTrigger::Disconnected);
+                        }
+                        tracing::debug!("launch log writer stopped: no senders left");
+                        return;
                     }
                 }
-                Ok(WriterMessage::Flush(ack)) => {
-                    if schedule.deadline().is_some() {
-                        save(path, &log, &mut schedule, SaveTrigger::Flush);
+                let now = Instant::now();
+                if self.schedule.is_due(now) {
+                    self.save(SaveTrigger::Deadline);
+                }
+                if self.next_recompute <= now {
+                    self.recompute();
+                }
+            }
+        }
+
+        fn handle(&mut self, message: WriterMessage) {
+            match message {
+                WriterMessage::Used {
+                    bundle_id,
+                    at,
+                    kind,
+                } => {
+                    let change = self.state.used(bundle_id, at, kind);
+                    self.apply(change);
+                }
+                WriterMessage::DockApps(apps) => {
+                    match self.state.dock_apps(apps, Timestamp::now()) {
+                        DockUpdate::Seed(apps) => self.start_seed_read(apps),
+                        DockUpdate::Applied(change) => self.apply(change),
+                    }
+                }
+                WriterMessage::SpotlightRead(readings) => self.finish_seeding(readings),
+                WriterMessage::WatchGrowth(channel) => {
+                    self.watcher = Some(channel);
+                    self.last_sent = None;
+                    tracing::debug!("growth watcher subscribed");
+                    self.recompute();
+                }
+                WriterMessage::Flush(ack) => {
+                    if self.schedule.deadline().is_some() {
+                        self.save(SaveTrigger::Flush);
                     }
                     if ack.send(()).is_err() {
                         tracing::debug!("launch log flushed after the quit stopped waiting");
                     }
                 }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    if schedule.deadline().is_some() {
-                        save(path, &log, &mut schedule, SaveTrigger::Disconnected);
-                    }
-                    tracing::debug!("launch log writer stopped: no senders left");
-                    return;
-                }
-            }
-            if schedule.is_due(Instant::now()) {
-                save(path, &log, &mut schedule, SaveTrigger::Deadline);
             }
         }
+
+        fn apply(&mut self, change: Change) {
+            if change.saves() {
+                self.schedule.changed(Instant::now());
+            }
+            if change.moves_growth() {
+                self.recompute();
+            }
+        }
+
+        fn start_seed_read(&mut self, apps: Vec<DockApp>) {
+            let bundle_ids: Vec<BundleId> = apps.iter().map(|app| app.bundle_id.clone()).collect();
+            let started = match self.seed_reply.take() {
+                Some(reply) => spawn_seed_read(apps, reply),
+                None => Err(std::io::Error::other("the reply channel was already used")),
+            };
+            match started {
+                Ok(()) => tracing::debug!(apps = bundle_ids.len(), "spotlight read started"),
+                Err(error) => {
+                    tracing::warn!(%error, "spotlight read not started; every Dock app starts now");
+                    self.finish_seeding(bundle_ids.into_iter().map(|id| (id, None)).collect());
+                }
+            }
+            self.recompute();
+        }
+
+        fn finish_seeding(&mut self, readings: Vec<(BundleId, Option<Timestamp>)>) {
+            let Some(report) = self.state.seeded(readings, Timestamp::now()) else {
+                tracing::warn!("spotlight dates arrived with no first run in flight; ignored");
+                return;
+            };
+            tracing::info!(
+                dock_apps = report.dock_apps,
+                spotlight_dates = report.dates_read,
+                seeds_kept = report.seeds_kept,
+                migration_batch_discarded = report.migration_batch,
+                "first run: dock apps seeded and baselined"
+            );
+            self.apply(Change::Log);
+        }
+
+        fn recompute(&mut self) {
+            let now = Instant::now();
+            self.next_recompute = now
+                .checked_add(usage::recompute_interval(self.fast_forward))
+                .unwrap_or(now);
+            let frame = self
+                .state
+                .growth(Timestamp::now(), &self.thresholds, self.fast_forward);
+            if self.last_sent.as_ref() == Some(&frame) {
+                tracing::debug!(apps = frame.len(), "growth recomputed; unchanged");
+                return;
+            }
+            let Some(watcher) = self.watcher.as_ref() else {
+                tracing::debug!(apps = frame.len(), "growth recomputed with no watcher");
+                return;
+            };
+            let summary = summarize(&frame);
+            match watcher.send(frame.clone()) {
+                Ok(()) => {
+                    tracing::debug!(apps = frame.len(), growth = %summary, "growth sent");
+                    self.last_sent = Some(frame);
+                }
+                Err(error) => {
+                    tracing::debug!(%error, "growth watcher dropped after a failed send");
+                    self.watcher = None;
+                }
+            }
+        }
+
+        fn save(&mut self, trigger: SaveTrigger) {
+            save(&self.path, self.state.log(), &mut self.schedule, trigger);
+        }
+    }
+
+    /// `bundle.id=0.14/Fuzz ...`, for the debug log.
+    fn summarize(frame: &[AppGrowth]) -> String {
+        frame
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{}={:.2}/{:?}",
+                    entry.bundle_id.as_str(),
+                    entry.overgrowth.get(),
+                    entry.stage
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Reads each app's Spotlight date on its own thread, so the usage
+    /// thread keeps recording while `mdls` runs.
+    fn spawn_seed_read(apps: Vec<DockApp>, reply: Sender<WriterMessage>) -> std::io::Result<()> {
+        std::thread::Builder::new()
+            .name("spotlight-seed".into())
+            .spawn(move || {
+                let readings = apps
+                    .into_iter()
+                    .map(|app| {
+                        let date = macos::spotlight::last_used_date(&app.app_path)
+                            .as_deref()
+                            .and_then(usage::parse_mdls);
+                        tracing::debug!(
+                            bundle_id = app.bundle_id.as_str(),
+                            path = %app.app_path.display(),
+                            ?date,
+                            "spotlight date read"
+                        );
+                        (app.bundle_id, date)
+                    })
+                    .collect();
+                if reply.send(WriterMessage::SpotlightRead(readings)).is_err() {
+                    tracing::warn!("spotlight dates not passed on: the usage thread stopped");
+                }
+            })?;
+        Ok(())
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -302,8 +523,10 @@ mod dock_tracker {
     use crate::commands::{TrackerInbox, TrackerMessage};
     use crate::dock::{self, DockItem};
     use crate::geometry::Display;
+    use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
     use crate::tracker::{self, PollRate, Tick, TickLog, Tracker, Visibility};
     use crate::trust::TrustState;
+    use crate::usage::DockApp;
     use crate::{OVERLAY_LABEL, macos, primary_display};
 
     pub(super) fn spawn(
@@ -434,6 +657,9 @@ mod dock_tracker {
         if let Some(visibility) = tick.overlay {
             order_overlay(app, visibility);
         }
+        if let Some(apps) = tick.apps {
+            report_dock_apps(app, apps);
+        }
         let Some(frame) = tick.send else {
             return;
         };
@@ -451,13 +677,27 @@ mod dock_tracker {
         }
     }
 
+    fn report_dock_apps(app: &AppHandle, apps: Vec<DockApp>) {
+        let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
+            tracing::debug!("dock apps changed; usage tracking is off");
+            return;
+        };
+        let bundle_ids: Vec<&str> = apps.iter().map(|app| app.bundle_id.as_str()).collect();
+        tracing::debug!(?bundle_ids, "dock apps changed");
+        if inbox.0.send(WriterMessage::DockApps(apps)).is_err() {
+            tracing::warn!("dock apps not passed on: the usage thread stopped");
+        }
+    }
+
     fn order_overlay(app: &AppHandle, visibility: Visibility) {
         let main = app.clone();
         let scheduled = app.run_on_main_thread(move || {
+            // No retry: run_on_main_thread always runs this on the main thread.
             let Some(mtm) = macos::MainThreadMarker::new() else {
                 tracing::warn!("overlay ordering ran off the main thread");
                 return;
             };
+            // No retry: with the window gone there is nothing left to order.
             let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
                 tracing::warn!("overlay window is gone");
                 return;

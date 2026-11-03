@@ -20,13 +20,6 @@ pub struct LaunchLog {
     baseline_at: Option<Timestamp>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the usage thread reads these for growth once it is wired in slice 8"
-    )
-)]
 impl LaunchLog {
     pub fn last_launched(&self, bundle_id: &BundleId) -> Option<Timestamp> {
         self.last_launched.get(bundle_id).copied()
@@ -55,9 +48,7 @@ impl LaunchLog {
     pub fn set_spotlight_seed(&mut self, bundle_id: BundleId, seed: SpotlightSeed) {
         self.spotlight_seed.insert(bundle_id, seed);
     }
-}
 
-impl LaunchLog {
     pub fn len(&self) -> usize {
         self.last_launched.len()
     }

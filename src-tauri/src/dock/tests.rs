@@ -1,8 +1,10 @@
+use std::cell::Cell;
 use std::path::PathBuf;
 
-use super::{DockItem, RawDockChild, app_items};
+use super::{DockError, DockItem, RawDockChild, app_items, read};
 use crate::bundle_id::BundleId;
 use crate::geometry::{Display, LogicalRect, ScreenRect};
+use crate::trust::Trust;
 
 const PRIMARY_2X: Display = Display {
     physical_x: 0,
@@ -183,4 +185,59 @@ fn dock_item_serializes_in_camel_case() {
             "rect": { "x": 700.5, "y": 920.0, "width": 56.0, "height": 56.0 }
         })
     );
+}
+
+#[test]
+fn two_items_with_one_bundle_id_are_both_kept_in_order() {
+    let left = RawDockChild {
+        app_path: Some(PathBuf::from("/Applications/Visual Studio Code.app")),
+        bundle_id: Some("com.microsoft.VSCode".into()),
+        rect: Some(ScreenRect { x: 640.0, ..ICON }),
+        ..safari()
+    };
+    let right = RawDockChild {
+        rect: Some(ScreenRect { x: 760.0, ..ICON }),
+        ..left.clone()
+    };
+
+    let xs: Vec<(BundleId, f64)> = app_items(vec![left, right], PRIMARY_2X)
+        .into_iter()
+        .map(|item| (item.bundle_id, item.rect.x))
+        .collect();
+
+    let vscode = BundleId::new("com.microsoft.VSCode").expect("non-empty bundle id");
+    assert_eq!(xs, [(vscode.clone(), 640.0), (vscode, 760.0)]);
+}
+
+#[test]
+fn untrusted_read_returns_api_disabled_without_reading() {
+    let called = Cell::new(false);
+
+    let result = read(Trust::Untrusted, || {
+        called.set(true);
+        Ok(vec![safari()])
+    });
+
+    assert_eq!(result, Err(DockError::ApiDisabled));
+    assert!(!called.get(), "the AX read ran while untrusted");
+}
+
+#[test]
+fn trusted_read_passes_the_result_through() {
+    let cases = [
+        ("children", Ok(vec![safari()])),
+        ("error", Err(DockError::CannotComplete)),
+    ];
+
+    for (case, outcome) in cases {
+        let called = Cell::new(false);
+
+        let result = read(Trust::Trusted, || {
+            called.set(true);
+            outcome.clone()
+        });
+
+        assert_eq!(result, outcome, "{case}");
+        assert!(called.get(), "{case}: the AX read did not run");
+    }
 }

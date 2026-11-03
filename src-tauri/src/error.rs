@@ -10,7 +10,7 @@ pub enum Error {
     #[error(transparent)]
     Overlay(#[from] crate::macos::overlay::OverlayError),
     #[error(transparent)]
-    Dock(#[from] crate::macos::dock::DockError),
+    Dock(#[from] crate::dock::DockError),
 }
 
 impl Error {

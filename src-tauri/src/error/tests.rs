@@ -35,7 +35,7 @@ fn overlay_failures_have_the_overlay_kind_and_message() {
 
 #[test]
 fn dock_failures_have_the_dock_kind_and_message() {
-    let json = serde_json::to_value(Error::from(crate::macos::dock::DockError::ApiDisabled))
+    let json = serde_json::to_value(Error::from(crate::dock::DockError::ApiDisabled))
         .expect("Error serializes to JSON");
 
     assert_eq!(
@@ -43,6 +43,24 @@ fn dock_failures_have_the_dock_kind_and_message() {
         serde_json::json!({
             "kind": "dock",
             "message": "Accessibility access is not granted, so the Dock cannot be read"
+        })
+    );
+}
+
+#[test]
+fn dock_ax_failures_name_the_attribute_and_code() {
+    let error = Error::from(crate::dock::DockError::Ax {
+        attribute: "AXSubrole",
+        code: -25202,
+    });
+
+    let json = serde_json::to_value(error).expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "dock",
+            "message": "reading AXSubrole from the Dock failed with AX error -25202"
         })
     );
 }

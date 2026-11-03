@@ -12,7 +12,7 @@ use objc2_application_services::{AXError, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{CFArray, CFRetained, CFString, CFType, CFURL, CGPoint, CGSize};
 use objc2_foundation::{NSBundle, ns_string};
 
-use crate::dock::RawDockChild;
+use crate::dock::{DockError, RawDockChild};
 use crate::geometry::ScreenRect;
 
 const DOCK_BUNDLE_ID: &str = "com.apple.dock";
@@ -23,20 +23,6 @@ const POSITION: &str = "AXPosition";
 const SIZE: &str = "AXSize";
 const URL: &str = "AXURL";
 const LIST_ROLE: &str = "AXList";
-
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum DockError {
-    #[error("the Dock process is not running")]
-    NotRunning,
-    #[error("Accessibility access is not granted, so the Dock cannot be read")]
-    ApiDisabled,
-    #[error("the Dock did not answer an Accessibility request")]
-    CannotComplete,
-    #[error("the Dock's Accessibility tree has no item list")]
-    NoItemList,
-    #[error("reading {attribute} from the Dock failed with AX error {code}")]
-    Ax { attribute: &'static str, code: i32 },
-}
 
 #[derive(Debug, PartialEq, Eq)]
 enum Reading {

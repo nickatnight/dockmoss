@@ -1,6 +1,7 @@
 use objc2_application_services::AXError;
 
-use super::{DockError, Reading, classify};
+use super::{Reading, classify};
+use crate::dock::DockError;
 
 #[test]
 fn ax_result_codes_map_to_a_reading_or_a_dock_error() {

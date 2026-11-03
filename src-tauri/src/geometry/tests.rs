@@ -154,3 +154,44 @@ fn rect_with_no_area_inside_the_frame_is_dropped() {
         assert_eq!(to_overlay_local(rect, display), None, "{case}");
     }
 }
+
+#[test]
+fn rect_with_a_non_finite_value_is_dropped() {
+    let primary_2x = display(0, 0, 3024, 1964, 2.0);
+    let icon = screen(700.0, 920.0, 56.0, 56.0);
+    let bad_values = [
+        ("NaN", f64::NAN),
+        ("+inf", f64::INFINITY),
+        ("-inf", f64::NEG_INFINITY),
+    ];
+
+    for (name, bad) in bad_values {
+        let cases = [
+            ("x", ScreenRect { x: bad, ..icon }),
+            ("y", ScreenRect { y: bad, ..icon }),
+            ("width", ScreenRect { width: bad, ..icon }),
+            (
+                "height",
+                ScreenRect {
+                    height: bad,
+                    ..icon
+                },
+            ),
+        ];
+        for (field, rect) in cases {
+            assert_eq!(to_overlay_local(rect, primary_2x), None, "{field} = {name}");
+        }
+    }
+}
+
+#[test]
+fn infinite_rect_spanning_the_display_is_dropped() {
+    let primary_2x = display(0, 0, 3024, 1964, 2.0);
+
+    let local = to_overlay_local(
+        screen(f64::NEG_INFINITY, 920.0, f64::INFINITY, 56.0),
+        primary_2x,
+    );
+
+    assert_eq!(local, None);
+}

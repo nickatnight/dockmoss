@@ -36,7 +36,7 @@ impl TrustState {
         Trust::from_trusted(self.trusted.load(Ordering::Relaxed))
     }
 
-    pub fn update(&self, reading: Trust) -> Option<Trust> {
+    pub fn replace_if_changed(&self, reading: Trust) -> Option<Trust> {
         let previous = self.trusted.swap(reading.is_trusted(), Ordering::Relaxed);
         (previous != reading.is_trusted()).then_some(reading)
     }

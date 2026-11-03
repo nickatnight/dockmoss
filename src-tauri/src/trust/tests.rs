@@ -8,7 +8,7 @@ fn state_starts_at_the_first_reading() {
 }
 
 #[test]
-fn update_reports_a_reading_only_when_it_changed() {
+fn replace_if_changed_returns_the_reading_only_when_it_changed() {
     let cases = [
         (
             "grant revoked",
@@ -29,7 +29,7 @@ fn update_reports_a_reading_only_when_it_changed() {
     for (case, previous, reading, changed) in cases {
         let state = TrustState::new(previous);
 
-        assert_eq!(state.update(reading), changed, "{case}: change");
+        assert_eq!(state.replace_if_changed(reading), changed, "{case}: change");
         assert_eq!(state.current(), reading, "{case}: current");
     }
 }

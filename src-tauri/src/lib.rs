@@ -5,6 +5,14 @@ mod error;
 mod geometry;
 mod growth;
 mod macos;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the dock-tracker thread calls it from the next commit"
+    )
+)]
+mod tracker;
 mod tray;
 mod trust;
 mod usage;

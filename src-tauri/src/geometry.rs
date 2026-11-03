@@ -11,6 +11,13 @@ pub struct ScreenRect {
     pub height: f64,
 }
 
+/// A point in the same global space as `ScreenRect`, such as the cursor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScreenPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
 impl ScreenRect {
     pub fn is_finite(self) -> bool {
         [self.x, self.y, self.width, self.height]

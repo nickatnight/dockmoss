@@ -175,8 +175,6 @@ impl UsageState {
             .collect()
     }
 
-    /// The Dock apps in Dock order, each bundle ID once: an app pinned twice
-    /// is read from Spotlight once.
     fn distinct_dock_apps(&self) -> Vec<DockApp> {
         let mut seen = BTreeSet::new();
         self.dock

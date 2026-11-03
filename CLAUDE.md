@@ -22,7 +22,8 @@ Run the app with `pnpm tauri dev` from the repo root. The package manager is **p
 ```
 src-tauri/src/
   main.rs        # one line: dockmoss_lib::run()
-  lib.rs         # Builder, plugins, setup(), command registration
+  lib.rs         # Builder, plugins, setup(), command registration, and the
+                 #   dock-tracker and launch-log thread glue
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules
   tracker.rs     # pure: per Dock read -> what to send, log and show, and the poll rate
@@ -30,7 +31,8 @@ src-tauri/src/
   dock.rs        # pure: raw Dock children -> DockItems (application items only)
   bundle_id.rs   # pure: BundleId newtype
   growth/        # pure: effective last-used -> 0..1 overgrowth, jitter, stages
-  usage/         # launch log persistence, Spotlight seeding, migration detection
+  usage/         # launch log model, file format, atomic store, save schedule, running-app
+                 #   filter; Spotlight seeding and migration detection from slice 8
   macos/         # every objc2 / AppKit / AX call, and every `unsafe` block
 src-tauri/capabilities/   # one capability file per window
 src/                      # webview: canvas/WebGL moss renderer, settings UI
@@ -42,11 +44,11 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 
 - **Edition 2024**, with `rust-version` pinned in `Cargo.toml`. Use current std: `LazyLock`/`OnceLock`, let-else, let chains, `impl Trait` in argument position.
 - **Errors:** each module has a `thiserror` enum. Commands return `Result<T, crate::Error>`, where `Error` implements `Serialize` as `{ kind, message }` so the frontend can branch on `kind`. `anyhow` is fine in `setup()` and in tests.
-- **Panics:** use `?` in non-test code. Use `.expect("reason")` only for real invariants, and write the reason as the invariant ("dock pid exists after AX lookup succeeded").
+- **Panics:** use `?` in non-test code. Release builds abort on panic. `unwrap`, `expect` and slice indexing are denied crate-wide (CONSTRAINTS.md Floor). The only `.expect`s outside tests are named startup invariants: the `MainThreadMarker` in `setup()`, the Tauri build in `run()`, and `build.rs`. Each has its own `#[expect(clippy::expect_used, reason = "...")]`, and the reason states the invariant ("tauri runs setup() on the main thread").
 - **Logging:** use `tracing` macros with structured fields (`tracing::debug!(bundle_id, days, "growth updated")`), wired up through `tauri-plugin-log`.
 - **Types:** use newtypes for domain values: `BundleId(String)`, and `Overgrowth(f32)` clamped to 0..=1 when constructed. Store time as `jiff::Timestamp` (UTC) and convert to local time only for display.
 - **Tests:** unit tests live in `<module>/tests.rs`, declared with `#[cfg(test)] mod tests;`, not in an inline `mod tests { ... }`. CONSTRAINTS.md excludes those files from coverage, so the number measures logic only.
-- **Lints:** set them in `Cargo.toml` under `[lints]` instead of crate-level attributes. Enable `clippy::pedantic` as warn, plus `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`. When you allow a lint, add `#[expect(clippy::..., reason = "...")]` at the narrowest scope.
+- **Lints:** set them in `Cargo.toml` under `[lints]` instead of crate-level attributes. Enable `clippy::pedantic` as warn, plus `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`. When you allow a lint, add `#[expect(clippy::..., reason = "...")]` at the narrowest scope. A lint attribute covers everything inside the item or statement it sits on, closures included, so never put one on a statement that holds a closure such as `.setup(|app| ...)`; split the statement first.
 - **Dependencies:** check that a new crate is maintained and supports Tauri 2 before you add it. Prefer an official `tauri-plugin-*` when one exists (autostart, store, log).
 
 ## Unsafe and objc2
@@ -76,6 +78,8 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 
 ## Usage data rules (code-level)
 
-- The launch log is the source of truth (see `SUMMARY.md`). It lives at `app.path().app_data_dir()/launch_log.json`. Write it atomically (temp file in the same directory, then `rename`), so a crash mid-write can't destroy history.
+- The launch log is the source of truth (see `SUMMARY.md`). It lives at `app.path().app_data_dir()/launch_log.json`. Write it atomically (temp file in the same directory, then `rename`), so a crash mid-write can't destroy history. `usage::save` removes a stale temp file and creates the new one with `create_new` and mode 0600; do not change that to `File::create`, which would keep an old mode and follow a planted link.
+- The file is versioned JSON (`version: 1`, ADR-0009). Timestamps are RFC 3339 strings parsed one entry at a time with `str::parse::<Timestamp>()`, and jiff's `serde` feature stays off, so a bad entry is dropped and logged, never a panic. Entries more than `FUTURE_TOLERANCE` (5 minutes) after now are dropped at load. A file that does not decode is renamed to `launch_log.json.corrupt`, never deleted.
+- Only the `launch-log` thread in `lib.rs` touches the `LaunchLog`. Everything else sends it `WriterMessage::Used` or `Flush` over its channel.
 - **Jitter must be stable across runs and Rust versions.** It is FNV-1a 64 of the bundle ID's UTF-8 bytes, mapped to whole seconds in ±1 day (`growth/jitter.rs`). Never use `std::hash::DefaultHasher` or an RNG. Changing the hash or the mapping moves every user's moss, and the golden-value tests in `growth/jitter/tests.rs` fail by design.
 - Test migration detection and the growth curve with table-driven tests over fixed timestamps, including the edge cases from `SUMMARY.md`: null Spotlight dates, 5+ apps within seconds, first-run grace, and apps running at startup.

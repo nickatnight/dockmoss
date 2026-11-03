@@ -17,7 +17,7 @@ fn hash_matches_the_standard_fnv1a_64_test_vectors() {
 }
 
 #[test]
-fn jitter_is_pinned_for_known_bundle_ids() {
+fn jitter_is_pinned_to_values_from_an_independent_fnv1a() {
     let cases = [
         ("com.apple.Safari", 38_842),
         ("com.microsoft.VSCode", 9_553),
@@ -41,7 +41,7 @@ fn hash_remainder_0_maps_to_minus_one_day_and_172_800_to_plus_one_day() {
         (86_400, SignedDuration::ZERO),
         (172_800, ONE_DAY),
         (172_801, -ONE_DAY),
-        (u64::MAX, SignedDuration::from_secs(-75_134)),
+        (u64::MAX, SignedDuration::from_secs(11_266 - 86_400)),
     ];
 
     for (hash, expected) in cases {

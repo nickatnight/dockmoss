@@ -204,3 +204,60 @@ fn future_dates_do_not_count_toward_a_batch() {
 
     assert_eq!(kept(&sane).map(|seeds| seeds.len()), Some(4), "{sane:?}");
 }
+
+#[test]
+fn an_app_pinned_twice_counts_once_toward_a_batch() {
+    let dates = seconds_after("2026-09-01T10:00:00Z", &[0, 1_000, 2_000, 3_000]);
+    let mut readings: Vec<_> = dates
+        .iter()
+        .enumerate()
+        .map(|(n, date)| (id(&format!("com.example.app{n}")), Some(*date)))
+        .collect();
+    readings.push((id("com.example.app2"), dates.get(2).copied()));
+
+    let sane = sane_seeds(readings, at(NOW));
+
+    assert_eq!(
+        kept(&sane).map(|seeds| seeds.len()),
+        Some(4),
+        "4 distinct apps are not a batch: {sane:?}"
+    );
+}
+
+#[test]
+fn five_distinct_apps_are_still_a_batch_when_one_is_pinned_twice() {
+    let dates = seconds_after("2026-09-01T10:00:00Z", &[0, 0, 1_000, 2_000, 3_000]);
+    let mut readings: Vec<_> = dates
+        .iter()
+        .enumerate()
+        .map(|(n, date)| (id(&format!("com.example.app{n}")), Some(*date)))
+        .collect();
+    readings.push((id("com.example.app3"), dates.get(3).copied()));
+
+    let sane = sane_seeds(readings, at(NOW));
+
+    assert!(
+        matches!(sane, SaneSeeds::MigrationBatch),
+        "two apps at the same second are two apps: {sane:?}"
+    );
+}
+
+#[test]
+fn an_app_read_twice_with_two_dates_keeps_the_later_one() {
+    let readings = vec![
+        (id("com.microsoft.VSCode"), Some(at("2026-10-03T06:45:44Z"))),
+        (id("com.apple.Safari"), Some(at("2026-10-29T01:37:04Z"))),
+        (id("com.microsoft.VSCode"), Some(at("2026-10-20T12:00:00Z"))),
+        (id("com.microsoft.VSCode"), None),
+    ];
+
+    let sane = sane_seeds(readings, at(NOW));
+
+    assert_eq!(
+        kept(&sane),
+        Some(vec![
+            ("com.microsoft.VSCode", at("2026-10-20T12:00:00Z")),
+            ("com.apple.Safari", at("2026-10-29T01:37:04Z")),
+        ])
+    );
+}

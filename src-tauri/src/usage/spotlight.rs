@@ -48,14 +48,19 @@ pub enum SaneSeeds {
     MigrationBatch,
 }
 
+/// One past date per bundle ID, the latest, so an app pinned twice in the
+/// Dock counts once toward a migration batch.
 pub fn sane_seeds(readings: Vec<(BundleId, Option<Timestamp>)>, now: Timestamp) -> SaneSeeds {
-    let past: Vec<(BundleId, Timestamp)> = readings
-        .into_iter()
-        .filter_map(|(bundle_id, date)| {
-            let past_date = date.filter(|date| *date <= now)?;
-            Some((bundle_id, past_date))
-        })
-        .collect();
+    let mut past: Vec<(BundleId, Timestamp)> = Vec::new();
+    for (bundle_id, date) in readings {
+        let Some(past_date) = date.filter(|date| *date <= now) else {
+            continue;
+        };
+        match past.iter_mut().find(|(seen, _)| *seen == bundle_id) {
+            Some((_, kept)) => *kept = (*kept).max(past_date),
+            None => past.push((bundle_id, past_date)),
+        }
+    }
     let dates: Vec<Timestamp> = past.iter().map(|(_, date)| *date).collect();
     if is_migration_batch(&dates) {
         return SaneSeeds::MigrationBatch;

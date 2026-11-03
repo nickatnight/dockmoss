@@ -13,6 +13,15 @@ mod error;
     reason = "polling path: release builds abort on panic"
 )]
 mod geometry;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "growth is wired to the tracker in slice 8")
+)]
+#[deny(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "growth is recomputed on the tracker thread from slice 8, and release builds abort on panic"
+)]
 mod growth;
 mod macos;
 #[deny(

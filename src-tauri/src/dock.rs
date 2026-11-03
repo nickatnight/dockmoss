@@ -22,6 +22,14 @@ pub enum DockError {
     Ax { attribute: &'static str, code: i32 },
 }
 
+impl DockError {
+    /// True when no part of the Dock can be read: access is not granted, or
+    /// the Dock is not answering. Any other error belongs to one child.
+    pub fn is_dock_wide(&self) -> bool {
+        matches!(self, Self::ApiDisabled | Self::CannotComplete)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DockItem {

@@ -29,6 +29,9 @@ const POSITION: &str = "AXPosition";
 const SIZE: &str = "AXSize";
 const URL: &str = "AXURL";
 const CHILD_ATTRIBUTES: &str = "AXSubrole, AXPosition, AXSize and AXURL";
+/// The attributes `child_values` reads in one AX call, in the order it
+/// unpacks them into `ChildValues`.
+const CHILD_ATTRIBUTE_NAMES: [&str; 4] = [SUBROLE, POSITION, SIZE, URL];
 const LIST_ROLE: &str = "AXList";
 /// Children do not inherit a timeout set on the application element (checked
 /// on macOS 27 with a paused Dock), so it is set on the system-wide element,
@@ -44,17 +47,17 @@ enum Reading {
 pub struct DockReader {
     dock: Option<CFRetained<AXUIElement>>,
     child_attributes: CFRetained<CFArray<CFString>>,
-    bundle_ids: HashMap<PathBuf, String>,
+    bundle_ids: BundleIdCache,
 }
 
 impl DockReader {
     pub fn new() -> Self {
         set_global_messaging_timeout();
-        let names = [SUBROLE, POSITION, SIZE, URL].map(CFString::from_static_str);
+        let names = CHILD_ATTRIBUTE_NAMES.map(CFString::from_static_str);
         Self {
             dock: None,
             child_attributes: CFArray::from_retained_objects(&names),
-            bundle_ids: HashMap::new(),
+            bundle_ids: BundleIdCache::default(),
         }
     }
 
@@ -72,64 +75,90 @@ impl DockReader {
         }
         let dock = self.dock.as_ref().ok_or(DockError::NotRunning)?;
         let list = item_list(dock)?;
-        let mut bundle_ids = HashMap::with_capacity(self.bundle_ids.len());
+        self.bundle_ids.begin_read();
         let mut kept = Vec::new();
         for child in children(&list)? {
-            if let Some(child) = keep_child(self.raw_child(&child, &mut bundle_ids))? {
+            let read = raw_child(&child, &self.child_attributes, &mut self.bundle_ids);
+            if let Some(child) = keep_child(read)? {
                 kept.push(child);
             }
         }
-        self.bundle_ids = bundle_ids;
+        self.bundle_ids.finish_read();
         Ok(kept)
     }
+}
 
-    fn raw_child(
-        &self,
-        child: &AXUIElement,
-        bundle_ids: &mut HashMap<PathBuf, String>,
-    ) -> Result<RawDockChild, DockError> {
-        let [subrole, position, size, url] = child_values(child, &self.child_attributes)?;
-        let subrole = subrole
-            .and_then(|value| value.downcast::<CFString>().ok())
-            .map(|string| string.to_string());
-        let rect = match (point(position), size_of(size)) {
-            (Some(origin), Some(size)) => Some(ScreenRect {
-                x: origin.x,
-                y: origin.y,
-                width: size.width,
-                height: size.height,
-            }),
-            _ => None,
-        };
-        let url = url.and_then(|value| value.downcast::<CFURL>().ok());
-        let app_path = url.as_deref().and_then(CFURL::to_file_path);
-        let bundle_id = match (&app_path, url.as_deref()) {
-            (Some(path), Some(url)) => {
-                let id = self
-                    .bundle_ids
-                    .get(path)
-                    .cloned()
-                    .or_else(|| bundle_id(url));
-                if let Some(id) = &id {
-                    bundle_ids.insert(path.clone(), id.clone());
-                }
-                id
-            }
-            _ => None,
-        };
-        Ok(RawDockChild {
-            subrole,
-            rect,
-            app_path,
-            bundle_id,
-        })
+/// Bundle IDs by app path, so `NSBundle` runs once per app rather than once
+/// per read. A read that completes keeps only the apps it found, so apps that
+/// left the Dock drop out; a read that fails keeps the previous IDs.
+#[derive(Default)]
+struct BundleIdCache {
+    previous: HashMap<PathBuf, String>,
+    current: HashMap<PathBuf, String>,
+}
+
+impl BundleIdCache {
+    fn begin_read(&mut self) {
+        self.current.clear();
     }
+
+    fn get_or_look_up(&mut self, path: &PathBuf, url: &CFURL) -> Option<String> {
+        let id = self
+            .current
+            .get(path)
+            .or_else(|| self.previous.get(path))
+            .cloned()
+            .or_else(|| bundle_id(url))?;
+        self.current.insert(path.clone(), id.clone());
+        Some(id)
+    }
+
+    fn finish_read(&mut self) {
+        std::mem::swap(&mut self.previous, &mut self.current);
+    }
+}
+
+fn raw_child(
+    child: &AXUIElement,
+    names: &CFArray<CFString>,
+    bundle_ids: &mut BundleIdCache,
+) -> Result<RawDockChild, DockError> {
+    let ChildValues {
+        subrole,
+        position,
+        size,
+        url,
+    } = child_values(child, names)?;
+    let subrole = subrole
+        .and_then(|value| value.downcast::<CFString>().ok())
+        .map(|string| string.to_string());
+    let rect = match (point(position), size_of(size)) {
+        (Some(origin), Some(size)) => Some(ScreenRect {
+            x: origin.x,
+            y: origin.y,
+            width: size.width,
+            height: size.height,
+        }),
+        _ => None,
+    };
+    let url = url.and_then(|value| value.downcast::<CFURL>().ok());
+    let app_path = url.as_deref().and_then(CFURL::to_file_path);
+    let bundle_id = match (&app_path, url.as_deref()) {
+        (Some(path), Some(url)) => bundle_ids.get_or_look_up(path, url),
+        _ => None,
+    };
+    Ok(RawDockChild {
+        subrole,
+        rect,
+        app_path,
+        bundle_id,
+    })
 }
 
 fn keep_child(read: Result<RawDockChild, DockError>) -> Result<Option<RawDockChild>, DockError> {
     match read {
         Ok(child) => Ok(Some(child)),
-        Err(error @ (DockError::ApiDisabled | DockError::CannotComplete)) => Err(error),
+        Err(error) if error.is_dock_wide() => Err(error),
         Err(error) => {
             tracing::debug!(%error, "dock child dropped");
             Ok(None)
@@ -141,17 +170,20 @@ fn find_dock() -> Result<CFRetained<AXUIElement>, DockError> {
     let pid =
         NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
             .iter()
-            .find(|app| {
-                !app.isTerminated()
-                    && app
-                        .bundleURL()
-                        .and_then(|url| url.path())
-                        .is_some_and(|path| path.to_string() == DOCK_APP_PATH)
-            })
+            .find(|app| is_system_dock(app))
             .map(|dock| dock.processIdentifier())
             .ok_or(DockError::NotRunning)?;
     tracing::debug!(pid, "dock process found");
     Ok(application(pid))
+}
+
+/// The running system Dock, not another process that claims its bundle ID.
+fn is_system_dock(app: &NSRunningApplication) -> bool {
+    !app.isTerminated()
+        && app
+            .bundleURL()
+            .and_then(|url| url.path())
+            .is_some_and(|path| path.to_string() == DOCK_APP_PATH)
 }
 
 #[expect(unsafe_code, reason = "AXUIElementCreateApplication is a C function")]
@@ -218,14 +250,20 @@ fn children(element: &AXUIElement) -> Result<Vec<CFRetained<AXUIElement>>, DockE
         .collect())
 }
 
+/// One child's attributes, each `None` when missing.
+struct ChildValues {
+    subrole: Option<CFRetained<CFType>>,
+    position: Option<CFRetained<CFType>>,
+    size: Option<CFRetained<CFType>>,
+    url: Option<CFRetained<CFType>>,
+}
+
+/// `names` must be `CHILD_ATTRIBUTE_NAMES`; the values come back in its order.
 #[expect(
     unsafe_code,
     reason = "AXUIElementCopyMultipleAttributeValues returns its values through an out-pointer"
 )]
-fn child_values(
-    child: &AXUIElement,
-    names: &CFArray<CFString>,
-) -> Result<[Option<CFRetained<CFType>>; 4], DockError> {
+fn child_values(child: &AXUIElement, names: &CFArray<CFString>) -> Result<ChildValues, DockError> {
     let mut values: *const CFArray = ptr::null();
     // SAFETY: `names` is a CFArray of CFStrings, the type the function
     // expects for attribute names, `values` is a live, writable out-pointer
@@ -252,12 +290,12 @@ fn child_values(
     // `CFType` is valid.
     let values = unsafe { values.cast_unchecked::<CFType>() };
     let mut slots = values.iter();
-    Ok([
-        slot(slots.next(), SUBROLE)?,
-        slot(slots.next(), POSITION)?,
-        slot(slots.next(), SIZE)?,
-        slot(slots.next(), URL)?,
-    ])
+    Ok(ChildValues {
+        subrole: slot(slots.next(), SUBROLE)?,
+        position: slot(slots.next(), POSITION)?,
+        size: slot(slots.next(), SIZE)?,
+        url: slot(slots.next(), URL)?,
+    })
 }
 
 /// Without `StopOnError`, a missing or failed attribute comes back as an

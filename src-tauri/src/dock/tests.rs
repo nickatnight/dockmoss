@@ -241,3 +241,24 @@ fn trusted_read_passes_the_result_through() {
         assert!(called.get(), "{case}: the AX read did not run");
     }
 }
+
+#[test]
+fn only_disabled_access_and_an_unanswering_dock_are_dock_wide() {
+    let cases = [
+        (DockError::ApiDisabled, true),
+        (DockError::CannotComplete, true),
+        (DockError::NotRunning, false),
+        (DockError::NoItemList, false),
+        (
+            DockError::Ax {
+                attribute: "AXURL",
+                code: -25202,
+            },
+            false,
+        ),
+    ];
+
+    for (error, dock_wide) in cases {
+        assert_eq!(error.is_dock_wide(), dock_wide, "{error}");
+    }
+}

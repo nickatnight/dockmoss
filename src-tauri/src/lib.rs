@@ -210,7 +210,7 @@ fn flush_launch_log(app: &AppHandle) {
 }
 
 mod launch_log_writer {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
@@ -431,7 +431,17 @@ mod launch_log_writer {
         }
 
         fn save(&mut self, trigger: SaveTrigger) {
-            save(&self.path, self.state.log(), &mut self.schedule, trigger);
+            let log = self.state.log();
+            match usage::save(&self.path, log) {
+                Ok(()) => {
+                    self.schedule.saved();
+                    tracing::debug!(entries = log.len(), ?trigger, "launch log saved");
+                }
+                Err(error) => {
+                    self.schedule.save_failed(Instant::now());
+                    tracing::warn!(%error, ?trigger, "launch log not saved; retrying in 5 s");
+                }
+            }
         }
     }
 
@@ -476,19 +486,6 @@ mod launch_log_writer {
         Deadline,
         Flush,
         Disconnected,
-    }
-
-    fn save(path: &Path, log: &LaunchLog, schedule: &mut SaveSchedule, trigger: SaveTrigger) {
-        match usage::save(path, log) {
-            Ok(()) => {
-                schedule.saved();
-                tracing::debug!(entries = log.len(), ?trigger, "launch log saved");
-            }
-            Err(error) => {
-                schedule.save_failed(Instant::now());
-                tracing::warn!(%error, ?trigger, "launch log not saved; retrying in 5 s");
-            }
-        }
     }
 }
 

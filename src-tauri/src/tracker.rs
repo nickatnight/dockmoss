@@ -69,15 +69,12 @@ impl Tracker {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "display changes reach the tracker from a later commit"
-        )
-    )]
-    pub fn set_display(&mut self, display: Display) {
+    /// Converts later reads against `display`. Returns false when it is the
+    /// display already in use, so a repeated notification changes nothing.
+    pub fn set_display(&mut self, display: Display) -> bool {
+        let changed = display != self.display;
         self.display = display;
+        changed
     }
 
     /// A new subscriber has seen nothing, so the next tick sends the current frame.

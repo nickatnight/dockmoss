@@ -10,6 +10,8 @@ use crate::dock::DockItem;
 /// state, so commands only post to it.
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
+    /// `NSApplicationDidChangeScreenParametersNotification` arrived.
+    ScreenParametersChanged,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);

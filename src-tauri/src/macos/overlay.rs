@@ -43,6 +43,38 @@ pub fn pin_above_dock(
     Ok(PinnedLevels { dock, overlay })
 }
 
+/// What the window reports after an order-out or order-in, logged so a
+/// regression in level, click-through or Spaces behaviour shows up.
+#[derive(Debug)]
+pub struct OrderedState {
+    pub visible: bool,
+    pub level: NSWindowLevel,
+    pub ignores_mouse_events: bool,
+    pub collection_behavior: usize,
+}
+
+/// Orders the overlay in without activating the app or making the window
+/// key, or orders it out. Level, collection behaviour and click-through are
+/// properties of the window, so they survive both.
+pub fn set_visible(
+    window: &WebviewWindow,
+    visible: bool,
+    mtm: MainThreadMarker,
+) -> Result<OrderedState, OverlayError> {
+    let ns_window = as_ns_window(window, mtm)?;
+    if visible {
+        ns_window.orderFrontRegardless();
+    } else {
+        ns_window.orderOut(None);
+    }
+    Ok(OrderedState {
+        visible: ns_window.isVisible(),
+        level: ns_window.level(),
+        ignores_mouse_events: ns_window.ignoresMouseEvents(),
+        collection_behavior: ns_window.collectionBehavior().0,
+    })
+}
+
 fn ensure_raised(dock: NSWindowLevel, overlay: NSWindowLevel) -> Result<(), OverlayError> {
     if overlay > dock {
         Ok(())

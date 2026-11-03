@@ -17,13 +17,16 @@ use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 use tauri::tray::TrayIcon;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 use tauri_plugin_log::log::LevelFilter;
 
 use commands::{TrackerInbox, TrackerMessage};
 use dock::DockItem;
 use geometry::Display;
-use tracker::{PollRate, Tick, TickLog, Tracker};
+use tracker::{PollRate, Tick, TickLog, Tracker, Visibility};
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
@@ -58,6 +61,7 @@ pub fn run() {
             spawn_trust_watcher(tray)?;
             let display = primary_display(app.handle())?;
             let (inbox, messages) = mpsc::channel();
+            let screen_changes = inbox.clone();
             app.manage(TrackerInbox(inbox));
             let overlay = build_overlay(app.handle(), display)?;
             let mtm =
@@ -70,6 +74,17 @@ pub fn run() {
             );
             overlay.show()?;
             spawn_dock_tracker(app.handle().clone(), messages, display)?;
+            macos::screen::on_screen_parameters_change(
+                move || {
+                    if screen_changes
+                        .send(TrackerMessage::ScreenParametersChanged)
+                        .is_err()
+                    {
+                        tracing::warn!("screen change not passed on: the dock tracker stopped");
+                    }
+                },
+                mtm,
+            );
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "dockmoss started");
             Ok(())
         })
@@ -129,8 +144,12 @@ fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Dis
     let mut tracker = Tracker::new(display);
     let mut watcher = None;
     let mut rate = PollRate::Slow;
+    let mut screen_changed = false;
     loop {
         let started = Instant::now();
+        if std::mem::take(&mut screen_changed) {
+            follow_display(app, &mut tracker);
+        }
         let cursor = macos::cursor::location();
         let read = dock::read(trust.current(), || reader.read());
         tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
@@ -139,40 +158,75 @@ fn track_dock(app: &AppHandle, messages: &Receiver<TrackerMessage>, display: Dis
             tracing::debug!(rate = ?tick.rate, "dock poll rate changed");
             rate = tick.rate;
         }
-        perform(tick, &mut watcher);
+        perform(app, tick, &mut watcher);
         let delay = tracker::next_delay(rate, started.elapsed());
-        match messages.recv_timeout(delay) {
-            Ok(message) => receive(message, &mut tracker, &mut watcher),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => std::thread::sleep(delay),
-        }
-        while let Ok(message) = messages.try_recv() {
-            receive(message, &mut tracker, &mut watcher);
+        let deadline = Instant::now().checked_add(delay);
+        // Messages never cut the wait short: a burst of screen notifications
+        // (one per frame while the Dock slides in) must not add reads.
+        loop {
+            let left = deadline.map_or(Duration::ZERO, |deadline| {
+                deadline.saturating_duration_since(Instant::now())
+            });
+            match messages.recv_timeout(left) {
+                Ok(TrackerMessage::Watch(channel)) => {
+                    watcher = Some(channel);
+                    tracker.resubscribe();
+                }
+                Ok(TrackerMessage::ScreenParametersChanged) => screen_changed = true,
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    std::thread::sleep(left);
+                    break;
+                }
+            }
         }
     }
 }
 
-fn receive(
-    message: TrackerMessage,
-    tracker: &mut Tracker,
-    watcher: &mut Option<Channel<Vec<DockItem>>>,
-) {
-    match message {
-        TrackerMessage::Watch(channel) => {
-            *watcher = Some(channel);
-            tracker.resubscribe();
+/// Re-reads the primary display and moves the conversion and the overlay
+/// window to it together, both from `Display::frame()` (ADR-0006).
+fn follow_display(app: &AppHandle, tracker: &mut Tracker) {
+    let display = match primary_display(app) {
+        Ok(display) => display,
+        Err(error) => {
+            tracing::warn!(%error, "display change not followed");
+            return;
         }
+    };
+    if !tracker.set_display(display) {
+        tracing::debug!("screen parameters changed; primary display unchanged");
+        return;
+    }
+    let frame = display.frame();
+    let scale = display.scale_factor;
+    let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
+        tracing::warn!("display changed but the overlay window is gone");
+        return;
+    };
+    let moved = window
+        .set_position(LogicalPosition::new(frame.x, frame.y))
+        .and_then(|()| window.set_size(LogicalSize::new(frame.width, frame.height)));
+    match moved {
+        Ok(()) => tracing::info!(
+            x = frame.x,
+            y = frame.y,
+            width = frame.width,
+            height = frame.height,
+            scale,
+            "overlay moved to the new display frame"
+        ),
+        Err(error) => tracing::warn!(%error, "overlay not moved to the new display frame"),
     }
 }
 
-fn perform(tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
+fn perform(app: &AppHandle, tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
     match tick.log {
         Some(TickLog::ReadFailed(error)) => tracing::warn!(%error, "dock read failed"),
         Some(TickLog::Recovered) => tracing::info!("dock read recovered"),
         None => {}
     }
     if let Some(visibility) = tick.overlay {
-        tracing::debug!(?visibility, "overlay visibility changed");
+        order_overlay(app, visibility);
     }
     let Some(frame) = tick.send else {
         return;
@@ -188,6 +242,36 @@ fn perform(tick: Tick, watcher: &mut Option<Channel<Vec<DockItem>>>) {
             tracing::debug!(%error, "dock watcher dropped after a failed send");
             *watcher = None;
         }
+    }
+}
+
+/// Orders the overlay out while the Dock is hidden (or unreadable) and back
+/// in when it shows. `NSWindow` calls must run on the main thread.
+fn order_overlay(app: &AppHandle, visibility: Visibility) {
+    let main = app.clone();
+    let scheduled = app.run_on_main_thread(move || {
+        let Some(mtm) = macos::MainThreadMarker::new() else {
+            tracing::warn!("overlay ordering ran off the main thread");
+            return;
+        };
+        let Some(window) = main.get_webview_window(OVERLAY_LABEL) else {
+            tracing::warn!("overlay window is gone");
+            return;
+        };
+        match macos::overlay::set_visible(&window, visibility == Visibility::Shown, mtm) {
+            Ok(state) => tracing::debug!(
+                ?visibility,
+                visible = state.visible,
+                level = state.level,
+                ignores_mouse_events = state.ignores_mouse_events,
+                collection_behavior = state.collection_behavior,
+                "overlay ordered"
+            ),
+            Err(error) => tracing::warn!(%error, ?visibility, "overlay not ordered"),
+        }
+    });
+    if let Err(error) = scheduled {
+        tracing::warn!(%error, "could not schedule the overlay ordering");
     }
 }
 

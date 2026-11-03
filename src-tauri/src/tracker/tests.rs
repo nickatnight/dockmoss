@@ -477,7 +477,7 @@ fn new_display_converts_the_next_read_against_it() {
     let mut tracker = Tracker::new(PRIMARY_2X);
     tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
 
-    tracker.set_display(Display {
+    let _changed = tracker.set_display(Display {
         physical_x: 0,
         physical_y: 0,
         physical_width: 1920,
@@ -606,4 +606,20 @@ fn next_delay_is_the_interval_minus_the_read() {
 fn rates_are_60_hz_and_2_hz() {
     assert_eq!(PollRate::Fast.interval(), Duration::from_nanos(16_666_667));
     assert_eq!(PollRate::Slow.interval(), Duration::from_millis(500));
+}
+
+#[test]
+fn set_display_reports_whether_the_display_changed() {
+    let mut tracker = Tracker::new(PRIMARY_2X);
+    let external = Display {
+        physical_x: 0,
+        physical_y: 0,
+        physical_width: 1920,
+        physical_height: 1080,
+        scale_factor: 1.0,
+    };
+
+    assert!(!tracker.set_display(PRIMARY_2X), "same display");
+    assert!(tracker.set_display(external), "new display");
+    assert!(!tracker.set_display(external), "same again");
 }

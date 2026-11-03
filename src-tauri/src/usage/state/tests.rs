@@ -473,3 +473,16 @@ fn growth_serializes_in_camel_case_with_a_lowercase_stage() {
             .is_some_and(serde_json::Value::is_f64)
     );
 }
+
+#[test]
+fn a_log_change_saves_and_any_change_recomputes_growth() {
+    let cases = [
+        (Change::Unchanged, false, false),
+        (Change::Growth, false, true),
+        (Change::Log, true, true),
+    ];
+    for (change, saves, moves_growth) in cases {
+        assert_eq!(change.saves(), saves, "{change:?}");
+        assert_eq!(change.moves_growth(), moves_growth, "{change:?}");
+    }
+}

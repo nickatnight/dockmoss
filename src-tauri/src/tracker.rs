@@ -50,7 +50,10 @@ pub struct Tracker {
     display: Display,
     last_sent: Option<Vec<DockItem>>,
     last_error: Option<DockError>,
-    overlay: Visibility,
+    /// Recorded when the ordering is issued, before the main thread applies it.
+    ordered: Visibility,
+    /// What `ordered` was before that, restored if the ordering fails.
+    before_order: Visibility,
 }
 
 impl Tracker {
@@ -61,7 +64,8 @@ impl Tracker {
             display,
             last_sent: None,
             last_error: None,
-            overlay,
+            ordered: overlay,
+            before_order: overlay,
         }
     }
 
@@ -78,10 +82,7 @@ impl Tracker {
     }
 
     pub fn order_failed(&mut self) {
-        self.overlay = match self.overlay {
-            Visibility::Shown => Visibility::Hidden,
-            Visibility::Hidden => Visibility::Shown,
-        };
+        self.ordered = self.before_order;
         self.resend_on_next_tick();
     }
 
@@ -124,10 +125,11 @@ impl Tracker {
         } else {
             Visibility::Shown
         };
-        if wanted == self.overlay {
+        if wanted == self.ordered {
             return None;
         }
-        self.overlay = wanted;
+        self.before_order = self.ordered;
+        self.ordered = wanted;
         Some(wanted)
     }
 }

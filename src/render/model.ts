@@ -142,12 +142,15 @@ export type OvergrowthOverride =
   | { kind: "set"; overgrowth: number }
   | { kind: "invalid"; raw: string };
 
+// Digits with an optional fraction, or a bare fraction: no sign, exponent or hex.
+const PLAIN_DECIMAL = /^(\d+(\.\d*)?|\.\d+)$/;
+
 export function parseOvergrowthOverride(raw: string | undefined): OvergrowthOverride {
   if (raw === undefined || raw === "") {
     return { kind: "unset" };
   }
   const overgrowth = Number(raw);
-  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(raw) || overgrowth > 1) {
+  if (!PLAIN_DECIMAL.test(raw) || overgrowth > 1) {
     return { kind: "invalid", raw };
   }
   return { kind: "set", overgrowth };

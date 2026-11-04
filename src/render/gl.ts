@@ -2,6 +2,9 @@ import type { DeviceBox } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
+// Keeps the clip's antialiased edge inside the scissor box.
+const SCISSOR_MARGIN_PX = 1;
+
 export interface MossGl {
   /** Sets the backing store size in device pixels. Clears the canvas. */
   resize(width: number, height: number): void;
@@ -50,9 +53,11 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
     },
     setBox(box) {
       gl.uniform4f(uniforms.box, box.x, box.y, box.width, box.height);
-      const x = Math.floor(box.x) - 1;
-      const y = Math.floor(box.y) - 1;
-      scissor = [x, y, Math.ceil(box.x + box.width) + 1 - x, Math.ceil(box.y + box.height) + 1 - y];
+      const x = Math.floor(box.x) - SCISSOR_MARGIN_PX;
+      const y = Math.floor(box.y) - SCISSOR_MARGIN_PX;
+      const right = Math.ceil(box.x + box.width) + SCISSOR_MARGIN_PX;
+      const top = Math.ceil(box.y + box.height) + SCISSOR_MARGIN_PX;
+      scissor = [x, y, right - x, top - y];
     },
     setMoss(seed, value) {
       gl.uniform2f(uniforms.seed, ((seed & 0xffff) / 0x10000) * 64, ((seed >>> 16) / 0x10000) * 64);

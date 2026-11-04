@@ -97,7 +97,7 @@ To start over, quit DockMoss and delete the file. The next start runs the first 
 | `pnpm check` | Same as `check:fast` |
 | `pnpm check:fast` | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, three grep guards (unit tests only in `tests.rs`, `unsafe_code` opt-ins only in `src/macos/`, no `@ts-ignore` or `@ts-expect-error` under `src/`), `tsc --noEmit` |
 | `pnpm test` | vitest, once, over the frontend's pure modules (`src/**/*.test.ts`) |
-| `pnpm check:task` | `check:fast`, then `pnpm test`, `cargo test`, the 80% line-coverage gate, `cargo deny`, `pnpm audit` and three gitleaks passes |
+| `pnpm check:task` | `check:fast`, then `pnpm test`, a `pnpm build` whose `dist/` must hold no debug layer, `cargo test`, the 80% line-coverage gate, `cargo deny`, `pnpm audit` and three gitleaks passes |
 
 [CONSTRAINTS.md](CONSTRAINTS.md) defines what each check enforces. If the scripts and that file disagree, the file wins.
 

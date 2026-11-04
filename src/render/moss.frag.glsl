@@ -111,7 +111,7 @@ vec3 mossColour(vec2 p, float grain, float side, float hue) {
   return colour;
 }
 
-const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const vec3 REC709_LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 const float CONTACT_SHADOW_STRENGTH = 0.18;
 
@@ -202,6 +202,6 @@ void main() {
       moss = drawn + moss * (1.0 - drawn.a);
     }
   }
-  moss.rgb = mix(moss.rgb, WITHER_TINT * dot(moss.rgb, LUMA), v_wither);
+  moss.rgb = mix(moss.rgb, WITHER_TINT * dot(moss.rgb, REC709_LUMA), v_wither);
   fragColor = moss * clip;
 }

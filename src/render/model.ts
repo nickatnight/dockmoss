@@ -398,7 +398,7 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function shrunk(sprite: Sprite, remaining: number): Sprite {
+function shrunkOnFoot(sprite: Sprite, remaining: number): Sprite {
   return { ...sprite, y: sprite.y - (sprite.size * (1 - remaining)) / 2, size: sprite.size * remaining };
 }
 
@@ -422,7 +422,7 @@ export function shrivelInstance(
   return {
     ...instance,
     wither: smoothstep(0, SHRIVEL_WITHER_END, progress),
-    sprites: instance.sprites.map((sprite) => shrunk(sprite, remaining)),
+    sprites: instance.sprites.map((sprite) => shrunkOnFoot(sprite, remaining)),
   };
 }
 

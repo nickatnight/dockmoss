@@ -4,15 +4,16 @@ import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
 
-// Per instance: the device box (4 floats), the seed offset and the
-// overgrowth (3), then MAX_SPRITES sprites of x, y, size and kind (4 each;
+// Per instance: the device box (4 floats), the seed offset, the overgrowth
+// and the hue (4), then MAX_SPRITES sprites of x, y, size and kind (4 each;
 // kind 0 is no sprite). The locations match the `layout` qualifiers in
 // moss.vert.glsl.
 const BOX_LOCATION = 0;
 const MOSS_LOCATION = 1;
 const FIRST_SPRITE_LOCATION = 2;
 const FLOATS_PER_SPRITE = 4;
-const FLOATS_PER_INSTANCE = 7 + MAX_SPRITES * FLOATS_PER_SPRITE;
+const FLOATS_BEFORE_SPRITES = 8;
+const FLOATS_PER_INSTANCE = FLOATS_BEFORE_SPRITES + MAX_SPRITES * FLOATS_PER_SPRITE;
 const BYTES_PER_FLOAT = 4;
 const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: 1, flower: 2 };
 
@@ -54,11 +55,11 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   gl.vertexAttribPointer(BOX_LOCATION, 4, gl.FLOAT, false, stride, 0);
   gl.vertexAttribDivisor(BOX_LOCATION, 1);
   gl.enableVertexAttribArray(MOSS_LOCATION);
-  gl.vertexAttribPointer(MOSS_LOCATION, 3, gl.FLOAT, false, stride, 4 * BYTES_PER_FLOAT);
+  gl.vertexAttribPointer(MOSS_LOCATION, 4, gl.FLOAT, false, stride, 4 * BYTES_PER_FLOAT);
   gl.vertexAttribDivisor(MOSS_LOCATION, 1);
   for (let index = 0; index < MAX_SPRITES; index++) {
     const location = FIRST_SPRITE_LOCATION + index;
-    const offset = (7 + index * FLOATS_PER_SPRITE) * BYTES_PER_FLOAT;
+    const offset = (FLOATS_BEFORE_SPRITES + index * FLOATS_PER_SPRITE) * BYTES_PER_FLOAT;
     gl.enableVertexAttribArray(location);
     gl.vertexAttribPointer(location, FLOATS_PER_SPRITE, gl.FLOAT, false, stride, offset);
     gl.vertexAttribDivisor(location, 1);
@@ -87,11 +88,11 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
         data = new Float32Array(length);
       }
       data.fill(0, 0, length);
-      instances.forEach(({ box, seed, overgrowth, sprites }, index) => {
+      instances.forEach(({ box, seed, overgrowth, hue, sprites }, index) => {
         const start = index * FLOATS_PER_INSTANCE;
-        data.set([box.x, box.y, box.width, box.height, ...seedOffset(seed), overgrowth], start);
+        data.set([box.x, box.y, box.width, box.height, ...seedOffset(seed), overgrowth, hue], start);
         sprites.slice(0, MAX_SPRITES).forEach(({ x, y, size, kind }, slot) => {
-          data.set([x, y, size, SPRITE_KINDS[kind]], start + 7 + slot * FLOATS_PER_SPRITE);
+          data.set([x, y, size, SPRITE_KINDS[kind]], start + FLOATS_BEFORE_SPRITES + slot * FLOATS_PER_SPRITE);
         });
       });
       gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, length), gl.DYNAMIC_DRAW);

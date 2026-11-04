@@ -9,6 +9,7 @@ import {
   glslConstants,
   fnv1a32,
   itemKeys,
+  mossHue,
   mossInstances,
   mossyIcons,
   parseOvergrowthOverride,
@@ -216,6 +217,7 @@ describe("mossInstances", () => {
     expect(instance.box).toEqual(toDeviceBox(artBox(tile), 2, 1964));
     expect(instance.seed).toBe(3244016102);
     expect(instance.overgrowth).toBe(quantize(0.6));
+    expect(instance.hue).toBe(mossHue(3244016102));
   });
 });
 
@@ -358,6 +360,29 @@ describe("worstCaseFront", () => {
 
   it.each([0, 0.5, 1])("draws nothing at overgrowth 0, at x = %d", (x) => {
     expect(worstCaseFront(x, 0)).toBe(0);
+  });
+});
+
+describe("mossHue", () => {
+  const hues = Array.from({ length: 2000 }, (_, index) => mossHue(fnv1a32(`app.${index}#0`)));
+
+  it("stays from -1 (warmer) to 1 (cooler)", () => {
+    expect(Math.min(...hues)).toBeGreaterThanOrEqual(-1);
+    expect(Math.max(...hues)).toBeLessThanOrEqual(1);
+  });
+
+  it("spreads icons across the range, not all one hue", () => {
+    expect(hues.filter((hue) => hue < -0.5).length).toBeGreaterThan(300);
+    expect(hues.filter((hue) => hue > 0.5).length).toBeGreaterThan(300);
+  });
+
+  // Golden values: a change here recolours every icon's moss.
+  it.each([
+    [0, -1],
+    [0xffffffff, -0.23921568627450984],
+    [3244016102, 0.3411764705882352],
+  ])("is fixed for seed %d", (seed, hue) => {
+    expect(mossHue(seed)).toBe(hue);
   });
 });
 

@@ -173,6 +173,8 @@ export const TUFT_PER_REACH = 0.3;
 export const FBM_OCTAVES = 5;
 /** Grain can cover pixels this far beyond the front. */
 export const FRONT_FUZZ_WIDTH = 0.04;
+/** The contact shadow darkens the art this far beyond the front. */
+export const CONTACT_SHADOW_WIDTH = 0.03;
 
 /** Mirrors `growthDistance` in moss.frag.glsl. */
 function growthDistance(x: number, y: number): number {
@@ -189,10 +191,10 @@ function growthDistance(x: number, y: number): number {
 const FRONT_SCAN_STEPS = 1000;
 
 /**
- * The highest point on column `x` where moss can cover any pixel, as a
- * fraction of the art height. Mirrors `mossFront` and `mossCover` with every
- * noise term at its peak: fbm at the sum of its octave amplitudes, the tuft
- * noise at 1. Rounded up to the next 1/1000.
+ * The highest point on column `x` where moss or its contact shadow can touch
+ * any pixel, as a fraction of the art height. Mirrors `mossFront`, `mossCover`
+ * and `contactShadow` with every noise term at its peak: fbm at the sum of its
+ * octave amplitudes, the tuft noise at 1. Rounded up to the next 1/1000.
  */
 export function worstCaseFront(x: number, overgrowth: number): number {
   if (overgrowth <= 0) {
@@ -205,7 +207,7 @@ export function worstCaseFront(x: number, overgrowth: number): number {
     reach +
     raggedPeak * Math.min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
     tuftPeak * Math.min(TUFT_CAP, reach * TUFT_PER_REACH) +
-    FRONT_FUZZ_WIDTH;
+    Math.max(FRONT_FUZZ_WIDTH, CONTACT_SHADOW_WIDTH);
   for (let step = FRONT_SCAN_STEPS; step >= 0; step--) {
     if (growthDistance(x, step / FRONT_SCAN_STEPS) <= front) {
       return Math.min(1, (step + 1) / FRONT_SCAN_STEPS);
@@ -231,6 +233,7 @@ export function glslConstants(): string {
     TUFT_CAP,
     TUFT_PER_REACH,
     FRONT_FUZZ_WIDTH,
+    CONTACT_SHADOW_WIDTH,
   };
   const vec2s = { LEFT_CORNER, RIGHT_CORNER };
   return [
@@ -297,11 +300,20 @@ export function spritesFor(seed: number): Sprite[] {
   return sprites;
 }
 
+/**
+ * Where an icon's moss sits between warmer (-1, olive) and cooler (1, blue
+ * green), from bits of its seed that seedOffset does not use alone.
+ */
+export function mossHue(seed: number): number {
+  return ((Math.imul(seed, 0x9e3779b1) >>> 24) / 0xff) * 2 - 1;
+}
+
 /** One icon's moss, ready for the GPU: one instance of the draw. */
 export interface MossInstance {
   box: DeviceBox;
   seed: number;
   overgrowth: QuantizedOvergrowth;
+  hue: number;
   sprites: readonly Sprite[];
 }
 
@@ -314,6 +326,7 @@ export function mossInstances(
     box: toDeviceBox(artBox(tile), pixelRatio, canvasHeight),
     seed,
     overgrowth,
+    hue: mossHue(seed),
     sprites: overgrown ? spritesFor(seed) : [],
   }));
 }

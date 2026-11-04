@@ -4,6 +4,7 @@ precision highp float;
 flat in vec4 v_box;
 flat in vec2 v_seed;
 flat in float v_overgrowth;
+flat in float v_hue;
 flat in vec4 v_sprites[3];
 
 out vec4 fragColor;
@@ -31,13 +32,27 @@ float noise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-float fbm(vec2 p) {
+// Noise finer than about half a lattice cell per device pixel aliases: it
+// speckles at rest and shimmers while the Dock magnifies. Each term fades to
+// its mean on the way there. Frequencies stay fixed in icon space, so the
+// pattern scales with the icon instead of changing as it grows.
+float bandLimit(float cellsPerPixel) {
+  return 1.0 - smoothstep(0.375, 0.5, cellsPerPixel);
+}
+
+float limitedNoise(vec2 p, float cellsPerPixel) {
+  return 0.5 + bandLimit(cellsPerPixel) * (noise(p) - 0.5);
+}
+
+// `cellsPerPixel` is the first octave's; each octave doubles it.
+float fbm(vec2 p, float cellsPerPixel) {
   float sum = 0.0;
   float amplitude = 0.5;
   for (int octave = 0; octave < FBM_OCTAVES; octave++) {
-    sum += amplitude * noise(p);
+    sum += amplitude * limitedNoise(p, cellsPerPixel);
     p = mat2(1.6, 1.2, -1.2, 1.6) * p;
     amplitude *= 0.5;
+    cellsPerPixel *= 2.0;
   }
   return sum;
 }
@@ -55,10 +70,10 @@ float growthDistance(vec2 uv) {
 
 // Positive inside the moss, negative beyond its front. The front's noise is
 // scaled down at low reach, so the first step of overgrowth is a thin fringe.
-float mossFront(vec2 uv, vec2 p) {
+float mossFront(vec2 uv, vec2 p, float side) {
   float reach = MAX_REACH * pow(v_overgrowth, REACH_EXPONENT);
-  float ragged = fbm(p * 5.0) - 0.5;
-  float tufts = noise(p * 26.0) - 0.5;
+  float ragged = fbm(p * 5.0, 5.0 / side) - 0.5;
+  float tufts = limitedNoise(p * 26.0, 26.0 / side) - 0.5;
   return reach - growthDistance(uv) + ragged * min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
     tufts * min(TUFT_CAP, reach * TUFT_PER_REACH);
 }
@@ -69,24 +84,37 @@ float mossCover(float front, float grain) {
   return clamp(cover + nearFront * (grain - 0.55) * 0.9, 0.0, 1.0);
 }
 
-// Cushions with dark crevices between them, lit from above.
-vec3 mossColour(vec2 p, float grain) {
-  float clump = fbm(p * 13.0 + 7.3);
-  float cushion = smoothstep(0.3, 0.62, clump);
-  float lift = clamp((fbm(p * 13.0 + 7.3 - vec2(0.0, 0.025)) - clump) * -14.0, -1.0, 1.0);
+// Deep enough to read as shade between cushions, light enough not to read as
+// holes on dark art.
+const vec3 CREVICE = vec3(0.10, 0.16, 0.05);
+// What a hue of 1 adds to the body and lit colours: cooler, blue-green moss.
+// A hue of -1 subtracts it: warmer, olive moss.
+const vec3 HUE_SHIFT = vec3(-0.05, 0.0, 0.05);
 
-  vec3 crevice = vec3(0.06, 0.09, 0.03);
-  vec3 body = mix(vec3(0.25, 0.42, 0.09), vec3(0.18, 0.38, 0.14), fbm(p * 2.0));
-  vec3 lit = vec3(0.64, 0.76, 0.24);
-  vec3 colour = mix(crevice, body, cushion);
+// Cushions with dark crevices between them, lit from above.
+vec3 mossColour(vec2 p, float grain, float side, float hue) {
+  float clump = fbm(p * 13.0 + 7.3, 13.0 / side);
+  float cushion = smoothstep(0.3, 0.62, clump);
+  float lift = clamp((fbm(p * 13.0 + 7.3 - vec2(0.0, 0.025), 13.0 / side) - clump) * -14.0, -1.0, 1.0);
+
+  vec3 body = mix(vec3(0.25, 0.42, 0.09), vec3(0.18, 0.38, 0.14), fbm(p * 2.0, 2.0 / side)) + hue * HUE_SHIFT;
+  vec3 lit = vec3(0.64, 0.76, 0.24) + hue * HUE_SHIFT * 1.5;
+  vec3 colour = mix(CREVICE, body, cushion);
   colour = mix(colour, lit, clamp(lift * 1.4 + cushion * 0.25 - 0.1, 0.0, 1.0) * cushion);
   colour *= mix(0.78, 1.12, grain);
   return colour;
 }
 
+// A faint crevice-green rim just beyond the front, so the moss sits on the art.
+const float CONTACT_SHADOW_STRENGTH = 0.18;
+
 float contactShadow(float front, float cover) {
-  return 0.4 * smoothstep(-0.06, 0.0, front) * (1.0 - cover);
+  return CONTACT_SHADOW_STRENGTH * smoothstep(-CONTACT_SHADOW_WIDTH, 0.0, front) * (1.0 - cover);
 }
+
+// Fine mottling: under half a lattice cell per device pixel at tile size 45
+// (a 74 px art box), so it stays whole there and fades on smaller Docks.
+const float GRAIN_FREQUENCY = 28.0;
 
 const float FLOWER = 2.0;
 
@@ -154,13 +182,13 @@ void main() {
 
   vec2 uv = local / size;
   vec2 p = uv + v_seed;
-  float front = mossFront(uv, p);
-  float grain = noise(p * 95.0);
+  float front = mossFront(uv, p, side);
+  float grain = limitedNoise(p * GRAIN_FREQUENCY, GRAIN_FREQUENCY / side);
   float cover = mossCover(front, grain);
-  vec3 colour = mossColour(p, grain);
+  vec3 colour = mossColour(p, grain, side, v_hue);
   float shadow = contactShadow(front, cover);
 
-  vec4 moss = vec4(colour * cover, cover + shadow);
+  vec4 moss = vec4(colour * cover + CREVICE * shadow, cover + shadow);
   if (v_sprites[0].w > 0.5) {
     float pixel = 1.0 / side;
     for (int index = 0; index < 3; index++) {

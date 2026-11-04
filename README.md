@@ -18,7 +18,7 @@ The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay wind
 
 `pnpm tauri dev` also outlines each application icon, alternating magenta and cyan, and labels it with the app's overgrowth (0.00 to 1.00) over its stage, for example `0.66` over `patchy`. Every second label sits one label higher, so neighbouring labels don't cover each other at the default Dock size. While the Dock is magnified, labels near the pointer can still overlap. The labels sit above macOS's own Dock tooltip and can hide part of it. If the overlay's `watch_dock` or `watch_growth` call is rejected, a 2 pt red bar runs along the bottom of the screen. `pnpm build` leaves all of this out.
 
-To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. Every Dock icon then uses that value, and at 1 every icon is also overgrown, with sprites. Any other value is ignored with a console warning. `VITE_DOCKMOSS_SWAY=1` turns on the sway loop: tuft tips and sprites move gently, at 30 frames a second, while some icon is at least patchy. Sway is off in every other build until the settings window adds it, because it costs about 19% CPU (job 010, M9).
+To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. Every Dock icon then uses that value, and at 1 every icon is also overgrown, with sprites. Any other value is ignored with a console warning. `VITE_DOCKMOSS_SWAY=1` turns on the sway loop: tuft tips and sprites move gently, at 30 frames a second, while some icon is at least patchy. Sway is off in every other build: this loop costs about 19% CPU (job 010, M9). Slice 12 replaces it with a cheaper sway, under a 3% bar, and adds its setting.
 
 ```sh
 VITE_DOCKMOSS_OVERGROWTH=0.6 pnpm tauri dev

@@ -7,7 +7,7 @@ import { createRenderer } from "./renderer";
 
 type Call =
   | { op: "resize"; width: number; height: number }
-  | { op: "draw"; instances: readonly MossInstance[] }
+  | { op: "draw"; instances: readonly MossInstance[]; time: number }
   | { op: "clear" };
 
 /** A MossGl that records its calls, and a list of every one created. */
@@ -17,9 +17,15 @@ function fakeGls() {
     const calls: Call[] = [];
     created.push(calls);
     return {
-      resize: (width, height) => calls.push({ op: "resize", width, height }),
-      draw: (instances) => calls.push({ op: "draw", instances }),
-      clear: () => calls.push({ op: "clear" }),
+      resize: (width, height) => {
+        calls.push({ op: "resize", width, height });
+      },
+      draw: (instances, time) => {
+        calls.push({ op: "draw", instances, time });
+      },
+      clear: () => {
+        calls.push({ op: "clear" });
+      },
     };
   };
   return { created, create };
@@ -43,13 +49,14 @@ function manualScheduler() {
   };
 }
 
-function setup() {
+function setup(sway = false) {
   const gls = fakeGls();
   const frames = manualScheduler();
   const renderer = createRenderer({
     schedule: frames.schedule,
     createGl: gls.create,
     overgrowthOverride: null,
+    sway,
   });
   renderer.resize(1512, 982, 2);
   const calls = (): Call[] => gls.created[gls.created.length - 1] ?? [];
@@ -171,5 +178,89 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(ops()).toEqual([]);
+  });
+});
+
+describe("the sway loop", () => {
+  const patchy = (overgrowth: number): AppGrowth[] => [
+    { bundleId: discord.bundleId, overgrowth, stage: overgrowth >= 0.5 ? "patchy" : "fuzz" },
+  ];
+
+  /** Runs `count` frames 1/60 s apart from `start` ms and returns the draw times. */
+  function runFrames(env: ReturnType<typeof setup>, count: number, start = 0): number[] {
+    const before = env.calls().length;
+    for (let index = 0; index < count; index++) {
+      env.frames.runFrame(start + (index * 1000) / 60);
+    }
+    return env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.time] : []));
+  }
+
+  it("does not run with sway off, even with a patchy icon", () => {
+    const env = setup(false);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.8));
+
+    expect(runFrames(env, 1)).toHaveLength(1);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("does not run with sway on while every icon is below patchy", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.45));
+
+    expect(runFrames(env, 1)).toHaveLength(1);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("runs with sway on and an icon at patchy, at 30 frames a second", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.5));
+
+    const drawTimes = runFrames(env, 60, 1000);
+
+    expect(env.frames.pending).toBe(1);
+    expect(drawTimes).toHaveLength(30);
+    for (let index = 1; index < drawTimes.length; index++) {
+      expect(drawTimes[index] - drawTimes[index - 1]).toBeGreaterThanOrEqual(1 / 30 - 1e-9);
+    }
+  });
+
+  it("stops scheduling once the last icon drops below patchy", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.9));
+    runFrames(env, 10);
+
+    env.renderer.growth(patchy(0.3));
+    runFrames(env, 1, 500);
+
+    expect(env.frames.pending).toBe(0);
+    expect(runFrames(env, 5, 600)).toEqual([]);
+  });
+
+  it("stops at once when the Dock empties", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.9));
+    runFrames(env, 3);
+
+    env.renderer.dock([]);
+    runFrames(env, 1, 100);
+
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("keeps the last sway pose for a draw after the loop stops", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.9));
+    const swayed = runFrames(env, 4, 2000);
+    env.renderer.growth(patchy(0.3));
+
+    const settled = runFrames(env, 1, 3000);
+
+    expect(settled).toEqual([swayed[swayed.length - 1]]);
   });
 });

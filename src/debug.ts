@@ -1,6 +1,6 @@
 import "./debug.css";
 import type { AppGrowth, BundleId, DockItem } from "./ipc";
-import { parseOvergrowthOverride } from "./render/model";
+import { parseOvergrowthOverride, parseSwayFlag } from "./render/model";
 import type { FrameSink } from "./render/renderer";
 
 interface Outline {
@@ -84,4 +84,12 @@ export function overgrowthOverride(): number | null {
     console.warn("VITE_DOCKMOSS_OVERGROWTH ignored: not a number from 0 to 1", parsed.raw);
   }
   return parsed.kind === "set" ? parsed.overgrowth : null;
+}
+
+export function swayFlag(): boolean {
+  const parsed = parseSwayFlag(import.meta.env.VITE_DOCKMOSS_SWAY);
+  if (parsed.kind === "invalid") {
+    console.warn("VITE_DOCKMOSS_SWAY ignored: not 1 or 0", parsed.raw);
+  }
+  return parsed.kind === "set" && parsed.sway;
 }

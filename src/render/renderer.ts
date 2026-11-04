@@ -4,7 +4,15 @@
 
 import type { AppGrowth, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
-import { type Icon, mossInstances, mossyIcons, step } from "./model";
+import {
+  type Icon,
+  SWAY_CYCLE_SECONDS,
+  SWAY_FRAME_MS,
+  mossInstances,
+  mossyIcons,
+  step,
+  swaying,
+} from "./model";
 
 /** What `overlay.ts` passes every Dock and growth frame to. */
 export interface FrameSink {
@@ -18,6 +26,8 @@ export interface RendererOptions {
   /** A MossGl for the canvas's current context, or null if it has none. */
   createGl(): MossGl | null;
   overgrowthOverride: number | null;
+  /** Off in user builds until a setting turns it on (slice 12). */
+  sway: boolean;
 }
 
 export interface MossRenderer extends FrameSink {
@@ -36,16 +46,44 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let drawn: Icon[] | null = null;
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
+  /** The schedule time of the last sway frame drawn, in ms. */
+  let lastSwayFrame: number | null = null;
+  /** The sway clock, in s, that every draw uses: frozen while sway is off. */
+  let swayTime = 0;
 
-  const frame = (): void => {
+  const loopRuns = (): boolean => options.sway && swaying(latest);
+
+  const requestFrame = (): void => {
+    if (gl !== null && !frameRequested) {
+      frameRequested = true;
+      options.schedule(frame);
+    }
+  };
+
+  function frame(time: number): void {
     frameRequested = false;
-    if (gl === null || step(drawn, latest).kind !== "draw") {
+    if (gl === null) {
       return;
     }
+    const changed = step(drawn, latest).kind === "draw";
+    let swayDue = false;
+    if (loopRuns()) {
+      requestFrame();
+      swayDue = lastSwayFrame === null || time - lastSwayFrame >= SWAY_FRAME_MS;
+    } else {
+      lastSwayFrame = null;
+    }
+    if (!changed && !swayDue) {
+      return;
+    }
+    if (swayDue) {
+      lastSwayFrame = time;
+      swayTime = (time / 1000) % SWAY_CYCLE_SECONDS;
+    }
     const canvasHeight = Math.round(size.height * size.pixelRatio);
-    gl.draw(mossInstances(latest, size.pixelRatio, canvasHeight));
+    gl.draw(mossInstances(latest, size.pixelRatio, canvasHeight), swayTime);
     drawn = latest;
-  };
+  }
 
   const update = (): void => {
     latest = mossyIcons(items, growth, options.overgrowthOverride);
@@ -55,9 +93,8 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       // frame callbacks there, so the old moss would show at the next order-in.
       gl?.clear();
       drawn = [];
-    } else if (next.kind === "draw" && gl !== null && !frameRequested) {
-      frameRequested = true;
-      options.schedule(frame);
+    } else if (next.kind === "draw" || loopRuns()) {
+      requestFrame();
     }
   };
 

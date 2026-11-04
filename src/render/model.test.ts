@@ -13,6 +13,7 @@ import {
   mossInstances,
   mossyIcons,
   parseOvergrowthOverride,
+  parseSwayFlag,
   quantize,
   seedOffset,
   spritesFor,
@@ -284,6 +285,24 @@ describe("parseOvergrowthOverride", () => {
 
   it.each([undefined, ""])("is unset for %j", (raw) => {
     expect(parseOvergrowthOverride(raw)).toEqual({ kind: "unset" });
+  });
+});
+
+describe("parseSwayFlag", () => {
+  it("turns sway on for 1", () => {
+    expect(parseSwayFlag("1")).toEqual({ kind: "set", sway: true });
+  });
+
+  it.each(["0", ""])("leaves sway off for %j", (raw) => {
+    expect(parseSwayFlag(raw)).toEqual({ kind: "set", sway: false });
+  });
+
+  it("leaves sway off when unset", () => {
+    expect(parseSwayFlag(undefined)).toEqual({ kind: "set", sway: false });
+  });
+
+  it.each(["yes", "true", "2"])("rejects %j", (raw) => {
+    expect(parseSwayFlag(raw)).toEqual({ kind: "invalid", raw });
   });
 });
 

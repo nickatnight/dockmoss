@@ -5,6 +5,10 @@ flat in vec4 v_box;
 flat in vec2 v_seed;
 flat in float v_overgrowth;
 flat in float v_hue;
+
+// The sway clock in s: 0 while sway has never run. It wraps at 60 s
+// (SWAY_CYCLE_SECONDS), a whole number of both sway periods below.
+uniform float u_time;
 flat in vec4 v_sprites[3];
 
 out vec4 fragColor;
@@ -68,14 +72,28 @@ float growthDistance(vec2 uv) {
   return min(fromBottom, fromCorner);
 }
 
+const float TAU = 6.2831853;
+const float MOSS_SWAY_PERIOD = 3.0;
+const float SPRITE_SWAY_PERIOD = 2.0;
+// How far a sprite's tip leans, in units of its box: 1.1 device px for the
+// largest sprite at tile size 45.
+const float SPRITE_SWAY = 0.08;
+
+// From -1 to 1, and 0 at time 0, so moss that has never swayed is static moss.
+float swayWave(float period, float phase) {
+  return 0.5 * (sin(TAU * u_time / period + phase) - sin(phase));
+}
+
 // Positive inside the moss, negative beyond its front. The front's noise is
 // scaled down at low reach, so the first step of overgrowth is a thin fringe.
 float mossFront(vec2 uv, vec2 p, float side) {
   float reach = MAX_REACH * pow(v_overgrowth, REACH_EXPONENT);
   float ragged = fbm(p * 5.0, 5.0 / side) - 0.5;
   float tufts = limitedNoise(p * 26.0, 26.0 / side) - 0.5;
+  // A slow wave along the front: tufts rise and settle in turn.
+  float sway = SWAY_REACH * swayWave(MOSS_SWAY_PERIOD, uv.x * 9.0 + v_seed.x);
   return reach - growthDistance(uv) + ragged * min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
-    tufts * min(TUFT_CAP, reach * TUFT_PER_REACH);
+    tufts * min(TUFT_CAP, reach * TUFT_PER_REACH) + sway;
 }
 
 float mossCover(float front, float grain) {
@@ -131,7 +149,7 @@ float boxDistance(vec2 p, vec2 halfSize) {
 // foot. `pixel` is one device pixel in the same units.
 vec4 mushroom(vec2 q, float pixel) {
   float stem = boxDistance(q - vec2(0.5, 0.28), vec2(0.075, 0.26));
-  float cap = max(ellipseDistance(q - vec2(0.5, 0.5), vec2(0.44, 0.36)), 0.47 - q.y);
+  float cap = max(ellipseDistance(q - vec2(0.5, 0.5), vec2(0.42, 0.36)), 0.47 - q.y);
   vec3 stemColour = mix(vec3(0.90, 0.85, 0.72), vec3(0.62, 0.55, 0.42), smoothstep(0.45, 0.6, q.x));
   vec3 capColour = mix(vec3(0.52, 0.14, 0.07), vec3(0.86, 0.36, 0.18), smoothstep(0.5, 0.85, q.y));
   float capCover = clamp(0.5 - cap / pixel, 0.0, 1.0);
@@ -159,6 +177,8 @@ vec4 flower(vec2 q, float pixel, float tint) {
 // One sprite (x, y, size, kind) composited at uv, or nothing outside its box.
 vec4 spriteColour(vec4 sprite, vec2 uv, float pixel, float grain) {
   vec2 q = (uv - sprite.xy) / sprite.z + 0.5;
+  // The tip leans more than the foot.
+  q.x -= SPRITE_SWAY * q.y * q.y * swayWave(SPRITE_SWAY_PERIOD, sprite.x * 41.0);
   if (sprite.w < 0.5 || any(lessThan(q, vec2(0.0))) || any(greaterThan(q, vec2(1.0)))) {
     return vec4(0.0);
   }

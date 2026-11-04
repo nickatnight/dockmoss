@@ -175,6 +175,11 @@ export const FBM_OCTAVES = 5;
 export const FRONT_FUZZ_WIDTH = 0.04;
 /** The contact shadow darkens the art this far beyond the front. */
 export const CONTACT_SHADOW_WIDTH = 0.03;
+/**
+ * How far sway lifts or lowers the front, at most: 0.9 device px on the 74 px
+ * art box of tile size 45.
+ */
+export const SWAY_REACH = 0.012;
 
 /** Mirrors `growthDistance` in moss.frag.glsl. */
 function growthDistance(x: number, y: number): number {
@@ -193,8 +198,9 @@ const FRONT_SCAN_STEPS = 1000;
 /**
  * The highest point on column `x` where moss or its contact shadow can touch
  * any pixel, as a fraction of the art height. Mirrors `mossFront`, `mossCover`
- * and `contactShadow` with every noise term at its peak: fbm at the sum of its
- * octave amplitudes, the tuft noise at 1. Rounded up to the next 1/1000.
+ * and `contactShadow` with every noise term at its peak (fbm at the sum of its
+ * octave amplitudes, the tuft noise at 1) and sway at its highest. Rounded up
+ * to the next 1/1000.
  */
 export function worstCaseFront(x: number, overgrowth: number): number {
   if (overgrowth <= 0) {
@@ -207,6 +213,7 @@ export function worstCaseFront(x: number, overgrowth: number): number {
     reach +
     raggedPeak * Math.min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
     tuftPeak * Math.min(TUFT_CAP, reach * TUFT_PER_REACH) +
+    SWAY_REACH +
     Math.max(FRONT_FUZZ_WIDTH, CONTACT_SHADOW_WIDTH);
   for (let step = FRONT_SCAN_STEPS; step >= 0; step--) {
     if (growthDistance(x, step / FRONT_SCAN_STEPS) <= front) {
@@ -234,6 +241,7 @@ export function glslConstants(): string {
     TUFT_PER_REACH,
     FRONT_FUZZ_WIDTH,
     CONTACT_SHADOW_WIDTH,
+    SWAY_REACH,
   };
   const vec2s = { LEFT_CORNER, RIGHT_CORNER };
   return [
@@ -329,6 +337,30 @@ export function mossInstances(
     hue: mossHue(seed),
     sprites: overgrown ? spritesFor(seed) : [],
   }));
+}
+
+/** Sway runs while some icon is at least patchy. */
+export const SWAY_MIN_OVERGROWTH = 0.5;
+/** Sway frames closer together than this are skipped: about 30 a second. */
+export const SWAY_FRAME_MS = 33;
+/**
+ * The sway clock wraps here, a whole number of every sway period in the
+ * shader, so the time stays small enough for float32.
+ */
+export const SWAY_CYCLE_SECONDS = 60;
+
+export function swaying(icons: readonly Icon[]): boolean {
+  return icons.some(({ overgrowth }) => overgrowth >= SWAY_MIN_OVERGROWTH);
+}
+
+export type SwayFlag = { kind: "set"; sway: boolean } | { kind: "invalid"; raw: string };
+
+/** The dev-only VITE_DOCKMOSS_SWAY: "1" turns sway on; unset, "" or "0" leaves it off. */
+export function parseSwayFlag(raw: string | undefined): SwayFlag {
+  if (raw === undefined || raw === "" || raw === "0") {
+    return { kind: "set", sway: false };
+  }
+  return raw === "1" ? { kind: "set", sway: true } : { kind: "invalid", raw };
 }
 
 export type OvergrowthOverride =

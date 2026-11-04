@@ -1,7 +1,12 @@
 import { createMossGl } from "./gl";
 import { type FrameSink, createRenderer } from "./renderer";
 
-export function startMossRenderer(root: HTMLElement, overgrowthOverride: number | null): FrameSink {
+export interface MossOptions {
+  overgrowthOverride: number | null;
+  sway: boolean;
+}
+
+export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway }: MossOptions): FrameSink {
   const canvas = document.createElement("canvas");
   canvas.className = "moss";
   canvas.setAttribute("aria-hidden", "true");
@@ -11,6 +16,7 @@ export function startMossRenderer(root: HTMLElement, overgrowthOverride: number 
     schedule: (callback) => requestAnimationFrame(callback),
     createGl: () => createMossGl(canvas),
     overgrowthOverride,
+    sway,
   });
   const resize = (): void => renderer.resize(innerWidth, innerHeight, devicePixelRatio);
 

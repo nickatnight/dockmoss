@@ -30,7 +30,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     key: "com.hnc.Discord#0" as ItemKey,
     seed: 3244016102,
     tile: { x: 700, ...TILE },
-    overgrowth: 0.5,
+    overgrowth: quantize(0.5),
     ...overrides,
   };
 }
@@ -192,7 +192,7 @@ describe("step", () => {
   });
 
   it("updates only the moss when the overgrowth moves by a visible step", () => {
-    const grown = scene({ overgrowth: 0.5 + 1 / 256 });
+    const grown = scene({ overgrowth: quantize(0.5 + 1 / 256) });
 
     expect(step(scene(), grown)).toEqual({
       kind: "draw",

@@ -5,17 +5,19 @@ import type { AppGrowth, BundleId, DockItem, LogicalRect } from "../ipc";
 
 export type ItemKey = string & { readonly __brand: "ItemKey" };
 
+export type QuantizedOvergrowth = number & { readonly __brand: "QuantizedOvergrowth" };
+
 export interface Scene {
   key: ItemKey;
   seed: number;
   tile: LogicalRect;
-  overgrowth: number;
+  overgrowth: QuantizedOvergrowth;
 }
 
 export const OVERGROWTH_STEPS = 256;
 
-export function quantize(overgrowth: number): number {
-  return Math.round(overgrowth * OVERGROWTH_STEPS) / OVERGROWTH_STEPS;
+export function quantize(overgrowth: number): QuantizedOvergrowth {
+  return (Math.round(overgrowth * OVERGROWTH_STEPS) / OVERGROWTH_STEPS) as QuantizedOvergrowth;
 }
 
 // Noise coordinates to move each item's pattern by, at most, on each axis.
@@ -56,7 +58,7 @@ export function mostOvergrownItem(
   const keys = itemKeys(items);
   let best: Scene | null = null;
   for (const [index, { bundleId, rect }] of items.entries()) {
-    const overgrowth = byBundleId.get(bundleId) ?? 0;
+    const overgrowth = byBundleId.get(bundleId) ?? quantize(0);
     if (best === null || overgrowth > best.overgrowth) {
       const key = keys[index];
       best = { key, seed: fnv1a32(key), tile: rect, overgrowth };

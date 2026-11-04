@@ -1,18 +1,12 @@
-import {
-  type AppGrowth,
-  type BundleId,
-  type DockItem,
-  isCommandError,
-  watchDock,
-  watchGrowth,
-} from "./ipc";
+import type { AppGrowth, BundleId, DockItem } from "./ipc";
 
 interface Outline {
   box: HTMLDivElement;
   label: HTMLSpanElement;
 }
 
-export async function outlineDockItems(root: HTMLElement): Promise<void> {
+/** Outlines each Dock app item and labels it with its growth. */
+export function outlineDockItems(root: HTMLElement) {
   const layer = document.createElement("div");
   layer.className = "debug-layer";
   layer.setAttribute("aria-hidden", "true");
@@ -60,25 +54,14 @@ export async function outlineDockItems(root: HTMLElement): Promise<void> {
     }
   };
 
-  const [dock, growthWatch] = await Promise.allSettled([
-    watchDock((items) => {
+  return {
+    dock(items: DockItem[]): void {
       latest = items;
       requestDraw();
-    }),
-    watchGrowth((frame) => {
+    },
+    growth(frame: AppGrowth[]): void {
       growth = new Map(frame.map((app) => [app.bundleId, app]));
       requestDraw();
-    }),
-  ]);
-  if (dock.status === "rejected") {
-    warnNotWatched("dock items", dock.reason);
-  }
-  if (growthWatch.status === "rejected") {
-    warnNotWatched("growth", growthWatch.reason);
-  }
-}
-
-function warnNotWatched(what: string, error: unknown): void {
-  const kind = isCommandError(error) ? error.kind : "unknown";
-  console.warn(`${what} not watched`, kind, error);
+    },
+  };
 }

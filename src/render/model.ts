@@ -103,6 +103,27 @@ function sameRect(a: LogicalRect, b: LogicalRect): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
+/** A rect in canvas device pixels, measured from the bottom-left as GL does. */
+export interface DeviceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function toDeviceBox(
+  rect: LogicalRect,
+  pixelRatio: number,
+  canvasHeight: number,
+): DeviceBox {
+  return {
+    x: rect.x * pixelRatio,
+    y: canvasHeight - (rect.y + rect.height) * pixelRatio,
+    width: rect.width * pixelRatio,
+    height: rect.height * pixelRatio,
+  };
+}
+
 export type OvergrowthOverride =
   | { kind: "unset" }
   | { kind: "set"; overgrowth: number }

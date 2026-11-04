@@ -10,6 +10,7 @@ import {
   parseOvergrowthOverride,
   quantize,
   step,
+  toDeviceBox,
 } from "./model";
 
 const TILE = { y: 918, width: 56, height: 56 };
@@ -240,5 +241,19 @@ describe("parseOvergrowthOverride", () => {
 
   it.each([undefined, ""])("is unset for %j", (raw) => {
     expect(parseOvergrowthOverride(raw)).toEqual({ kind: "unset" });
+  });
+});
+
+describe("toDeviceBox", () => {
+  it("scales a CSS-pixel rect by the pixel ratio and measures y up from the canvas bottom", () => {
+    const rect = { x: 700, y: 918, width: 56, height: 56 };
+
+    expect(toDeviceBox(rect, 2, 1964)).toEqual({ x: 1400, y: 16, width: 112, height: 112 });
+  });
+
+  it("keeps CSS pixels at a pixel ratio of 1", () => {
+    const rect = { x: 10.5, y: 1000, width: 64, height: 64 };
+
+    expect(toDeviceBox(rect, 1, 1080)).toEqual({ x: 10.5, y: 16, width: 64, height: 64 });
   });
 });

@@ -662,6 +662,14 @@ describe("INSTANCE_ATTRIBUTES", () => {
     expect(INSTANCE_ATTRIBUTES.map(({ name, size }) => ({ name, size }))).toEqual(inputs);
   });
 
+  it("reads every input in moss.vert.glsl's main, so each one reaches the fragment shader", () => {
+    const main = vertexSource.slice(vertexSource.indexOf("void main()"));
+    const unread = INSTANCE_ATTRIBUTES.map(({ name }) => name).filter((name) => !new RegExp(`\\b${name}\\b`).test(main));
+
+    expect(vertexSource).toContain("void main()");
+    expect(unread).toEqual([]);
+  });
+
   it("writes exactly `size` values per attribute, zeros for a missing sprite", () => {
     const values = INSTANCE_ATTRIBUTES.map((attribute) => attribute.values(layoutInstance));
 
@@ -821,6 +829,12 @@ describe("shrivelInstance", () => {
 
   it("leaves the icon no instance at progress 1, so it is clean", () => {
     expect(at(1)).toBeNull();
+  });
+
+  // Derived by hand: the smoothstep at 0.25 is 3 * 0.25^2 - 2 * 0.25^3 = 0.15625,
+  // so 0.84375 of the overgrowth remains, which is 216/256 and needs no rounding.
+  it("eases the front down slowly at first: a quarter of the way, an overgrown icon keeps 0.84375", () => {
+    expect(at(0.25)?.overgrowth).toBe(0.84375);
   });
 
   it("recedes the front from its start to the bottom edge, never rising, and at or below 0.55", () => {

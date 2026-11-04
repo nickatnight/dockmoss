@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   CORNER_RADIUS_PER_SIDE,
-  type Icon,
+  type MossyIcon,
   type ItemKey,
   artBox,
   glslConstants,
@@ -37,7 +37,7 @@ function growth(
   return { bundleId: bundleId as BundleId, overgrowth, stage };
 }
 
-function icon(overrides: Partial<Icon> = {}): Icon {
+function icon(overrides: Partial<MossyIcon> = {}): MossyIcon {
   return {
     key: "com.hnc.Discord#0" as ItemKey,
     seed: 3244016102,

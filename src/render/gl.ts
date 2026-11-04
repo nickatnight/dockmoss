@@ -35,8 +35,8 @@ const BYTES_PER_FLOAT = 4;
 export interface MossGl {
   /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
   resize(width: number, height: number): void;
-  /** Clears the canvas, then draws every instance in one call, swayed to `time` in s. */
-  draw(instances: readonly MossInstance[], time: number): void;
+  /** Clears the canvas, then draws every instance in one call, swayed to `swaySeconds`. */
+  draw(instances: readonly MossInstance[], swaySeconds: number): void;
   clear(): void;
 }
 
@@ -60,7 +60,7 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   gl.disable(gl.BLEND);
   gl.clearColor(0, 0, 0, 0);
   const resolution = gl.getUniformLocation(program, "u_resolution");
-  const swayTime = gl.getUniformLocation(program, "u_time");
+  const swaySecondsUniform = gl.getUniformLocation(program, "u_sway_seconds");
   gl.uniform2f(resolution, canvas.width, canvas.height);
 
   const buffer = gl.createBuffer();
@@ -94,9 +94,9 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       gl.viewport(0, 0, width, height);
       gl.uniform2f(resolution, width, height);
     },
-    draw(instances, time) {
+    draw(instances, swaySeconds) {
       clear();
-      gl.uniform1f(swayTime, time);
+      gl.uniform1f(swaySecondsUniform, swaySeconds);
       const length = instances.length * FLOATS_PER_INSTANCE;
       if (data.length < length) {
         data = new Float32Array(length);

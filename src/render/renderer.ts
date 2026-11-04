@@ -1,9 +1,9 @@
 import type { AppGrowth, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
 import {
-  type Icon,
+  type MossyIcon,
   SWAY_CYCLE_SECONDS,
-  SWAY_FRAME_MS,
+  SWAY_MIN_FRAME_INTERVAL_MS,
   mossInstances,
   mossyIcons,
   step,
@@ -35,12 +35,12 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let gl = options.createGl();
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
-  let latest: Icon[] = [];
-  let drawn: Icon[] | null = null;
+  let latest: MossyIcon[] = [];
+  let drawn: MossyIcon[] | null = null;
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
-  let lastSwayFrame: number | null = null;
-  let swayTime = 0;
+  let lastSwayFrameMs: number | null = null;
+  let swaySeconds = 0;
 
   const loopRuns = (): boolean => options.sway && swaying(latest);
 
@@ -60,19 +60,19 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     let swayDue = false;
     if (loopRuns()) {
       requestFrame();
-      swayDue = lastSwayFrame === null || time - lastSwayFrame >= SWAY_FRAME_MS;
+      swayDue = lastSwayFrameMs === null || time - lastSwayFrameMs >= SWAY_MIN_FRAME_INTERVAL_MS;
     } else {
-      lastSwayFrame = null;
+      lastSwayFrameMs = null;
     }
     if (!changed && !swayDue) {
       return;
     }
     if (swayDue) {
-      lastSwayFrame = time;
-      swayTime = (time / 1000) % SWAY_CYCLE_SECONDS;
+      lastSwayFrameMs = time;
+      swaySeconds = (time / 1000) % SWAY_CYCLE_SECONDS;
     }
     const canvasHeight = Math.round(size.height * size.pixelRatio);
-    gl.draw(mossInstances(latest, size.pixelRatio, canvasHeight), swayTime);
+    gl.draw(mossInstances(latest, size.pixelRatio, canvasHeight), swaySeconds);
     drawn = latest;
   }
 

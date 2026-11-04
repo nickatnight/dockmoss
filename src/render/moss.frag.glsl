@@ -6,7 +6,7 @@ flat in vec2 v_seed;
 flat in float v_overgrowth;
 flat in float v_hue;
 
-uniform float u_time;
+uniform float u_sway_seconds;
 flat in vec4 v_sprites[3];
 
 out vec4 fragColor;
@@ -32,15 +32,19 @@ float noise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+const float ALIAS_FADE_START = 0.375;
+const float ALIAS_FADE_END = 0.5;
+
 float bandLimit(float cellsPerPixel) {
-  return 1.0 - smoothstep(0.375, 0.5, cellsPerPixel);
+  return 1.0 - smoothstep(ALIAS_FADE_START, ALIAS_FADE_END, cellsPerPixel);
 }
 
 float limitedNoise(vec2 p, float cellsPerPixel) {
   return 0.5 + bandLimit(cellsPerPixel) * (noise(p) - 0.5);
 }
 
-float fbm(vec2 p, float cellsPerPixel) {
+float fbm(vec2 p, float firstOctaveCellsPerPixel) {
+  float cellsPerPixel = firstOctaveCellsPerPixel;
   float sum = 0.0;
   float amplitude = 0.5;
   for (int octave = 0; octave < FBM_OCTAVES; octave++) {
@@ -66,10 +70,10 @@ float growthDistance(vec2 uv) {
 const float TAU = 6.2831853;
 const float MOSS_SWAY_PERIOD = 3.0;
 const float SPRITE_SWAY_PERIOD = 2.0;
-const float SPRITE_SWAY = 0.08;
+const float SPRITE_TIP_LEAN = 0.08;
 
 float swayWave(float period, float phase) {
-  return 0.5 * (sin(TAU * u_time / period + phase) - sin(phase));
+  return 0.5 * (sin(TAU * u_sway_seconds / period + phase) - sin(phase));
 }
 
 // Positive inside the moss, negative beyond its front. The front's noise is
@@ -125,42 +129,42 @@ float boxDistance(vec2 p, vec2 halfSize) {
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
 }
 
-vec4 mushroom(vec2 q, float pixel) {
-  float stem = boxDistance(q - vec2(0.5, 0.28), vec2(0.075, 0.26));
-  float cap = max(ellipseDistance(q - vec2(0.5, 0.5), vec2(0.42, 0.36)), 0.47 - q.y);
-  vec3 stemColour = mix(vec3(0.90, 0.85, 0.72), vec3(0.62, 0.55, 0.42), smoothstep(0.45, 0.6, q.x));
-  vec3 capColour = mix(vec3(0.52, 0.14, 0.07), vec3(0.86, 0.36, 0.18), smoothstep(0.5, 0.85, q.y));
-  float capCover = clamp(0.5 - cap / pixel, 0.0, 1.0);
-  float stemCover = clamp(0.5 - stem / pixel, 0.0, 1.0);
+vec4 mushroom(vec2 boxUv, float devicePixelInBox) {
+  float stem = boxDistance(boxUv - vec2(0.5, 0.28), vec2(0.075, 0.26));
+  float cap = max(ellipseDistance(boxUv - vec2(0.5, 0.5), vec2(0.42, 0.36)), 0.47 - boxUv.y);
+  vec3 stemColour = mix(vec3(0.90, 0.85, 0.72), vec3(0.62, 0.55, 0.42), smoothstep(0.45, 0.6, boxUv.x));
+  vec3 capColour = mix(vec3(0.52, 0.14, 0.07), vec3(0.86, 0.36, 0.18), smoothstep(0.5, 0.85, boxUv.y));
+  float capCover = clamp(0.5 - cap / devicePixelInBox, 0.0, 1.0);
+  float stemCover = clamp(0.5 - stem / devicePixelInBox, 0.0, 1.0);
   vec3 colour = mix(stemColour * stemCover, capColour, capCover);
   return vec4(colour, max(capCover, stemCover));
 }
 
-vec4 flower(vec2 q, float pixel, float tint) {
-  float stem = boxDistance(q - vec2(0.5, 0.3), vec2(0.04, 0.3));
-  vec2 head = q - vec2(0.5, 0.68);
+vec4 flower(vec2 boxUv, float devicePixelInBox, float tint) {
+  float stem = boxDistance(boxUv - vec2(0.5, 0.3), vec2(0.04, 0.3));
+  vec2 head = boxUv - vec2(0.5, 0.68);
   float angle = atan(head.y, head.x);
   float petals = length(head) - (0.21 + 0.09 * cos(5.0 * angle));
   float centre = length(head) - 0.09;
   vec3 petalColour = mix(vec3(0.97, 0.95, 0.90), vec3(0.86, 0.72, 0.94), tint);
-  float stemCover = clamp(0.5 - stem / pixel, 0.0, 1.0);
-  float petalCover = clamp(0.5 - petals / pixel, 0.0, 1.0);
-  float centreCover = clamp(0.5 - centre / pixel, 0.0, 1.0);
+  float stemCover = clamp(0.5 - stem / devicePixelInBox, 0.0, 1.0);
+  float petalCover = clamp(0.5 - petals / devicePixelInBox, 0.0, 1.0);
+  float centreCover = clamp(0.5 - centre / devicePixelInBox, 0.0, 1.0);
   vec3 colour = vec3(0.20, 0.42, 0.12) * stemCover;
   colour = mix(colour, petalColour, petalCover);
   colour = mix(colour, vec3(0.98, 0.76, 0.20), centreCover);
   return vec4(colour, max(stemCover, petalCover));
 }
 
-vec4 spriteColour(vec4 sprite, vec2 uv, float pixel, float grain) {
-  vec2 q = (uv - sprite.xy) / sprite.z + 0.5;
-  q.x -= SPRITE_SWAY * q.y * q.y * swayWave(SPRITE_SWAY_PERIOD, sprite.x * 41.0);
-  if (sprite.w < 0.5 || any(lessThan(q, vec2(0.0))) || any(greaterThan(q, vec2(1.0)))) {
+vec4 spriteColour(vec4 sprite, vec2 uv, float devicePixelInIcon, float grain) {
+  vec2 boxUv = (uv - sprite.xy) / sprite.z + 0.5;
+  boxUv.x -= SPRITE_TIP_LEAN * boxUv.y * boxUv.y * swayWave(SPRITE_SWAY_PERIOD, sprite.x * 41.0);
+  if (sprite.w < 0.5 || any(lessThan(boxUv, vec2(0.0))) || any(greaterThan(boxUv, vec2(1.0)))) {
     return vec4(0.0);
   }
-  float spritePixel = pixel / sprite.z;
-  vec4 colour = sprite.w < FLOWER - 0.5 ? mushroom(q, spritePixel) : flower(q, spritePixel, step(0.5, fract(sprite.x * 37.0)));
-  return colour * smoothstep(0.02, 0.2, q.y + (grain - 0.5) * 0.2);
+  float devicePixelInBox = devicePixelInIcon / sprite.z;
+  vec4 colour = sprite.w < FLOWER - 0.5 ? mushroom(boxUv, devicePixelInBox) : flower(boxUv, devicePixelInBox, step(0.5, fract(sprite.x * 37.0)));
+  return colour * smoothstep(0.02, 0.2, boxUv.y + (grain - 0.5) * 0.2);
 }
 
 void main() {
@@ -185,9 +189,9 @@ void main() {
 
   vec4 moss = vec4(colour * cover + CREVICE * shadow, cover + shadow);
   if (v_sprites[0].w > 0.5) {
-    float pixel = 1.0 / side;
+    float devicePixelInIcon = 1.0 / side;
     for (int index = 0; index < 3; index++) {
-      vec4 drawn = spriteColour(v_sprites[index], uv, pixel, grain);
+      vec4 drawn = spriteColour(v_sprites[index], uv, devicePixelInIcon, grain);
       moss = drawn + moss * (1.0 - drawn.a);
     }
   }

@@ -4,7 +4,7 @@ export type ItemKey = string & { readonly __brand: "ItemKey" };
 
 export type QuantizedOvergrowth = number & { readonly __brand: "QuantizedOvergrowth" };
 
-export interface Icon {
+export interface MossyIcon {
   key: ItemKey;
   seed: number;
   tile: LogicalRect;
@@ -55,7 +55,7 @@ export function mossyIcons(
   items: readonly DockItem[],
   growth: readonly AppGrowth[],
   overgrowthOverride: number | null,
-): Icon[] {
+): MossyIcon[] {
   const byBundleId = new Map(growth.map((app) => [app.bundleId, app]));
   const keys = itemKeys(items);
   return items.flatMap(({ bundleId, rect }, index) => {
@@ -77,7 +77,7 @@ export type Step = { kind: "none" } | { kind: "clear" } | { kind: "draw" };
  * `drawn` is what the canvas shows: null when that is unknown (after a
  * resize or a context restore), and empty when it shows nothing.
  */
-export function step(drawn: readonly Icon[] | null, next: readonly Icon[]): Step {
+export function step(drawn: readonly MossyIcon[] | null, next: readonly MossyIcon[]): Step {
   if (next.length === 0) {
     return drawn !== null && drawn.length === 0 ? { kind: "none" } : { kind: "clear" };
   }
@@ -87,7 +87,7 @@ export function step(drawn: readonly Icon[] | null, next: readonly Icon[]): Step
   return { kind: "draw" };
 }
 
-function sameIcons(a: readonly Icon[], b: readonly Icon[]): boolean {
+function sameIcons(a: readonly MossyIcon[], b: readonly MossyIcon[]): boolean {
   return (
     a.length === b.length &&
     a.every((icon, index) => {
@@ -231,7 +231,7 @@ export function glslConstants(): string {
   ].join("\n");
 }
 
-/** A mushroom or flower on an overgrown icon. Icon space; `size` is its box's side. */
+/** A mushroom or flower on an overgrown icon. MossyIcon space; `size` is its box's side. */
 export interface Sprite {
   kind: "mushroom" | "flower";
   x: number;
@@ -245,7 +245,7 @@ const SPRITE_Y = [0.16, 0.3] as const;
 const SPRITE_SIZE = [0.13, 0.19] as const;
 const SPRITE_TRIES = 12;
 
-function seededRandom(seed: number): () => number {
+function mulberry32(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;
@@ -261,7 +261,7 @@ function between([low, high]: readonly [number, number], random: () => number): 
 
 /** 1 to 3 sprites that do not overlap, chosen and placed from the icon's seed. */
 export function spritesFor(seed: number): Sprite[] {
-  const random = seededRandom(seed);
+  const random = mulberry32(seed);
   const wanted = 1 + Math.floor(random() * MAX_SPRITES);
   const sprites: Sprite[] = [];
   for (let attempt = 0; attempt < SPRITE_TRIES && sprites.length < wanted; attempt++) {
@@ -300,7 +300,7 @@ export interface MossInstance {
 }
 
 export function mossInstances(
-  icons: readonly Icon[],
+  icons: readonly MossyIcon[],
   pixelRatio: number,
   canvasHeight: number,
 ): MossInstance[] {
@@ -314,10 +314,10 @@ export function mossInstances(
 }
 
 export const SWAY_MIN_OVERGROWTH = 0.5;
-export const SWAY_FRAME_MS = 33;
+export const SWAY_MIN_FRAME_INTERVAL_MS = 33;
 export const SWAY_CYCLE_SECONDS = 60;
 
-export function swaying(icons: readonly Icon[]): boolean {
+export function swaying(icons: readonly MossyIcon[]): boolean {
   return icons.some(({ overgrowth }) => overgrowth >= SWAY_MIN_OVERGROWTH);
 }
 

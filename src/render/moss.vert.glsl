@@ -16,11 +16,11 @@ flat out float v_overgrowth;
 flat out float v_hue;
 flat out vec4 v_sprites[3];
 
-const float MARGIN_PX = 1.0;
+const float CLIP_AA_MARGIN_PX = 1.0;
 
 void main() {
   vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
-  vec2 pixel = a_box.xy - MARGIN_PX + corner * (a_box.zw + 2.0 * MARGIN_PX);
+  vec2 pixel = a_box.xy - CLIP_AA_MARGIN_PX + corner * (a_box.zw + 2.0 * CLIP_AA_MARGIN_PX);
   gl_Position = vec4(pixel / u_resolution * 2.0 - 1.0, 0.0, 1.0);
   v_box = a_box;
   v_seed = a_seed;

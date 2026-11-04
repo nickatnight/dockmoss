@@ -7,7 +7,7 @@ import { createRenderer } from "./renderer";
 
 type Call =
   | { op: "resize"; width: number; height: number }
-  | { op: "draw"; instances: readonly MossInstance[]; time: number }
+  | { op: "draw"; instances: readonly MossInstance[]; swaySeconds: number }
   | { op: "clear" };
 
 function fakeGls() {
@@ -19,8 +19,8 @@ function fakeGls() {
       resize: (width, height) => {
         calls.push({ op: "resize", width, height });
       },
-      draw: (instances, time) => {
-        calls.push({ op: "draw", instances, time });
+      draw: (instances, swaySeconds) => {
+        calls.push({ op: "draw", instances, swaySeconds });
       },
       clear: () => {
         calls.push({ op: "clear" });
@@ -187,7 +187,7 @@ describe("the sway loop", () => {
     for (let index = 0; index < count; index++) {
       env.frames.runFrame(start + (index * 1000) / 60);
     }
-    return env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.time] : []));
+    return env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []));
   }
 
   it("does not run with sway off, even with a patchy icon", () => {

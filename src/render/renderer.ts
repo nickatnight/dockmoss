@@ -4,6 +4,7 @@ import {
   type Drawn,
   LOOP_MIN_FRAME_INTERVAL_MS,
   type MossyIcon,
+  NOTHING_DRAWN,
   SWAY_CYCLE_SECONDS,
   type Shrivels,
   mossInstances,
@@ -42,7 +43,6 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let latest: MossyIcon[] = [];
   let drawn: Drawn = "unknown";
   let shrivels: Shrivels = new Map();
-  let shrivelDrawn = false;
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
   let lastLoopFrameMs: number | null = null;
@@ -65,7 +65,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     }
     const due =
       loopRuns() && (lastLoopFrameMs === null || time - lastLoopFrameMs >= LOOP_MIN_FRAME_INTERVAL_MS);
-    const changed = step(drawn, latest).kind !== "none" || (shrivelDrawn && shrivels.size === 0);
+    const changed = step(drawn, latest, shrivels).kind !== "none";
     if (due) {
       lastLoopFrameMs = time;
       if (swayRuns()) {
@@ -77,8 +77,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight);
       shrivels = shrivelling.running;
       gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight), ...shrivelling.instances], swaySeconds);
-      drawn = latest;
-      shrivelDrawn = shrivelling.instances.length > 0;
+      drawn = { icons: latest, shrivelFrame: shrivelling.instances.length > 0 };
     }
     if (loopRuns()) {
       requestFrame();
@@ -88,18 +87,15 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   }
 
   const update = (): void => {
-    const next = mossyIcons(items, growth, options.overgrowthOverride);
-    shrivels = shrivelsAfter(shrivels, drawn, items, growth, next);
-    latest = next;
-    if (shrivels.size === 0 && latest.length === 0) {
-      if (shrivelDrawn || step(drawn, latest).kind === "clear") {
-        // At once: the window may be ordered out already, and WebKit runs no
-        // frame callbacks there, so the old moss would show at the next order-in.
-        gl?.clear();
-      }
-      drawn = [];
-      shrivelDrawn = false;
-    } else if (shrivels.size > 0 || shrivelDrawn || step(drawn, latest).kind === "draw") {
+    latest = mossyIcons(items, growth, options.overgrowthOverride);
+    shrivels = shrivelsAfter(shrivels, drawn, items, growth, latest);
+    const next = step(drawn, latest, shrivels);
+    if (next.kind === "clear") {
+      // At once: the window may be ordered out already, and WebKit runs no
+      // frame callbacks there, so the old moss would show at the next order-in.
+      gl?.clear();
+      drawn = NOTHING_DRAWN;
+    } else if (next.kind === "draw" || shrivels.size > 0) {
       requestFrame();
     }
     if (!loopRuns()) {
@@ -128,7 +124,6 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       gl = null;
       drawn = "unknown";
       shrivels = new Map();
-      shrivelDrawn = false;
       lastLoopFrameMs = null;
     },
     contextRestored() {

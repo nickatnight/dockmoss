@@ -82,19 +82,25 @@ export function mossyIcons(
 export type Step = { kind: "none" } | { kind: "clear" } | { kind: "draw" };
 
 /**
- * What the canvas shows: its icons, none when it is empty, or "unknown"
- * after a resize or a context restore.
+ * What the canvas shows: its static icons and whether its last frame drew a
+ * shrivel, or "unknown" after a resize or a context restore.
  */
-export type Drawn = readonly MossyIcon[] | "unknown";
+export type Drawn = { icons: readonly MossyIcon[]; shrivelFrame: boolean } | "unknown";
 
-export function step(drawn: Drawn, next: readonly MossyIcon[]): Step {
-  if (next.length === 0) {
-    return drawn !== "unknown" && drawn.length === 0 ? { kind: "none" } : { kind: "clear" };
+export const NOTHING_DRAWN: Drawn = { icons: [], shrivelFrame: false };
+
+/**
+ * What the canvas needs to show the static icons `next` while `shrivels` run.
+ * A shrivel frame that no running shrivel will redraw needs a redraw, or a
+ * clear when nothing is mossy. While shrivels run, their loop redraws them.
+ */
+export function step(drawn: Drawn, next: readonly MossyIcon[], shrivels: Shrivels): Step {
+  const running = shrivels.size > 0;
+  const shownIcons = drawn === "unknown" || (drawn.shrivelFrame && !running) ? null : drawn.icons;
+  if (next.length === 0 && !running) {
+    return shownIcons?.length === 0 ? { kind: "none" } : { kind: "clear" };
   }
-  if (drawn !== "unknown" && sameIcons(drawn, next)) {
-    return { kind: "none" };
-  }
-  return { kind: "draw" };
+  return shownIcons !== null && sameIcons(shownIcons, next) ? { kind: "none" } : { kind: "draw" };
 }
 
 function sameIcons(a: readonly MossyIcon[], b: readonly MossyIcon[]): boolean {
@@ -379,7 +385,7 @@ export function shrivelsAfter(
       after.set(key, { ...shrivel, icon: { ...shrivel.icon, tile: item.rect } });
     }
   }
-  for (const icon of drawn === "unknown" ? [] : drawn) {
+  for (const icon of drawn === "unknown" ? [] : drawn.icons) {
     const item = inDock.get(icon.key);
     if (item !== undefined && cleanApps.has(item.bundleId) && !mossy.has(icon.key) && !after.has(icon.key)) {
       after.set(icon.key, { icon: { ...icon, tile: item.rect }, startMs: null });

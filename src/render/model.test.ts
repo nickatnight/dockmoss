@@ -11,7 +11,9 @@ import {
   type MossOvergrowth,
   type MossyIcon,
   type ItemKey,
+  type Drawn,
   type Shrivel,
+  type Shrivels,
   type Sprite,
   artBox,
   glslConstants,
@@ -70,6 +72,13 @@ function icon(overrides: Partial<MossyIcon> = {}): MossyIcon {
     ...overrides,
   };
 }
+
+/** A canvas showing `icons` and no shrivel frame. */
+function shown(icons: readonly MossyIcon[]): Drawn {
+  return { icons, shrivelFrame: false };
+}
+
+const noShrivels: Shrivels = new Map();
 
 describe("mossyIcons", () => {
   it("gives every Dock item with moss an icon, in Dock order, and leaves clean items out", () => {
@@ -157,17 +166,17 @@ describe("mossyIcons", () => {
 
 describe("step", () => {
   it("draws the first scene", () => {
-    expect(step("unknown", [icon()])).toEqual({ kind: "draw" });
+    expect(step("unknown", [icon()], noShrivels)).toEqual({ kind: "draw" });
   });
 
   it("does nothing when the scene is unchanged", () => {
-    expect(step([icon()], [icon()])).toEqual({ kind: "none" });
+    expect(step(shown([icon()]), [icon()], noShrivels)).toEqual({ kind: "none" });
   });
 
   it("redraws when another app's icon takes a tile with the same overgrowth", () => {
     const key = "com.apple.Safari#0" as ItemKey;
 
-    expect(step([icon()], [icon({ key, seed: fnv1a32(key) })])).toEqual({ kind: "draw" });
+    expect(step(shown([icon()]), [icon({ key, seed: fnv1a32(key) })], noShrivels)).toEqual({ kind: "draw" });
   });
 
   it("redraws when two saturated neighbours trade places", () => {
@@ -178,7 +187,7 @@ describe("step", () => {
     const discordAt = (tile: typeof left) => icon({ ...saturated, tile });
     const safariAt = (tile: typeof left) => icon({ ...saturated, key: safariKey, seed: fnv1a32(safariKey), tile });
 
-    expect(step([discordAt(left), safariAt(right)], [safariAt(left), discordAt(right)])).toEqual({ kind: "draw" });
+    expect(step(shown([discordAt(left), safariAt(right)]), [safariAt(left), discordAt(right)], noShrivels)).toEqual({ kind: "draw" });
   });
 
   it.each([{ x: 704 }, { y: 912 }, { width: 64 }, { height: 64 }])(
@@ -186,16 +195,16 @@ describe("step", () => {
     (moved) => {
       const next = icon({ tile: { ...icon().tile, ...moved } });
 
-      expect(step([icon()], [next])).toEqual({ kind: "draw" });
+      expect(step(shown([icon()]), [next], noShrivels)).toEqual({ kind: "draw" });
     },
   );
 
   it("redraws when a mossy icon's overgrowth moves by a visible step", () => {
-    expect(step([icon()], [icon({ overgrowth: mossy(0.5 + 1 / 256) })])).toEqual({ kind: "draw" });
+    expect(step(shown([icon()]), [icon({ overgrowth: mossy(0.5 + 1 / 256) })], noShrivels)).toEqual({ kind: "draw" });
   });
 
   it("redraws when a mossy icon becomes overgrown", () => {
-    expect(step([icon({ overgrowth: mossy(1) })], [icon({ overgrowth: mossy(1), overgrown: true })])).toEqual({
+    expect(step(shown([icon({ overgrowth: mossy(1) })]), [icon({ overgrowth: mossy(1), overgrown: true })], noShrivels)).toEqual({
       kind: "draw",
     });
   });
@@ -205,14 +214,14 @@ describe("step", () => {
     const before = mossyIcons(items, [growth("com.hnc.Discord", 0.5)], null);
     const after = mossyIcons(items, [growth("com.hnc.Discord", 0.5 + 1 / 1024)], null);
 
-    expect(step(before, after)).toEqual({ kind: "none" });
+    expect(step(shown(before), after, noShrivels)).toEqual({ kind: "none" });
   });
 
   it("redraws when an icon gains moss or loses it", () => {
     const safari = icon({ key: "com.apple.Safari#0" as ItemKey, seed: 1184891789, tile: { x: 760, ...TILE } });
 
-    expect(step([icon()], [icon(), safari])).toEqual({ kind: "draw" });
-    expect(step([icon(), safari], [safari])).toEqual({ kind: "draw" });
+    expect(step(shown([icon()]), [icon(), safari], noShrivels)).toEqual({ kind: "draw" });
+    expect(step(shown([icon(), safari]), [safari], noShrivels)).toEqual({ kind: "draw" });
   });
 
   it("draws nothing for a clean Dock whose tiles move", () => {
@@ -220,19 +229,44 @@ describe("step", () => {
     const before = mossyIcons([item("com.apple.finder", 100), item("com.hnc.Discord", 160)], frame, null);
     const after = mossyIcons([item("com.apple.finder", 96), item("com.hnc.Discord", 152)], frame, null);
 
-    expect(step(before, after)).toEqual({ kind: "none" });
+    expect(step(shown(before), after, noShrivels)).toEqual({ kind: "none" });
   });
 
   it("clears at once when the last mossy icon goes", () => {
-    expect(step([icon()], [])).toEqual({ kind: "clear" });
+    expect(step(shown([icon()]), [], noShrivels)).toEqual({ kind: "clear" });
   });
 
   it("clears a canvas in an unknown state, after a resize or a restore, when nothing is mossy", () => {
-    expect(step("unknown", [])).toEqual({ kind: "clear" });
+    expect(step("unknown", [], noShrivels)).toEqual({ kind: "clear" });
   });
 
   it("does nothing while nothing is mossy", () => {
-    expect(step([], [])).toEqual({ kind: "none" });
+    expect(step(shown([]), [], noShrivels)).toEqual({ kind: "none" });
+  });
+
+  describe("with a shrivel frame on the canvas", () => {
+    const withShrivelFrame = (icons: readonly MossyIcon[]): Drawn => ({ icons, shrivelFrame: true });
+    const shrivelling: Shrivels = new Map([[icon().key, { icon: icon(), startMs: 1000 }]]);
+
+    it("redraws the scene once no shrivel runs", () => {
+      expect(step(withShrivelFrame([icon()]), [icon()], noShrivels)).toEqual({ kind: "draw" });
+    });
+
+    it("clears at once when no shrivel runs and nothing is mossy", () => {
+      expect(step(withShrivelFrame([]), [], noShrivels)).toEqual({ kind: "clear" });
+    });
+
+    it("leaves the redraws to the shrivel loop while one runs", () => {
+      expect(step(withShrivelFrame([icon()]), [icon()], shrivelling)).toEqual({ kind: "none" });
+    });
+
+    it("does not clear while a shrivel runs and nothing else is mossy", () => {
+      expect(step(withShrivelFrame([]), [], shrivelling)).toEqual({ kind: "none" });
+    });
+
+    it("draws when an icon drops out to shrivel", () => {
+      expect(step(shown([icon()]), [], shrivelling)).toEqual({ kind: "draw" });
+    });
   });
 });
 
@@ -651,7 +685,7 @@ describe("shrivelsAfter", () => {
   const none = new Map<ItemKey, Shrivel>();
 
   function shrivelling(drawn: readonly MossyIcon[], items: DockItem[], frame: AppGrowth[]): Shrivel[] {
-    return [...shrivelsAfter(none, drawn, items, frame, mossyIcons(items, frame, null)).values()];
+    return [...shrivelsAfter(none, shown(drawn), items, frame, mossyIcons(items, frame, null)).values()];
   }
 
   it("starts a shrivel for a drawn mossy item that the next growth frame lists as clean, from its drawn state", () => {
@@ -708,7 +742,7 @@ describe("shrivelsAfter", () => {
     const drawn = mossyIcons([chess], overgrownChess, 0.6);
     const next = mossyIcons([chess], cleanChess, 0.6);
 
-    expect([...shrivelsAfter(none, drawn, [chess], cleanChess, next).values()]).toEqual([]);
+    expect([...shrivelsAfter(none, shown(drawn), [chess], cleanChess, next).values()]).toEqual([]);
   });
 
   describe("for a shrivel in progress", () => {
@@ -717,13 +751,13 @@ describe("shrivelsAfter", () => {
 
     function after(items: DockItem[], frame: AppGrowth[]): Shrivel[] {
       const drawnWithoutChess = mossyIcons(items, cleanChess, null);
-      return [...shrivelsAfter(running, drawnWithoutChess, items, frame, mossyIcons(items, frame, null)).values()];
+      return [...shrivelsAfter(running, shown(drawnWithoutChess), items, frame, mossyIcons(items, frame, null)).values()];
     }
 
     it("keeps its start time while the app stays clean, even before the canvas has redrawn", () => {
       const stillDrawn = [drawnChess];
 
-      const kept = shrivelsAfter(running, stillDrawn, [chess], cleanChess, []);
+      const kept = shrivelsAfter(running, shown(stillDrawn), [chess], cleanChess, []);
 
       expect([...kept.values()]).toEqual([{ icon: drawnChess, startMs: 1000 }]);
     });

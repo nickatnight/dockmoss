@@ -171,7 +171,7 @@ describe("quantize", () => {
 });
 
 describe("step", () => {
-  const all = { geometry: true, moss: true, target: true };
+  const all = { geometry: true, moss: true };
 
   it("draws everything for the first scene", () => {
     expect(step(null, scene())).toEqual({ kind: "draw", changes: all });
@@ -186,7 +186,7 @@ describe("step", () => {
 
     expect(step(scene(), moved)).toEqual({
       kind: "draw",
-      changes: { geometry: true, moss: false, target: false },
+      changes: { geometry: true, moss: false },
     });
   });
 
@@ -195,7 +195,7 @@ describe("step", () => {
 
     expect(step(scene(), grown)).toEqual({
       kind: "draw",
-      changes: { geometry: false, moss: true, target: false },
+      changes: { geometry: false, moss: true },
     });
   });
 

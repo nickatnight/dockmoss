@@ -61,7 +61,6 @@ export function drawnIcon(
 export interface Changes {
   geometry: boolean;
   moss: boolean;
-  target: boolean;
 }
 
 export type Step =
@@ -74,14 +73,14 @@ export function step(drawn: Scene | null, next: Scene | null): Step {
     return drawn === null ? { kind: "none" } : { kind: "clear" };
   }
   if (drawn === null || drawn.key !== next.key) {
-    return { kind: "draw", changes: { geometry: true, moss: true, target: true } };
+    return { kind: "draw", changes: { geometry: true, moss: true } };
   }
   const geometry = !sameRect(drawn.rect, next.rect);
   const moss = drawn.overgrowth !== next.overgrowth;
   if (!geometry && !moss) {
     return { kind: "none" };
   }
-  return { kind: "draw", changes: { geometry, moss, target: false } };
+  return { kind: "draw", changes: { geometry, moss } };
 }
 
 function sameRect(a: LogicalRect, b: LogicalRect): boolean {

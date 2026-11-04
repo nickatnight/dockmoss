@@ -48,7 +48,7 @@ export function fnv1a32(text: string): number {
 export function drawnIcon(
   items: readonly DockItem[],
   growth: readonly AppGrowth[],
-  override: number | null,
+  overgrowthOverride: number | null,
 ): Scene | null {
   const byBundleId = new Map(
     growth.map(({ bundleId, overgrowth }) => [bundleId, quantize(overgrowth)]),
@@ -62,10 +62,10 @@ export function drawnIcon(
       best = { key, seed: fnv1a32(key), rect, overgrowth };
     }
   }
-  if (best === null || override === null) {
+  if (best === null || overgrowthOverride === null) {
     return best;
   }
-  return { ...best, overgrowth: quantize(override) };
+  return { ...best, overgrowth: quantize(overgrowthOverride) };
 }
 
 export interface Changes {

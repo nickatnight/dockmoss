@@ -264,9 +264,10 @@ impl Activity {
         let settling = self
             .last_sent
             .is_some_and(|sent| now.saturating_duration_since(sent) <= FAST_AFTER_SEND);
+        let near = proximity_rate == PollRate::Fast;
         let moving = moved || settling;
-        self.resting = proximity_rate == PollRate::Fast && !moving;
-        if proximity_rate == PollRate::Fast && moving {
+        self.resting = near && !moving;
+        if near && moving {
             PollRate::Fast
         } else {
             PollRate::Slow

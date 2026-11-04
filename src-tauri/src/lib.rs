@@ -582,10 +582,10 @@ mod dock_tracker {
                 rate = next_rate;
             }
             perform(app, tick, &mut watcher);
-            let read_due = tracker::next_deadline(deadline, rate, Instant::now());
+            let now = Instant::now();
             deadline = activity.wait_for_read(
-                read_due,
-                Instant::now(),
+                tracker::next_deadline(deadline, rate, now),
+                now,
                 |until| {
                     drain_inbox_until(
                         until,

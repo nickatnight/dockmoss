@@ -333,6 +333,14 @@ fn trust_revoked_while_running_stops_reads_until_trust_returns() {
 }
 
 #[test]
+fn the_recheck_interval_is_the_trackers_slow_interval() {
+    assert_eq!(
+        super::RECHECK_INTERVAL,
+        crate::tracker::PollRate::Slow.interval()
+    );
+}
+
+#[test]
 fn a_latched_gate_rechecks_trust_at_most_once_per_slow_interval() {
     let mut gate = ReadGate::default();
     let start = Instant::now();

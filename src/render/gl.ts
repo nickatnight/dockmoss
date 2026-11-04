@@ -1,42 +1,8 @@
-import {
-  FLOWER,
-  MAX_SPRITES,
-  MUSHROOM,
-  type MossInstance,
-  NO_SPRITE,
-  type Sprite,
-  glslConstants,
-  seedOffset,
-} from "./model";
+import { INSTANCE_ATTRIBUTES, type MossInstance, glslConstants } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
-
-const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: MUSHROOM, flower: FLOWER };
-
-function spriteValues(sprite: Sprite | undefined): number[] {
-  return sprite === undefined ? [0, 0, 0, NO_SPRITE] : [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
-}
-
-export interface InstanceAttribute {
-  name: string;
-  size: number;
-  values(instance: MossInstance): readonly number[];
-}
-
-/** One instance's attributes in buffer order, each an `in` of moss.vert.glsl. */
-export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
-  { name: "a_box", size: 4, values: ({ box }) => [box.x, box.y, box.width, box.height] },
-  { name: "a_seed", size: 2, values: ({ seed }) => seedOffset(seed) },
-  { name: "a_overgrowth", size: 1, values: ({ overgrowth }) => [overgrowth] },
-  { name: "a_hue", size: 1, values: ({ hue }) => [hue] },
-  ...Array.from({ length: MAX_SPRITES }, (_, slot) => ({
-    name: `a_sprite${slot}`,
-    size: 4,
-    values: ({ sprites }: MossInstance) => spriteValues(sprites[slot]),
-  })),
-];
 
 const FLOATS_PER_INSTANCE = INSTANCE_ATTRIBUTES.reduce((sum, { size }) => sum + size, 0);
 const BYTES_PER_FLOAT = 4;

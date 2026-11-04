@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-03 (approved at Gate 1, emgee job 001; Idle CPU counts the Dock process from job 005 Gate 2; no-panic lints crate-wide from job 007; `pnpm test` added to Tests from job 009 Gate 1; the Release bundle row from job 009's polish)
+Last reviewed: 2026-11-04 (approved at Gate 1, emgee job 001; Idle CPU counts the Dock process from job 005 Gate 2; no-panic lints crate-wide from job 007; `pnpm test` added to Tests from job 009 Gate 1; the Release bundle row from job 009's polish; cold start and GPU memory recorded in job 010)
 
 Read alongside `CLAUDE.md`. This file does not get weakened to make a change pass.
 
@@ -46,7 +46,8 @@ Scripts in `package.json` mirror this file; if they drift, this file wins:
 | Metric | Today | Direction |
 |---|---|---|
 | Release `.app` size | n/a until slice 13 | record, must not grow > 10% per change |
-| Cold start to first overlay frame | n/a until slice 10 | record, must not grow |
+| Cold start to first overlay frame | 0.72 s, median of 5 (0.718 to 0.741 s), job 010: an embedded-asset build on the real log, from launch to the first ScreenCaptureKit capture of Discord's tile that shows moss (captures about 22 ms apart) | record, must not grow |
+| WebKit GPU process memory (`footprint -p`, phys_footprint), every mossy icon drawn | 17 MB idle and 174 MB at the peak of a magnification sweep, with a 191 MB process peak at startup, job 010 (four overgrown icons, the canvas the size of the 3024x1964 display) | record, must not grow |
 
 ## Exceptions
 

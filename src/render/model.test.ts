@@ -6,6 +6,7 @@ import {
   INSTANCE_ATTRIBUTES,
   SHRIVEL_MS,
   SPRITE_TIP_LEAN,
+  WITHER_TINT,
   type MossInstance,
   type MossOvergrowth,
   type MossyIcon,
@@ -900,5 +901,21 @@ describe("shrivelFrame", () => {
 
     expect(instances).toEqual([shrivelInstance(discord, 0.5, 2, 1964)]);
     expect([...running.keys()]).toEqual([discord.key]);
+  });
+});
+
+describe("WITHER_TINT", () => {
+  // Withered moss is WITHER_TINT times the colour's luminance. With weights
+  // that sum to 1, the luminance of a premultiplied colour is at most its
+  // alpha, so a tint no channel of which is above 1 keeps it premultiplied.
+  it("keeps a withered premultiplied colour premultiplied", () => {
+    const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource);
+
+    expect(weights).not.toBeNull();
+    expect(weights?.[1].split(",").map(Number).reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
+    for (const channel of WITHER_TINT) {
+      expect(channel).toBeGreaterThanOrEqual(0);
+      expect(channel).toBeLessThanOrEqual(1);
+    }
   });
 });

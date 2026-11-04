@@ -32,17 +32,17 @@ function fakeGls() {
 
 function manualScheduler() {
   let pending: ((time: number) => void)[] = [];
-  let scheduled = 0;
+  let scheduleCalls = 0;
   return {
     schedule: (callback: (time: number) => void) => {
-      scheduled += 1;
+      scheduleCalls += 1;
       pending.push(callback);
     },
     get pending() {
       return pending.length;
     },
-    get scheduled() {
-      return scheduled;
+    get scheduleCalls() {
+      return scheduleCalls;
     },
     runFrame(time = 0) {
       const due = pending;
@@ -318,7 +318,7 @@ describe("the shrivel", () => {
 
   type Drawn = { time: number; instances: readonly MossInstance[] };
 
-  function run(env: ReturnType<typeof setup>, start: number, ms: number): Drawn[] {
+  function runAt60Hz(env: ReturnType<typeof setup>, start: number, ms: number): Drawn[] {
     const drawnFrames: Drawn[] = [];
     for (let index = 0; index * (1000 / 60) <= ms; index++) {
       const time = start + index * (1000 / 60);
@@ -335,7 +335,7 @@ describe("the shrivel", () => {
 
   function shrivelling(env: ReturnType<typeof setup>): void {
     env.renderer.growth(launchedChess);
-    const drawnFrames = run(env, 1000, 100);
+    const drawnFrames = runAt60Hz(env, 1000, 100);
     expect(chessIn(drawnFrames[drawnFrames.length - 1])?.wither).toBeGreaterThan(0);
   }
 
@@ -345,7 +345,7 @@ describe("the shrivel", () => {
     env.renderer.growth(launchedChess);
 
     expect(env.frames.pending).toBe(1);
-    const [first] = run(env, 1000, 0);
+    const [first] = runAt60Hz(env, 1000, 0);
     expect(chessIn(first)).toMatchObject({ overgrowth: 1, wither: 0 });
     expect(first.instances).toHaveLength(2);
   });
@@ -354,7 +354,7 @@ describe("the shrivel", () => {
     const env = mossyDock();
     env.renderer.growth(launchedChess);
 
-    const drawnFrames = run(env, 1000, 1000);
+    const drawnFrames = runAt60Hz(env, 1000, 1000);
 
     const times = drawnFrames.map(({ time }) => time);
     for (let index = 1; index < times.length; index++) {
@@ -369,7 +369,7 @@ describe("the shrivel", () => {
     const env = mossyDock();
     env.renderer.growth(launchedChess);
 
-    const drawnFrames = run(env, 1000, 1000);
+    const drawnFrames = runAt60Hz(env, 1000, 1000);
 
     const last = drawnFrames[drawnFrames.length - 1];
     expect(drawnFrames.length).toBeGreaterThan(10);
@@ -382,15 +382,15 @@ describe("the shrivel", () => {
   it("stays idle after it ends: updates that change nothing make no schedule call", () => {
     const env = mossyDock();
     shrivelling(env);
-    run(env, 1100, 900);
-    const scheduled = env.frames.scheduled;
+    runAt60Hz(env, 1100, 900);
+    const scheduleCalls = env.frames.scheduleCalls;
     const ops = env.calls().length;
 
     env.renderer.dock([discord, chess]);
     env.renderer.growth(launchedChess);
     env.renderer.growth(launchedChess);
 
-    expect(env.frames.scheduled).toBe(scheduled);
+    expect(env.frames.scheduleCalls).toBe(scheduleCalls);
     expect(env.calls().length).toBe(ops);
   });
 
@@ -400,7 +400,7 @@ describe("the shrivel", () => {
     const magnified = { ...chess, rect: { x: 655, y: 905, width: 66, height: 78 } };
 
     env.renderer.dock([discord, magnified]);
-    const [next] = run(env, 1150, 0);
+    const [next] = runAt60Hz(env, 1150, 0);
 
     expect(chessIn(next)?.box).toEqual(toDeviceBox(artBox(magnified.rect), 2, 1964));
   });
@@ -410,7 +410,7 @@ describe("the shrivel", () => {
     shrivelling(env);
 
     env.renderer.growth([...mossy, { bundleId: chess.bundleId, overgrowth: 0.3, stage: "fuzz" }]);
-    const drawnFrames = run(env, 1150, 500);
+    const drawnFrames = runAt60Hz(env, 1150, 500);
 
     expect(drawnFrames).toHaveLength(1);
     expect(chessIn(drawnFrames[0])).toMatchObject({ overgrowth: 77 / 256, wither: 0 });
@@ -422,7 +422,7 @@ describe("the shrivel", () => {
     shrivelling(env);
 
     env.renderer.dock([discord]);
-    const drawnFrames = run(env, 1150, 500);
+    const drawnFrames = runAt60Hz(env, 1150, 500);
 
     expect(drawnFrames).toHaveLength(1);
     expect(chessIn(drawnFrames[0])).toBeUndefined();
@@ -438,7 +438,7 @@ describe("the shrivel", () => {
     env.calls().length = 0;
 
     env.renderer.dock([{ bundleId: "com.apple.finder" as BundleId, rect: chess.rect }]);
-    run(env, 1150, 500);
+    runAt60Hz(env, 1150, 500);
 
     expect(env.ops()).toEqual(["clear"]);
     expect(env.frames.pending).toBe(0);
@@ -452,7 +452,7 @@ describe("the shrivel", () => {
     env.renderer.dock([]);
 
     expect(env.ops()).toEqual(["clear"]);
-    expect(run(env, 1150, 500)).toEqual([]);
+    expect(runAt60Hz(env, 1150, 500)).toEqual([]);
     expect(env.frames.pending).toBe(0);
   });
 
@@ -462,7 +462,7 @@ describe("the shrivel", () => {
 
     env.renderer.contextLost();
     env.renderer.contextRestored();
-    const drawnFrames = run(env, 1150, 500);
+    const drawnFrames = runAt60Hz(env, 1150, 500);
 
     expect(env.gls.created).toHaveLength(2);
     expect(drawnFrames).toHaveLength(1);
@@ -476,7 +476,7 @@ describe("the shrivel", () => {
     env.renderer.growth(launchedChess);
     env.renderer.contextRestored();
 
-    const drawnFrames = run(env, 1000, 500);
+    const drawnFrames = runAt60Hz(env, 1000, 500);
 
     expect(drawnFrames).toHaveLength(1);
     expect(chessIn(drawnFrames[0])).toBeUndefined();
@@ -488,7 +488,7 @@ describe("the shrivel", () => {
     env.renderer.dock([discord, chess]);
     env.renderer.growth(launchedChess);
 
-    const drawnFrames = run(env, 1000, 500);
+    const drawnFrames = runAt60Hz(env, 1000, 500);
 
     expect(drawnFrames).toHaveLength(1);
     expect(chessIn(drawnFrames[0])).toBeUndefined();
@@ -502,7 +502,7 @@ describe("the shrivel", () => {
       { bundleId: discord.bundleId, overgrowth: 0, stage: "clean" },
       { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" },
     ]);
-    const drawnFrames = run(env, 1000, 1000);
+    const drawnFrames = runAt60Hz(env, 1000, 1000);
 
     expect(drawnFrames[0].instances).toHaveLength(2);
     expect(drawnFrames[5].instances.map(({ wither }) => wither > 0)).toEqual([true, true]);
@@ -518,7 +518,7 @@ describe("the shrivel", () => {
     env.frames.runFrame(500);
 
     env.renderer.growth(launchedChess);
-    const drawnFrames = run(env, 1000, 1000);
+    const drawnFrames = runAt60Hz(env, 1000, 1000);
 
     expect(drawnFrames[5].instances.map(({ seed, wither }) => ({ seed, withered: wither > 0 }))).toEqual([
       { seed: chessSeed, withered: true },
@@ -531,7 +531,7 @@ describe("the shrivel", () => {
     const env = mossyDock(false);
     env.renderer.growth(launchedChess);
 
-    const drawnFrames = run(env, 1000, 1000);
+    const drawnFrames = runAt60Hz(env, 1000, 1000);
 
     expect(drawnFrames.length).toBeGreaterThan(10);
     expect(env.calls().flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []))).toEqual(

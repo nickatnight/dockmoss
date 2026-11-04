@@ -715,8 +715,8 @@ describe("shrivelsAfter", () => {
     const running = new Map([[drawnChess.key, { icon: drawnChess, startMs: 1000 }]]);
 
     function after(items: DockItem[], frame: AppGrowth[]): Shrivel[] {
-      const drawn = mossyIcons(items, cleanChess, null);
-      return [...shrivelsAfter(running, drawn, items, frame, mossyIcons(items, frame, null)).values()];
+      const drawnWithoutChess = mossyIcons(items, cleanChess, null);
+      return [...shrivelsAfter(running, drawnWithoutChess, items, frame, mossyIcons(items, frame, null)).values()];
     }
 
     it("keeps its start time while the app stays clean, even before the canvas has redrawn", () => {

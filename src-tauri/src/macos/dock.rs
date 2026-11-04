@@ -63,6 +63,11 @@ impl DockReader {
         }
     }
 
+    /// Drops the Dock element, so the next read looks the Dock process up again.
+    pub fn forget_dock(&mut self) {
+        self.dock = None;
+    }
+
     pub fn read(&mut self) -> Result<Vec<RawDockChild>, DockError> {
         let read = autoreleasepool(|_| self.read_in_pool());
         if read.is_err() {

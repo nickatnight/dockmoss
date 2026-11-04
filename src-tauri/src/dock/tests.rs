@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::{DockError, DockItem, RawDockChild, ReadGate, app_items};
 use crate::bundle_id::BundleId;
@@ -210,16 +211,29 @@ fn two_items_with_one_bundle_id_are_both_kept_in_order() {
 
 /// One gated tick: returns the result, whether the AX read ran and whether
 /// trust was re-checked.
+/// A read through the gate one second after the previous `gated` call, so the
+/// re-check throttle never holds one back.
 fn gated(
     gate: &mut ReadGate,
     trust: Trust,
     recheck: Trust,
     outcome: Result<Vec<RawDockChild>, DockError>,
 ) -> (Result<Vec<RawDockChild>, DockError>, bool, bool) {
+    thread_local! {
+        static CLOCK: Cell<Option<Instant>> = const { Cell::new(None) };
+    }
+    let now = CLOCK.with(|clock| {
+        let now = clock
+            .get()
+            .map_or_else(Instant::now, |last| last + Duration::from_secs(1));
+        clock.set(Some(now));
+        now
+    });
     let read = Cell::new(false);
     let rechecked = Cell::new(false);
     let result = gate.read(
         trust,
+        now,
         || {
             rechecked.set(true);
             recheck
@@ -318,6 +332,37 @@ fn trust_revoked_while_running_stops_reads_until_trust_returns() {
 
         assert_eq!((read, rechecked), (expect_read, expect_recheck), "{case}");
     }
+}
+
+#[test]
+fn a_latched_gate_rechecks_trust_at_most_once_per_slow_interval() {
+    let mut gate = ReadGate::default();
+    let start = Instant::now();
+    let revoked = gate.read(
+        Trust::Trusted,
+        start,
+        || Trust::Untrusted,
+        || Err(DockError::ApiDisabled),
+    );
+    assert_eq!(revoked, Err(DockError::ApiDisabled));
+    let rechecks = Cell::new(0);
+
+    // Five seconds of 60 Hz ticks while TrustState still says trusted.
+    for tick in 1..=300_u32 {
+        let now = start + Duration::from_nanos(16_666_667) * tick;
+        let result = gate.read(
+            Trust::Trusted,
+            now,
+            || {
+                rechecks.set(rechecks.get() + 1);
+                Trust::Untrusted
+            },
+            || panic!("read while access is revoked"),
+        );
+        assert_eq!(result, Err(DockError::ApiDisabled));
+    }
+
+    assert_eq!(rechecks.get(), 10);
 }
 
 #[test]

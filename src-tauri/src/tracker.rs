@@ -1,14 +1,18 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::dock::{self, DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, ScreenPoint, ScreenRect};
-use crate::usage::DockApp;
+use crate::usage::{AppEvent, AppEventKind, DockApp};
 
 /// Overlay-local logical pixels a rect field must move, from the last frame
 /// sent, to count as a change.
 const MIN_RECT_CHANGE_PX: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
+/// `Fast` holds this long after a frame is sent, with the pointer at rest, so
+/// a magnification or reveal that is still settling is followed to the end.
+const SETTLE: Duration = Duration::from_millis(250);
+const DOCK_BUNDLE_ID: &str = "com.apple.dock";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -48,6 +52,8 @@ pub struct Tick {
     /// non-empty frame did. Empty frames (Dock hidden or unreadable) never
     /// report, so growth keeps the last known apps.
     pub apps: Option<Vec<DockApp>>,
+    /// `Fast` while the cursor is near the Dock; `Activity` decides whether
+    /// anything there moves.
     pub rate: PollRate,
 }
 
@@ -237,8 +243,58 @@ fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect) -> bool {
         && (bottom - PROXIMITY..=bottom).contains(&point.y)
 }
 
-pub fn next_delay(rate: PollRate, read_took: Duration) -> Duration {
-    rate.interval().saturating_sub(read_took)
+/// Keeps the poll at `Fast` only while something there moves: the pointer
+/// moved since the last tick, or a frame was sent within `SETTLE`. A pointer
+/// at rest in the band then costs what `Slow` costs.
+#[derive(Debug, Default)]
+pub struct Activity {
+    last_cursor: Option<ScreenPoint>,
+    last_sent: Option<Instant>,
+}
+
+impl Activity {
+    /// `near` is the tick's own rate, from where the cursor is.
+    pub fn rate(
+        &mut self,
+        near: PollRate,
+        cursor: Option<ScreenPoint>,
+        sent: bool,
+        now: Instant,
+    ) -> PollRate {
+        if sent {
+            self.last_sent = Some(now);
+        }
+        let moved = cursor != self.last_cursor;
+        self.last_cursor = cursor;
+        let settling = self
+            .last_sent
+            .is_some_and(|sent| now.saturating_duration_since(sent) <= SETTLE);
+        if near == PollRate::Fast && (moved || settling) {
+            PollRate::Fast
+        } else {
+            PollRate::Slow
+        }
+    }
+}
+
+/// When the tick after one due at `previous` is due: one interval later, so
+/// a late wake-up or a slow read does not stretch the interval. When `now` is
+/// already past that, the deadlines it missed are skipped, not run in a burst.
+pub fn next_deadline(previous: Instant, rate: PollRate, now: Instant) -> Instant {
+    let interval = rate.interval();
+    let behind = now.saturating_duration_since(previous);
+    let missed = behind.as_nanos() / interval.as_nanos().max(1);
+    let intervals = u32::try_from(missed.saturating_add(1)).unwrap_or(u32::MAX);
+    interval
+        .checked_mul(intervals)
+        .and_then(|ahead| previous.checked_add(ahead))
+        .unwrap_or(now)
+}
+
+/// True for the workspace notification that the Dock process quit, which
+/// arrives before an AX read would time out on it.
+pub fn is_dock_exit(event: &AppEvent) -> bool {
+    event.kind == AppEventKind::Terminated && event.app.bundle_id.as_deref() == Some(DOCK_BUNDLE_ID)
 }
 
 #[cfg(test)]

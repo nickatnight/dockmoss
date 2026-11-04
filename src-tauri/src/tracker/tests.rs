@@ -1,13 +1,14 @@
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::{
-    PollRate, Tick, TickLog, Tracker, Visibility, changed, dock_bounds, next_delay, poll_rate,
+    Activity, PollRate, Tick, TickLog, Tracker, Visibility, changed, dock_bounds, is_dock_exit,
+    next_deadline, poll_rate,
 };
 use crate::bundle_id::BundleId;
 use crate::dock::{DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, LogicalRect, ScreenPoint, ScreenRect};
-use crate::usage::DockApp;
+use crate::usage::{AppEvent, AppEventKind, DockApp, RunningApp};
 
 const PRIMARY_2X: Display = Display {
     physical_x: 0,
@@ -559,52 +560,198 @@ fn first_empty_frame_orders_the_overlay_out() {
     assert_eq!(tick.overlay, Some(Visibility::Hidden));
 }
 
+fn ms(millis: u64) -> Duration {
+    Duration::from_millis(millis)
+}
+
 #[test]
-fn next_delay_is_the_interval_minus_the_read() {
-    let fast = PollRate::Fast.interval();
-    let slow = PollRate::Slow.interval();
+fn fast_holds_only_while_the_pointer_moves_or_a_frame_was_just_sent() {
+    let start = Instant::now();
+    let near = PollRate::Fast;
     let cases = [
+        // (case, spatial rate, cursor, frame sent this tick, ms since start, expected)
         (
-            "fast, short read",
+            "first tick near the Dock",
+            near,
+            Some(point(720.0, 850.0)),
+            false,
+            0,
             PollRate::Fast,
-            Duration::from_millis(5),
-            Duration::from_nanos(11_666_667),
         ),
         (
-            "fast, read equal to the interval",
+            "pointer at rest, no frame for 300 ms",
+            near,
+            Some(point(720.0, 850.0)),
+            false,
+            300,
+            PollRate::Slow,
+        ),
+        (
+            "pointer moved",
+            near,
+            Some(point(721.0, 850.0)),
+            false,
+            310,
             PollRate::Fast,
-            fast,
-            Duration::ZERO,
         ),
         (
-            "fast, read longer than the interval",
+            "at rest, frame sent now",
+            near,
+            Some(point(721.0, 850.0)),
+            true,
+            320,
             PollRate::Fast,
-            Duration::from_millis(40),
-            Duration::ZERO,
         ),
         (
-            "slow, short read",
-            PollRate::Slow,
-            Duration::from_millis(5),
-            Duration::from_millis(495),
+            "at rest, frame sent 200 ms ago",
+            near,
+            Some(point(721.0, 850.0)),
+            false,
+            520,
+            PollRate::Fast,
         ),
         (
-            "slow, read equal to the interval",
-            PollRate::Slow,
-            slow,
-            Duration::ZERO,
+            "at rest, frame sent 250 ms ago",
+            near,
+            Some(point(721.0, 850.0)),
+            false,
+            570,
+            PollRate::Fast,
         ),
         (
-            "slow, read longer than the interval",
+            "at rest, frame sent 300 ms ago",
+            near,
+            Some(point(721.0, 850.0)),
+            false,
+            620,
             PollRate::Slow,
-            Duration::from_secs(2),
-            Duration::ZERO,
+        ),
+        (
+            "moving, but far from the Dock",
+            PollRate::Slow,
+            Some(point(721.0, 300.0)),
+            true,
+            630,
+            PollRate::Slow,
+        ),
+        ("cursor unknown", near, None, false, 1200, PollRate::Fast),
+        (
+            "cursor still unknown",
+            near,
+            None,
+            false,
+            1500,
+            PollRate::Slow,
         ),
     ];
+    let mut activity = Activity::default();
 
-    for (case, rate, read_took, expected) in cases {
-        assert_eq!(next_delay(rate, read_took), expected, "{case}");
+    for (case, spatial, cursor, sent, at, expected) in cases {
+        let now = start.checked_add(ms(at)).expect("in range");
+        assert_eq!(
+            activity.rate(spatial, cursor, sent, now),
+            expected,
+            "{case}"
+        );
     }
+}
+
+#[test]
+fn deadlines_follow_the_previous_deadline_not_the_end_of_the_read() {
+    let start = Instant::now();
+    let fast = PollRate::Fast.interval();
+    let at = |nanos: u64| {
+        start
+            .checked_add(Duration::from_nanos(nanos))
+            .expect("in range")
+    };
+
+    // The tick ran 2.5 ms late and read for 3 ms: the next one is still one
+    // interval after the last deadline, so the rate stays at 60 Hz.
+    assert_eq!(
+        next_deadline(start, PollRate::Fast, at(5_500_000)),
+        at(16_666_667)
+    );
+    assert_eq!(
+        next_deadline(start, PollRate::Slow, at(5_000_000)),
+        at(500_000_000)
+    );
+    assert_eq!(
+        next_deadline(at(16_666_667), PollRate::Fast, at(20_000_000)),
+        at(33_333_334)
+    );
+    // A tick that overruns skips the deadlines it missed instead of bursting.
+    let overrun = next_deadline(start, PollRate::Fast, at(40_000_000));
+    assert_eq!(overrun, at(50_000_001));
+    assert!(overrun > at(40_000_000));
+    // Exactly on a deadline: the next one is a whole interval away.
+    assert_eq!(
+        next_deadline(start, PollRate::Fast, at(16_666_667)),
+        start.checked_add(fast * 2).expect("in range")
+    );
+}
+
+#[test]
+fn sixty_deadlines_span_one_second() {
+    let start = Instant::now();
+    let mut deadline = start;
+    for _ in 0..60 {
+        // Each tick starts 2.5 ms after its deadline and reads for 1 ms.
+        let now = deadline
+            .checked_add(Duration::from_micros(3_500))
+            .expect("in range");
+        deadline = next_deadline(deadline, PollRate::Fast, now);
+    }
+
+    let span = deadline.duration_since(start);
+    assert!(
+        span.abs_diff(Duration::from_secs(1)) < Duration::from_micros(1),
+        "{span:?}"
+    );
+}
+
+#[test]
+fn a_dock_that_stops_answering_or_running_clears_and_orders_out_on_that_tick() {
+    for error in [DockError::CannotComplete, DockError::NotRunning] {
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+
+        let tick = tracker.tick(Err(error.clone()), None);
+
+        assert_eq!(tick.send, Some(Vec::new()), "{error}");
+        assert_eq!(tick.overlay, Some(Visibility::Hidden), "{error}");
+    }
+}
+
+#[test]
+fn only_the_dock_terminating_is_a_dock_exit() {
+    let event = |kind, bundle_id: &str| AppEvent {
+        kind,
+        app: RunningApp {
+            bundle_id: Some(bundle_id.into()),
+            can_have_dock_icon: false,
+        },
+    };
+
+    assert!(is_dock_exit(&event(
+        AppEventKind::Terminated,
+        "com.apple.dock"
+    )));
+    assert!(!is_dock_exit(&event(
+        AppEventKind::Launched,
+        "com.apple.dock"
+    )));
+    assert!(!is_dock_exit(&event(
+        AppEventKind::Terminated,
+        "com.apple.Safari"
+    )));
+    assert!(!is_dock_exit(&AppEvent {
+        kind: AppEventKind::Terminated,
+        app: RunningApp {
+            bundle_id: None,
+            can_have_dock_icon: false,
+        },
+    }));
 }
 
 #[test]

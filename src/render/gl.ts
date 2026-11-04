@@ -80,10 +80,10 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
 function linkProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
   const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
   const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
-  const program = gl.createProgram();
   if (vertex === null || fragment === null) {
     return null;
   }
+  const program = gl.createProgram();
   gl.attachShader(program, vertex);
   gl.attachShader(program, fragment);
   gl.linkProgram(program);

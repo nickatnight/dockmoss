@@ -4,13 +4,13 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 9 of 13 (moss on one icon). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
+MVP slice 10 of 13 (moss on every icon). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden), and at 2 Hz otherwise;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 
-The overlay draws moss on one Dock icon: the app with the highest overgrowth, the first in Dock order on a tie. Overgrowth 0 draws nothing. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower half of the icon in the middle, higher at the sides, so the top half of the app's glyph stays visible. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes. Two Dock items for one app get the same overgrowth and their own moss pattern, which is the same on every run. Slice 10 draws every icon. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
+The overlay draws moss on every Dock app whose overgrowth is above 0, all in one instanced WebGL draw. Overgrowth 0 draws nothing. At the Overgrown stage an icon also gets one to three small mushrooms or flowers, placed from its bundle ID and the same on every run. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower half of the icon in the middle, higher at the sides, so the top half of the app's glyph stays visible. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes. Each icon gets its own moss pattern and a shade between olive and blue-green, the same on every run; two Dock items for one app get the same overgrowth and a pattern each. The Dock tracker polls at 60 Hz only while the pointer is near the Dock and moving, or the Dock moved in the last 250 ms, and at 2 Hz otherwise. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
 
 The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay window itself is still in the Accessibility tree, as an empty web area.
 
@@ -18,7 +18,7 @@ The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay wind
 
 `pnpm tauri dev` also outlines each application icon, alternating magenta and cyan, and labels it with the app's overgrowth (0.00 to 1.00) over its stage, for example `0.66` over `patchy`. Every second label sits one label higher, so neighbouring labels don't cover each other at the default Dock size. While the Dock is magnified, labels near the pointer can still overlap. The labels sit above macOS's own Dock tooltip and can hide part of it. If the overlay's `watch_dock` or `watch_growth` call is rejected, a 2 pt red bar runs along the bottom of the screen. `pnpm build` leaves all of this out.
 
-To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. The drawn icon (still picked by real growth) then uses that value. Any other value is ignored with a console warning.
+To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. Every Dock icon then uses that value, and at 1 every icon is also overgrown, with sprites. Any other value is ignored with a console warning. `VITE_DOCKMOSS_SWAY=1` turns on the sway loop: tuft tips and sprites move gently, at 30 frames a second, while some icon is at least patchy. Sway is off in every other build until the settings window adds it, because it costs about 19% CPU (job 010, M9).
 
 ```sh
 VITE_DOCKMOSS_OVERGROWTH=0.6 pnpm tauri dev
@@ -144,9 +144,11 @@ src/                # webview frontend: overlay.ts (one subscription per channel
                     #   out to the renderer and, in dev builds, the debug layer), ipc.ts
                     #   (every invoke call, the watchDock and watchGrowth Channels),
                     #   debug.ts / debug.css (dev only: outlines, labels, the override)
-  render/           # WebGL2 moss: model.ts (pure: which icon, its key and seed, the art
-                    #   box, the draw rule; tested by model.test.ts), gl.ts, index.ts,
-                    #   moss.vert.glsl, moss.frag.glsl
+  render/           # WebGL2 moss: model.ts (pure: mossy icons, keys and seeds, art box,
+                    #   draw rule, sprites, the reach bound and the shader's constants;
+                    #   model.test.ts), renderer.ts (draw and sway loop behind injected
+                    #   schedule and MossGl; renderer.test.ts), gl.ts (one instanced
+                    #   draw), index.ts (DOM wiring), moss.vert.glsl, moss.frag.glsl
 ```
 
 ## Icons

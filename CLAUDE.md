@@ -40,8 +40,11 @@ src-tauri/src/
 src-tauri/capabilities/   # one capability file per window
 src/                      # webview: overlay.ts (one subscription per channel, fanned out),
                           #   ipc.ts, debug.ts / debug.css (dev builds only)
-  render/                 # WebGL2 moss: model.ts (pure: drawn icon, item keys and seeds,
-                          #   art box, draw rule), gl.ts, index.ts, moss.{vert,frag}.glsl
+  render/                 # WebGL2 moss: model.ts (pure: mossy icons, item keys and seeds,
+                          #   art box, draw rule, sprites, reach bound, shader constants),
+                          #   renderer.ts (draw and sway loop behind an injected schedule
+                          #   and MossGl), gl.ts (one instanced draw), index.ts (DOM wiring),
+                          #   moss.{vert,frag}.glsl
 ```
 
 The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `tracker.rs`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
@@ -71,7 +74,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **Spawning:** use `tauri::async_runtime::spawn`. A bare `tokio::spawn` panics inside `setup()` because no runtime context exists there yet.
 - **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). For the same reason `src/overlay.ts` subscribes once per channel and passes each frame to every consumer (the renderer, and the debug layer in dev builds). Send only what the webview draws: `DockItem::app_path` stays in Rust (`#[serde(skip_serializing)]`), because a path can hold the user's name. An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
 - **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` and `allow-watch-growth` (the commands that hand Rust its `Channel`s). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
-- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels and `VITE_DOCKMOSS_OVERGROWTH`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). Put Dock data into the DOM with `textContent` only.
+- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels, `VITE_DOCKMOSS_OVERGROWTH` and `VITE_DOCKMOSS_SWAY`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). Put Dock data into the DOM with `textContent` only.
 
 ## macOS overlay gotchas
 

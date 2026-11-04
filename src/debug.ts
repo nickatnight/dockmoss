@@ -1,18 +1,13 @@
-import {
-  type AppGrowth,
-  type BundleId,
-  type DockItem,
-  isCommandError,
-  watchDock,
-  watchGrowth,
-} from "./ipc";
+import "./debug.css";
+import type { AppGrowth, BundleId, DockItem } from "./ipc";
+import { parseOvergrowthOverride } from "./render/model";
 
 interface Outline {
   box: HTMLDivElement;
   label: HTMLSpanElement;
 }
 
-export async function outlineDockItems(root: HTMLElement): Promise<void> {
+export function outlineDockItems(root: HTMLElement) {
   const layer = document.createElement("div");
   layer.className = "debug-layer";
   layer.setAttribute("aria-hidden", "true");
@@ -46,7 +41,7 @@ export async function outlineDockItems(root: HTMLElement): Promise<void> {
       box.style.width = `${rect.width}px`;
       box.style.height = `${rect.height}px`;
       const app = growth.get(bundleId);
-      const text = app ? `${app.overgrowth.toFixed(2)} ${app.stage}` : "";
+      const text = app ? `${app.overgrowth.toFixed(2)}\n${app.stage}` : "";
       if (label.textContent !== text) {
         label.textContent = text;
       }
@@ -60,25 +55,32 @@ export async function outlineDockItems(root: HTMLElement): Promise<void> {
     }
   };
 
-  const [dock, growthWatch] = await Promise.allSettled([
-    watchDock((items) => {
+  return {
+    dock(items: DockItem[]): void {
       latest = items;
       requestDraw();
-    }),
-    watchGrowth((frame) => {
+    },
+    growth(frame: AppGrowth[]): void {
       growth = new Map(frame.map((app) => [app.bundleId, app]));
       requestDraw();
-    }),
-  ]);
-  if (dock.status === "rejected") {
-    warnNotWatched("dock items", dock.reason);
-  }
-  if (growthWatch.status === "rejected") {
-    warnNotWatched("growth", growthWatch.reason);
-  }
+    },
+  };
 }
 
-function warnNotWatched(what: string, error: unknown): void {
-  const kind = isCommandError(error) ? error.kind : "unknown";
-  console.warn(`${what} not watched`, kind, error);
+export function markNotWatched(root: HTMLElement): void {
+  if (root.querySelector(".debug-not-watched") !== null) {
+    return;
+  }
+  const bar = document.createElement("div");
+  bar.className = "debug-not-watched";
+  bar.setAttribute("aria-hidden", "true");
+  root.append(bar);
+}
+
+export function overgrowthOverride(): number | null {
+  const parsed = parseOvergrowthOverride(import.meta.env.VITE_DOCKMOSS_OVERGROWTH);
+  if (parsed.kind === "invalid") {
+    console.warn("VITE_DOCKMOSS_OVERGROWTH ignored: not a number from 0 to 1", parsed.raw);
+  }
+  return parsed.kind === "set" ? parsed.overgrowth : null;
 }

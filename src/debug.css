@@ -1,0 +1,53 @@
+.debug-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.debug-dock-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 1px solid #ff2bd6;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+
+.debug-dock-item:nth-child(even) {
+  border-color: #00e0ff;
+}
+
+.debug-dock-item-label {
+  --label-gap: 2px;
+  --label-lines: 2;
+  --label-line-height: 1.3;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: var(--label-gap);
+  padding: 0 3px;
+  white-space: pre;
+  text-align: center;
+  font: 10px/var(--label-line-height) ui-monospace, monospace;
+  color: #fff;
+  background: rgb(0 0 0 / 0.7);
+}
+
+.debug-dock-item:nth-child(even) .debug-dock-item-label {
+  margin-bottom: calc(var(--label-gap) + var(--label-lines) * var(--label-line-height) * 1em);
+}
+
+.debug-dock-item-label:empty {
+  display: none;
+}
+
+.debug-not-watched {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: #ff0000;
+  pointer-events: none;
+}

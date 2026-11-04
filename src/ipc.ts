@@ -11,7 +11,6 @@ export interface LogicalRect {
 
 export interface DockItem {
   bundleId: BundleId;
-  appPath: string;
   rect: LogicalRect;
 }
 

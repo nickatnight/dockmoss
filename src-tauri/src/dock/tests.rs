@@ -163,10 +163,10 @@ fn kept_items_stay_in_dock_order() {
 }
 
 #[test]
-fn dock_item_serializes_in_camel_case() {
+fn dock_item_serializes_only_its_bundle_id_and_rect_in_camel_case() {
     let item = DockItem {
         bundle_id: BundleId::new("com.apple.Safari").expect("non-empty bundle id"),
-        app_path: PathBuf::from("/Applications/Safari.app"),
+        app_path: PathBuf::from("/Users/someone/Applications/Safari.app"),
         rect: LogicalRect {
             x: 700.5,
             y: 920.0,
@@ -181,7 +181,6 @@ fn dock_item_serializes_in_camel_case() {
         json,
         serde_json::json!({
             "bundleId": "com.apple.Safari",
-            "appPath": "/Applications/Safari.app",
             "rect": { "x": 700.5, "y": 920.0, "width": 56.0, "height": 56.0 }
         })
     );

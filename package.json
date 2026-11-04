@@ -7,9 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "tauri": "tauri",
     "check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rlE --include='*.rs' '#\\[([a-z_]+::)?test\\]' src | grep -v '/tests[.]rs$' && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
-    "check:task": "pnpm check:fast && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)|/tests[.]rs$' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
+    "check:task": "pnpm check:fast && pnpm test && pnpm build && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)|/tests[.]rs$' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
     "check": "pnpm check:fast"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^5.1.0"
   }
 }

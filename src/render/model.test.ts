@@ -500,6 +500,7 @@ describe("glslConstants", () => {
 
     expect(used.size).toBeGreaterThan(ownConstants.size);
     expect(missing).toEqual([]);
+    expect([...ownConstants].filter((name) => generated.has(name))).toEqual([]);
   });
 
   it("writes every float with a decimal point, as GLSL requires", () => {

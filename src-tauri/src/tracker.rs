@@ -9,6 +9,7 @@ use crate::usage::DockApp;
 const MIN_RECT_CHANGE_PX: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
+/// Long enough to follow a magnification or reveal that is still settling.
 const FAST_AFTER_SEND: Duration = Duration::from_millis(250);
 const REST_POINTER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 

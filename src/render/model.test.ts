@@ -357,6 +357,7 @@ describe("artBox", () => {
 });
 
 describe("art boxes", () => {
+  // Job 009's AX tile rects in points, normal and magnified over Discord.
   it.each([
     ["normal", [[476, 46], [523, 47], [570, 47], [617, 47], [664, 47], [711, 47]]],
     ["magnified", [[435, 46], [482, 46], [529, 48], [578, 57], [635, 65], [701, 67], [769, 65]]],
@@ -415,6 +416,7 @@ describe("mossHue", () => {
     expect(hues.filter((hue) => hue > 0.5).length).toBeGreaterThan(300);
   });
 
+  // Golden values: a change here recolours every icon's moss.
   it.each([
     [0, -1],
     [0xffffffff, -0.23921568627450984],
@@ -504,6 +506,7 @@ describe("spritesFor", () => {
     }
   });
 
+  // Golden values: a change here moves every overgrown icon's sprites.
   it.each([
     [
       "com.hnc.Discord#0",

@@ -32,6 +32,8 @@ float noise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// Noise finer than half a lattice cell per device pixel aliases: it speckles at
+// rest and shimmers while the Dock magnifies. Each term fades to its mean first.
 const float ALIAS_FADE_START = 0.375;
 const float ALIAS_FADE_END = 0.5;
 
@@ -70,6 +72,7 @@ float growthDistance(vec2 uv) {
 const float TAU = 6.2831853;
 const float SPRITE_TIP_LEAN = 0.08;
 
+// 0 at time 0, so moss that has never swayed is the static moss.
 float swayWave(float period, float phase) {
   return 0.5 * (sin(TAU * u_sway_seconds / period + phase) - sin(phase));
 }
@@ -114,6 +117,8 @@ float contactShadow(float front, float cover) {
   return CONTACT_SHADOW_STRENGTH * smoothstep(-CONTACT_SHADOW_WIDTH, 0.0, front) * (1.0 - cover);
 }
 
+// Under half a cell per device pixel on tile size 45's 74 px art box, so the
+// grain stays whole there and fades on smaller Docks.
 const float GRAIN_FREQUENCY = 28.0;
 
 float ellipseDistance(vec2 p, vec2 radii) {

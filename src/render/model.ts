@@ -168,8 +168,10 @@ export const TUFT_PER_REACH = 0.3;
 export const FBM_OCTAVES = 5;
 export const FRONT_FUZZ_WIDTH = 0.04;
 export const CONTACT_SHADOW_WIDTH = 0.03;
+/** About 0.9 device px on the 74 px art box of tile size 45. */
 export const SWAY_REACH = 0.012;
 
+/** Mirrors `growthDistance` in moss.frag.glsl: change both together. */
 function growthDistance(x: number, y: number): number {
   const fromBottom = y * BOTTOM_DISTANCE_SCALE;
   const fromCorner =

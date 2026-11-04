@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -7,6 +8,9 @@ use crate::geometry::{Display, LogicalRect, ScreenRect, to_overlay_local};
 use crate::trust::Trust;
 
 const APPLICATION_SUBROLE: &str = "AXApplicationDockItem";
+/// A latched gate re-checks trust at most this often: the tracker's `Slow`
+/// interval, so a revoked grant costs one query per slow poll.
+const RECHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DockError {
@@ -56,32 +60,48 @@ pub struct RawDockChild {
 /// `TrustState` is refreshed only every few seconds, so trust revoked while
 /// running shows up first as a read that returns `ApiDisabled`. From then on
 /// the gate skips the read and calls `recheck` (a trust query that never
-/// prompts) each tick, until it or `TrustState` reports trust again. The
-/// latch holds only while `check_trust` agrees with AX.
+/// prompts) at most once per `Slow` interval, until it or `TrustState`
+/// reports trust again. The latch holds only while `check_trust` agrees with
+/// AX.
 #[derive(Debug, Default)]
 pub struct ReadGate {
     revoked: bool,
+    last_recheck: Option<Instant>,
 }
 
 impl ReadGate {
     pub fn read(
         &mut self,
         trust: Trust,
+        now: Instant,
         recheck: impl FnOnce() -> Trust,
         read: impl FnOnce() -> Result<Vec<RawDockChild>, DockError>,
     ) -> Result<Vec<RawDockChild>, DockError> {
         match trust {
             Trust::Untrusted => {
                 self.revoked = false;
+                self.last_recheck = None;
                 return Err(DockError::ApiDisabled);
             }
-            Trust::Trusted if self.revoked && recheck() == Trust::Untrusted => {
-                return Err(DockError::ApiDisabled);
+            Trust::Trusted if self.revoked => {
+                let due = self
+                    .last_recheck
+                    .is_none_or(|last| now.saturating_duration_since(last) >= RECHECK_INTERVAL);
+                if !due {
+                    return Err(DockError::ApiDisabled);
+                }
+                self.last_recheck = Some(now);
+                if recheck() == Trust::Untrusted {
+                    return Err(DockError::ApiDisabled);
+                }
             }
             Trust::Trusted => {}
         }
         let result = read();
         self.revoked = result == Err(DockError::ApiDisabled);
+        if !self.revoked {
+            self.last_recheck = None;
+        }
         result
     }
 }

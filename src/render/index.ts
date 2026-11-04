@@ -1,59 +1,24 @@
-import type { AppGrowth, DockItem } from "../ipc";
-import { type MossGl, createMossGl } from "./gl";
-import { type Scene, artBox, mostOvergrownItem, step, toDeviceBox } from "./model";
+import { createMossGl } from "./gl";
+import { type FrameSink, createRenderer } from "./renderer";
 
-export function startMossRenderer(root: HTMLElement, overgrowthOverride: number | null) {
+export interface MossOptions {
+  overgrowthOverride: number | null;
+  sway: boolean;
+}
+
+export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway }: MossOptions): FrameSink {
   const canvas = document.createElement("canvas");
   canvas.className = "moss";
   canvas.setAttribute("aria-hidden", "true");
   root.append(canvas);
 
-  let moss: MossGl | null = createMossGl(canvas);
-  let items: DockItem[] = [];
-  let growth: AppGrowth[] = [];
-  let latest: Scene | null = null;
-  let drawn: Scene | null = null;
-  let frameRequested = false;
-
-  const frame = (): void => {
-    frameRequested = false;
-    const scene = latest;
-    if (moss === null || scene === null) {
-      return;
-    }
-    const next = step(drawn, scene);
-    if (next.kind !== "draw") {
-      return;
-    }
-    if (next.changes.geometry) {
-      moss.setBox(toDeviceBox(artBox(scene.tile), devicePixelRatio, canvas.height));
-    }
-    if (next.changes.moss) {
-      moss.setMoss(scene.seed, scene.overgrowth);
-    }
-    moss.draw();
-    drawn = scene;
-  };
-
-  const update = (): void => {
-    latest = mostOvergrownItem(items, growth, overgrowthOverride);
-    const next = step(drawn, latest);
-    if (next.kind === "clear") {
-      // At once: the window may be ordered out already, and WebKit runs no
-      // frame callbacks there, so the old moss would show at the next order-in.
-      moss?.clear();
-      drawn = null;
-    } else if (next.kind === "draw" && moss !== null && !frameRequested) {
-      frameRequested = true;
-      requestAnimationFrame(frame);
-    }
-  };
-
-  const resize = (): void => {
-    moss?.resize(Math.round(innerWidth * devicePixelRatio), Math.round(innerHeight * devicePixelRatio));
-    drawn = null;
-    update();
-  };
+  const renderer = createRenderer({
+    schedule: (callback) => requestAnimationFrame(callback),
+    createGl: () => createMossGl(canvas),
+    overgrowthOverride,
+    sway,
+  });
+  const resize = (): void => renderer.resize(innerWidth, innerHeight, devicePixelRatio);
 
   const watchPixelRatio = (): void => {
     matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener(
@@ -70,23 +35,10 @@ export function startMossRenderer(root: HTMLElement, overgrowthOverride: number 
   watchPixelRatio();
   canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
-    moss = null;
-    drawn = null;
+    renderer.contextLost();
   });
-  canvas.addEventListener("webglcontextrestored", () => {
-    moss = createMossGl(canvas);
-    resize();
-  });
+  canvas.addEventListener("webglcontextrestored", () => renderer.contextRestored());
   resize();
 
-  return {
-    dock(next: DockItem[]): void {
-      items = next;
-      update();
-    },
-    growth(next: AppGrowth[]): void {
-      growth = next;
-      update();
-    },
-  };
+  return renderer;
 }

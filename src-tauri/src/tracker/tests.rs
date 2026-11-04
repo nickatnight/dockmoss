@@ -1,8 +1,9 @@
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::{
-    PollRate, Tick, TickLog, Tracker, Visibility, changed, dock_bounds, next_delay, poll_rate,
+    Activity, PollRate, Tick, TickLog, Tracker, Visibility, awaits_reveal, changed, dock_bounds,
+    next_deadline, poll_rate,
 };
 use crate::bundle_id::BundleId;
 use crate::dock::{DockError, DockItem, RawDockChild};
@@ -358,13 +359,55 @@ fn tick_reports_the_rate_for_the_cursor_and_the_read() {
     let failed_near_bottom =
         tracker.tick(Err(DockError::CannotComplete), Some(point(720.0, 900.0)));
 
-    assert_eq!(near.rate, PollRate::Fast, "near the Dock");
-    assert_eq!(far.rate, PollRate::Slow, "away from the Dock");
+    assert_eq!(near.proximity_rate, PollRate::Fast, "near the Dock");
+    assert_eq!(far.proximity_rate, PollRate::Slow, "away from the Dock");
     assert_eq!(
-        failed_near_bottom.rate,
+        failed_near_bottom.proximity_rate,
         PollRate::Fast,
         "failed read, near the bottom edge"
     );
+}
+
+#[test]
+fn tick_reports_a_pointer_awaiting_a_reveal_for_the_cursor_and_the_read() {
+    let hidden_read = || {
+        Ok(vec![RawDockChild {
+            rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        }])
+    };
+    let edge = Some(point(700.0, 982.0));
+    let cases = [
+        (
+            "hidden Dock, pointer at the edge",
+            hidden_read(),
+            edge,
+            true,
+        ),
+        (
+            "hidden Dock, pointer 100 pt above the edge",
+            hidden_read(),
+            Some(point(700.0, 882.0)),
+            false,
+        ),
+        (
+            "shown Dock, pointer at the edge",
+            Ok(vec![raw_app("Safari", 700.0)]),
+            edge,
+            false,
+        ),
+        (
+            "unreadable Dock, pointer at the edge",
+            Err(DockError::CannotComplete),
+            edge,
+            true,
+        ),
+    ];
+
+    for (case, read, cursor, expected) in cases {
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        assert_eq!(tracker.tick(read, cursor).awaits_reveal, expected, "{case}");
+    }
 }
 
 #[test]
@@ -559,51 +602,489 @@ fn first_empty_frame_orders_the_overlay_out() {
     assert_eq!(tick.overlay, Some(Visibility::Hidden));
 }
 
+fn ms(millis: u64) -> Duration {
+    Duration::from_millis(millis)
+}
+
+struct RateCase {
+    case: &'static str,
+    proximity_rate: PollRate,
+    cursor: Option<ScreenPoint>,
+    sent: bool,
+    at_ms: u64,
+    expected: PollRate,
+}
+
 #[test]
-fn next_delay_is_the_interval_minus_the_read() {
-    let fast = PollRate::Fast.interval();
-    let slow = PollRate::Slow.interval();
+fn fast_holds_only_while_the_pointer_moves_or_a_frame_was_just_sent() {
+    let start = Instant::now();
+    let near = PollRate::Fast;
+    let rest = Some(point(720.0, 850.0));
+    let moved = Some(point(721.0, 850.0));
+    let cases = [
+        RateCase {
+            case: "first tick near the Dock",
+            proximity_rate: near,
+            cursor: rest,
+            sent: false,
+            at_ms: 0,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "pointer at rest, no frame for 300 ms",
+            proximity_rate: near,
+            cursor: rest,
+            sent: false,
+            at_ms: 300,
+            expected: PollRate::Slow,
+        },
+        RateCase {
+            case: "pointer moved",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 310,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent now",
+            proximity_rate: near,
+            cursor: moved,
+            sent: true,
+            at_ms: 320,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent 200 ms ago",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 520,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent 250 ms ago",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 570,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent 300 ms ago",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 620,
+            expected: PollRate::Slow,
+        },
+        RateCase {
+            case: "moving, but far from the Dock",
+            proximity_rate: PollRate::Slow,
+            cursor: Some(point(721.0, 300.0)),
+            sent: true,
+            at_ms: 630,
+            expected: PollRate::Slow,
+        },
+        RateCase {
+            case: "Activity alone: an unknown cursor after a known one counts as moved",
+            proximity_rate: near,
+            cursor: None,
+            sent: false,
+            at_ms: 1200,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "Activity alone: an unknown cursor that stays unknown is at rest",
+            proximity_rate: near,
+            cursor: None,
+            sent: false,
+            at_ms: 1500,
+            expected: PollRate::Slow,
+        },
+    ];
+    let mut activity = Activity::default();
+
+    for step in cases {
+        let now = start.checked_add(ms(step.at_ms)).expect("in range");
+        let rate = activity.rate(step.proximity_rate, false, step.cursor, step.sent, now);
+        assert_eq!(rate, step.expected, "{}", step.case);
+    }
+}
+
+struct RevealCase {
+    case: &'static str,
+    awaits_reveal: bool,
+    cursor: Option<ScreenPoint>,
+    at_ms: u64,
+    expected: PollRate,
+}
+
+#[test]
+fn a_pointer_at_a_hidden_docks_edge_holds_fast_for_a_bounded_wait() {
+    let start = Instant::now();
+    let edge = Some(point(700.0, 982.0));
+    let above = Some(point(700.0, 882.0));
+    let cases = [
+        RevealCase {
+            case: "hidden Dock, the pointer reaches the edge",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 0,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge for 500 ms",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 500,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge for 1000 ms",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 1000,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge for 1100 ms: the wait is over",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 1100,
+            expected: PollRate::Slow,
+        },
+        RevealCase {
+            case: "hidden Dock, moves 100 pt above the edge",
+            awaits_reveal: false,
+            cursor: above,
+            at_ms: 1200,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest 100 pt above the edge",
+            awaits_reveal: false,
+            cursor: above,
+            at_ms: 1500,
+            expected: PollRate::Slow,
+        },
+        RevealCase {
+            case: "hidden Dock, back at the edge: a new move opens a new wait",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 1600,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge 500 ms after the later move",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 2100,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge 1000 ms after the later move",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 2600,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge 1100 ms after the later move",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 2700,
+            expected: PollRate::Slow,
+        },
+    ];
+    let mut activity = Activity::default();
+
+    for step in cases {
+        let now = start.checked_add(ms(step.at_ms)).expect("in range");
+        let rate = activity.rate(PollRate::Fast, step.awaits_reveal, step.cursor, false, now);
+        assert_eq!(rate, step.expected, "{}", step.case);
+    }
+}
+
+#[test]
+fn a_pointer_awaits_a_reveal_only_at_a_hidden_docks_bottom_edge() {
+    let hidden = Some(rect(440.0, 987.0, 630.0, 56.0));
+    let shown = Some(rect(440.0, 920.0, 630.0, 56.0));
     let cases = [
         (
-            "fast, short read",
-            PollRate::Fast,
-            Duration::from_millis(5),
-            Duration::from_nanos(11_666_667),
+            "hidden, at the bottom edge",
+            hidden,
+            Some(point(700.0, 982.0)),
+            true,
         ),
         (
-            "fast, read equal to the interval",
-            PollRate::Fast,
-            fast,
-            Duration::ZERO,
+            "hidden, 4 pt above the edge",
+            hidden,
+            Some(point(700.0, 978.0)),
+            true,
         ),
         (
-            "fast, read longer than the interval",
-            PollRate::Fast,
-            Duration::from_millis(40),
-            Duration::ZERO,
+            "hidden, 5 pt above the edge",
+            hidden,
+            Some(point(700.0, 977.0)),
+            false,
         ),
         (
-            "slow, short read",
-            PollRate::Slow,
-            Duration::from_millis(5),
-            Duration::from_millis(495),
+            "no read, at the bottom edge",
+            None,
+            Some(point(700.0, 982.0)),
+            true,
         ),
         (
-            "slow, read equal to the interval",
-            PollRate::Slow,
-            slow,
-            Duration::ZERO,
+            "shown, at the bottom edge",
+            shown,
+            Some(point(700.0, 982.0)),
+            false,
         ),
+        ("hidden, cursor unknown", hidden, None, false),
         (
-            "slow, read longer than the interval",
-            PollRate::Slow,
-            Duration::from_secs(2),
-            Duration::ZERO,
+            "hidden, left of the display",
+            hidden,
+            Some(point(-10.0, 982.0)),
+            false,
         ),
     ];
 
-    for (case, rate, read_took, expected) in cases {
-        assert_eq!(next_delay(rate, read_took), expected, "{case}");
+    for (case, bounds, cursor, expected) in cases {
+        assert_eq!(
+            awaits_reveal(cursor, bounds, PRIMARY_2X),
+            expected,
+            "{case}"
+        );
+    }
+}
+
+fn wait_for_read(
+    activity: &Activity,
+    start: Instant,
+    now_ms: u64,
+    read_due_ms: u64,
+    pointer: &[Option<ScreenPoint>],
+) -> (u64, Vec<u64>) {
+    let at = |millis: u64| start.checked_add(ms(millis)).expect("in range");
+    let since_start = |instant: Instant| {
+        u64::try_from(instant.duration_since(start).as_millis()).expect("in range")
+    };
+    let clock = std::cell::Cell::new(at(now_ms));
+    let mut checks = Vec::new();
+    let read = activity.wait_for_read(
+        at(read_due_ms),
+        at(now_ms),
+        |until| clock.set(until),
+        || {
+            let pointer = pointer
+                .get(checks.len())
+                .or(pointer.last())
+                .copied()
+                .flatten();
+            checks.push(since_start(clock.get()));
+            pointer
+        },
+    );
+    (since_start(read), checks)
+}
+
+struct RestCase {
+    case: &'static str,
+    proximity_rate: PollRate,
+    cursor_at_read: Option<ScreenPoint>,
+    pointer_at_checks: Vec<Option<ScreenPoint>>,
+    expected_read_ms: u64,
+    expected_checks_ms: Vec<u64>,
+}
+
+#[test]
+fn a_pointer_resting_in_the_band_is_checked_at_10_hz_until_it_moves_or_the_read_is_due() {
+    const NOW_MS: u64 = 300;
+    const READ_DUE_MS: u64 = 800;
+    let start = Instant::now();
+    let rest = Some(point(720.0, 850.0));
+    let moved = Some(point(722.0, 850.0));
+    let cases = [
+        RestCase {
+            case: "at rest: checks every 100 ms, then the Slow read",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: rest,
+            pointer_at_checks: vec![rest],
+            expected_read_ms: 800,
+            expected_checks_ms: vec![400, 500, 600, 700],
+        },
+        RestCase {
+            case: "moves before the first check: read at that check",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: rest,
+            pointer_at_checks: vec![moved],
+            expected_read_ms: 400,
+            expected_checks_ms: vec![400],
+        },
+        RestCase {
+            case: "moves before the third check: read at that check",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: rest,
+            pointer_at_checks: vec![rest, rest, moved],
+            expected_read_ms: 600,
+            expected_checks_ms: vec![400, 500, 600],
+        },
+        RestCase {
+            case: "cursor unknown at rest: checks, then the Slow read",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: None,
+            pointer_at_checks: vec![None],
+            expected_read_ms: 800,
+            expected_checks_ms: vec![400, 500, 600, 700],
+        },
+        RestCase {
+            case: "away from the Dock: no checks",
+            proximity_rate: PollRate::Slow,
+            cursor_at_read: Some(point(720.0, 300.0)),
+            pointer_at_checks: vec![moved],
+            expected_read_ms: 800,
+            expected_checks_ms: vec![],
+        },
+    ];
+
+    for RestCase {
+        case,
+        proximity_rate,
+        cursor_at_read,
+        pointer_at_checks,
+        expected_read_ms,
+        expected_checks_ms,
+    } in cases
+    {
+        let mut activity = Activity::default();
+        activity.rate(proximity_rate, false, cursor_at_read, false, start);
+        let rate = activity.rate(
+            proximity_rate,
+            false,
+            cursor_at_read,
+            false,
+            start.checked_add(ms(NOW_MS)).expect("in range"),
+        );
+        assert_eq!(rate, PollRate::Slow, "{case}");
+
+        let (read, checks) =
+            wait_for_read(&activity, start, NOW_MS, READ_DUE_MS, &pointer_at_checks);
+
+        assert_eq!(read, expected_read_ms, "{case}: read");
+        assert_eq!(checks, expected_checks_ms, "{case}: checks");
+    }
+}
+
+#[test]
+fn a_moving_pointer_near_the_dock_gets_no_pointer_checks_between_fast_reads() {
+    let start = Instant::now();
+    let mut activity = Activity::default();
+    let rate = activity.rate(
+        PollRate::Fast,
+        false,
+        Some(point(720.0, 850.0)),
+        false,
+        start,
+    );
+    assert_eq!(rate, PollRate::Fast);
+
+    let (read, checks) = wait_for_read(&activity, start, 0, 17, &[Some(point(730.0, 850.0))]);
+
+    assert_eq!(read, 17);
+    assert_eq!(checks, Vec::<u64>::new());
+}
+
+#[test]
+fn a_magnification_started_from_rest_is_read_at_fast_within_one_check() {
+    let start = Instant::now();
+    let rest = Some(point(720.0, 850.0));
+    let moved = Some(point(724.0, 850.0));
+    let mut activity = Activity::default();
+    activity.rate(PollRate::Fast, false, rest, false, start);
+    assert_eq!(
+        activity.rate(
+            PollRate::Fast,
+            false,
+            rest,
+            false,
+            start.checked_add(ms(300)).expect("in range")
+        ),
+        PollRate::Slow
+    );
+
+    let (read, _) = wait_for_read(&activity, start, 300, 800, &[moved]);
+    let rate = activity.rate(
+        PollRate::Fast,
+        false,
+        moved,
+        false,
+        start.checked_add(ms(read)).expect("in range"),
+    );
+
+    assert!(read - 300 <= 100, "read {read} ms");
+    assert_eq!(rate, PollRate::Fast);
+}
+
+#[test]
+fn deadlines_follow_the_previous_deadline_not_the_end_of_the_read() {
+    let start = Instant::now();
+    let fast = PollRate::Fast.interval();
+    let at = |nanos: u64| {
+        start
+            .checked_add(Duration::from_nanos(nanos))
+            .expect("in range")
+    };
+
+    assert_eq!(
+        next_deadline(start, PollRate::Fast, at(5_500_000)),
+        at(16_666_667)
+    );
+    assert_eq!(
+        next_deadline(start, PollRate::Slow, at(5_000_000)),
+        at(500_000_000)
+    );
+    assert_eq!(
+        next_deadline(at(16_666_667), PollRate::Fast, at(20_000_000)),
+        at(33_333_334)
+    );
+    let overrun = next_deadline(start, PollRate::Fast, at(40_000_000));
+    assert_eq!(overrun, at(50_000_001));
+    assert!(overrun > at(40_000_000));
+    assert_eq!(
+        next_deadline(start, PollRate::Fast, at(16_666_667)),
+        start.checked_add(fast * 2).expect("in range")
+    );
+}
+
+#[test]
+fn sixty_deadlines_span_one_second() {
+    let start = Instant::now();
+    let mut deadline = start;
+    for _ in 0..60 {
+        let now = deadline
+            .checked_add(Duration::from_micros(3_500))
+            .expect("in range");
+        deadline = next_deadline(deadline, PollRate::Fast, now);
+    }
+
+    let span = deadline.duration_since(start);
+    assert!(
+        span.abs_diff(Duration::from_secs(1)) < Duration::from_micros(1),
+        "{span:?}"
+    );
+}
+
+#[test]
+fn a_dock_that_stops_answering_or_running_clears_and_orders_out_on_that_tick() {
+    for error in [DockError::CannotComplete, DockError::NotRunning] {
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+
+        let tick = tracker.tick(Err(error.clone()), None);
+
+        assert_eq!(tick.send, Some(Vec::new()), "{error}");
+        assert_eq!(tick.overlay, Some(Visibility::Hidden), "{error}");
     }
 }
 

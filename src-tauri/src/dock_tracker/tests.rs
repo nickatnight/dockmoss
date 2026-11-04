@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 
-use super::drain_inbox_for;
+use super::drain_inbox_until;
 use crate::commands::TrackerMessage;
 use crate::dock::RawDockChild;
 use crate::geometry::{Display, ScreenRect};
@@ -46,8 +46,8 @@ fn a_burst_of_screen_changes_does_not_cut_the_wait_short() {
     let delay = Duration::from_millis(50);
 
     let started = Instant::now();
-    drain_inbox_for(
-        delay,
+    drain_inbox_until(
+        started + delay,
         &messages,
         &mut tracker,
         &mut watcher,
@@ -75,8 +75,8 @@ fn a_new_watcher_gets_the_current_frame_on_the_next_tick() {
     let mut watcher = None;
     let mut screen_changed = false;
 
-    drain_inbox_for(
-        Duration::from_millis(5),
+    drain_inbox_until(
+        Instant::now() + Duration::from_millis(5),
         &messages,
         &mut tracker,
         &mut watcher,

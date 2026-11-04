@@ -1,10 +1,16 @@
 import { isCommandError, watchDock, watchGrowth } from "./ipc";
 import { startMossRenderer } from "./render";
+import type { FrameSink } from "./render/renderer";
 
 // One subscription per channel: a second watch call would replace the first.
 async function start(root: HTMLElement): Promise<void> {
   const dev = import.meta.env.DEV ? await import("./debug") : null;
-  const sinks = [startMossRenderer(root, dev?.overgrowthOverride() ?? null)];
+  const sinks: FrameSink[] = [
+    startMossRenderer(root, {
+      overgrowthOverride: dev?.overgrowthOverride() ?? null,
+      sway: dev?.swayFlag() ?? false,
+    }),
+  ];
   if (dev !== null) {
     sinks.push(dev.outlineDockItems(root));
   }
@@ -29,4 +35,6 @@ async function start(root: HTMLElement): Promise<void> {
   }
 }
 
-void start(document.body);
+start(document.body).catch((error: unknown) => {
+  console.error("overlay did not start", error);
+});

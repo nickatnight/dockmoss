@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::dock::{self, DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, ScreenPoint, ScreenRect};
@@ -9,6 +9,16 @@ use crate::usage::DockApp;
 const MIN_RECT_CHANGE_PX: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
+/// Long enough to follow a magnification or reveal that is still settling.
+const FAST_AFTER_SEND: Duration = Duration::from_millis(250);
+const REST_POINTER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+/// With the Dock hidden, a pointer this close to the bottom edge may be
+/// waiting for it to slide in.
+const REVEAL_EDGE: f64 = 4.0;
+/// `Fast` holds this long for a pointer resting at that edge: longer than the
+/// Dock's default auto-hide delay, after which its slide sends frames. Bounded,
+/// so a pointer parked over a hidden Dock goes back to `Slow`.
+const REVEAL_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -48,7 +58,9 @@ pub struct Tick {
     /// non-empty frame did. Empty frames (Dock hidden or unreadable) never
     /// report, so growth keeps the last known apps.
     pub apps: Option<Vec<DockApp>>,
-    pub rate: PollRate,
+    pub proximity_rate: PollRate,
+    /// The Dock is hidden and the pointer is at the edge it slides in from.
+    pub awaits_reveal: bool,
 }
 
 pub struct Tracker {
@@ -124,7 +136,8 @@ impl Tracker {
             log,
             overlay,
             apps,
-            rate: poll_rate(cursor, bounds, self.display),
+            proximity_rate: poll_rate(cursor, bounds, self.display),
+            awaits_reveal: awaits_reveal(cursor, bounds, self.display),
         }
     }
 
@@ -212,9 +225,19 @@ pub fn poll_rate(
     let frame = display.frame();
     let near = match dock_bounds.filter(|bounds| overlaps(*bounds, frame)) {
         Some(bounds) => distance(cursor, bounds) <= PROXIMITY,
-        None => near_bottom_edge(cursor, frame),
+        None => near_bottom_edge(cursor, frame, PROXIMITY),
     };
     if near { PollRate::Fast } else { PollRate::Slow }
+}
+
+pub fn awaits_reveal(
+    cursor: Option<ScreenPoint>,
+    dock_bounds: Option<ScreenRect>,
+    display: Display,
+) -> bool {
+    let frame = display.frame();
+    let hidden = !dock_bounds.is_some_and(|bounds| overlaps(bounds, frame));
+    hidden && cursor.is_some_and(|cursor| near_bottom_edge(cursor, frame, REVEAL_EDGE))
 }
 
 fn overlaps(a: ScreenRect, b: ScreenRect) -> bool {
@@ -231,14 +254,94 @@ fn distance(point: ScreenPoint, rect: ScreenRect) -> f64 {
     dx.hypot(dy)
 }
 
-fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect) -> bool {
+fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect, reach: f64) -> bool {
     let bottom = frame.y + frame.height;
     (frame.x..=frame.x + frame.width).contains(&point.x)
-        && (bottom - PROXIMITY..=bottom).contains(&point.y)
+        && (bottom - reach..=bottom).contains(&point.y)
 }
 
-pub fn next_delay(rate: PollRate, read_took: Duration) -> Duration {
-    rate.interval().saturating_sub(read_took)
+/// Keeps the poll at `Fast` only while something there moves: the pointer
+/// moved since the last tick, a frame was sent within `FAST_AFTER_SEND`, or
+/// the pointer moved within `REVEAL_WAIT` and waits at a hidden Dock's edge.
+#[derive(Debug, Default)]
+pub struct Activity {
+    last_cursor: Option<ScreenPoint>,
+    last_moved: Option<Instant>,
+    last_sent: Option<Instant>,
+    resting: bool,
+}
+
+impl Activity {
+    pub fn rate(
+        &mut self,
+        proximity_rate: PollRate,
+        awaits_reveal: bool,
+        cursor: Option<ScreenPoint>,
+        sent: bool,
+        now: Instant,
+    ) -> PollRate {
+        if sent {
+            self.last_sent = Some(now);
+        }
+        let moved = cursor != self.last_cursor;
+        self.last_cursor = cursor;
+        if moved {
+            self.last_moved = Some(now);
+        }
+        let within = |since: Option<Instant>, window: Duration| {
+            since.is_some_and(|since| now.saturating_duration_since(since) <= window)
+        };
+        let settling = within(self.last_sent, FAST_AFTER_SEND);
+        let revealing = awaits_reveal && within(self.last_moved, REVEAL_WAIT);
+        let near = proximity_rate == PollRate::Fast;
+        let moving = moved || settling || revealing;
+        self.resting = near && !moving;
+        if near && moving {
+            PollRate::Fast
+        } else {
+            PollRate::Slow
+        }
+    }
+
+    /// Waits, through `wait_until`, for the next Dock read, and returns the
+    /// instant it became due: `read_due`, or sooner if the pointer rests in
+    /// the band and moves. While it rests there, the pointer alone is checked
+    /// every `REST_POINTER_CHECK_INTERVAL`, with no Dock read.
+    pub fn wait_for_read(
+        &self,
+        read_due: Instant,
+        now: Instant,
+        mut wait_until: impl FnMut(Instant),
+        mut cursor: impl FnMut() -> Option<ScreenPoint>,
+    ) -> Instant {
+        let mut checked = now;
+        while self.resting
+            && let Some(check) = checked.checked_add(REST_POINTER_CHECK_INTERVAL)
+            && check < read_due
+        {
+            wait_until(check);
+            if cursor() != self.last_cursor {
+                return check;
+            }
+            checked = check;
+        }
+        wait_until(read_due);
+        read_due
+    }
+}
+
+/// When the tick after one due at `previous` is due: one interval later, so
+/// a late wake-up or a slow read does not stretch the interval. When `now` is
+/// already past that, the deadlines it missed are skipped, not run in a burst.
+pub fn next_deadline(previous: Instant, rate: PollRate, now: Instant) -> Instant {
+    let interval = rate.interval();
+    let behind = now.saturating_duration_since(previous);
+    let missed = behind.as_nanos() / interval.as_nanos().max(1);
+    let intervals = u32::try_from(missed.saturating_add(1)).unwrap_or(u32::MAX);
+    interval
+        .checked_mul(intervals)
+        .and_then(|ahead| previous.checked_add(ahead))
+        .unwrap_or(now)
 }
 
 #[cfg(test)]

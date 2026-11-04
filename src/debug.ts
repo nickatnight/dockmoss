@@ -1,4 +1,9 @@
+// Dev builds only: overlay.ts loads this module under import.meta.env.DEV,
+// so `pnpm build` leaves it, and its CSS, out of the bundle.
+
+import "./debug.css";
 import type { AppGrowth, BundleId, DockItem } from "./ipc";
+import { parseOvergrowthOverride } from "./render/model";
 
 interface Outline {
   box: HTMLDivElement;
@@ -40,7 +45,7 @@ export function outlineDockItems(root: HTMLElement) {
       box.style.width = `${rect.width}px`;
       box.style.height = `${rect.height}px`;
       const app = growth.get(bundleId);
-      const text = app ? `${app.overgrowth.toFixed(2)} ${app.stage}` : "";
+      const text = app ? `${app.overgrowth.toFixed(2)}\n${app.stage}` : "";
       if (label.textContent !== text) {
         label.textContent = text;
       }
@@ -64,4 +69,24 @@ export function outlineDockItems(root: HTMLElement) {
       requestDraw();
     },
   };
+}
+
+/** A 2 pt red bar along the bottom edge, for a rejected watch call. */
+export function markNotWatched(root: HTMLElement): void {
+  if (root.querySelector(".debug-not-watched") !== null) {
+    return;
+  }
+  const bar = document.createElement("div");
+  bar.className = "debug-not-watched";
+  bar.setAttribute("aria-hidden", "true");
+  root.append(bar);
+}
+
+/** `VITE_DOCKMOSS_OVERGROWTH=<0..1>` at `pnpm tauri dev` sets the drawn icon's overgrowth. */
+export function overgrowthOverride(): number | null {
+  const override = parseOvergrowthOverride(import.meta.env.VITE_DOCKMOSS_OVERGROWTH);
+  if (override.kind === "invalid") {
+    console.warn("VITE_DOCKMOSS_OVERGROWTH ignored: not a number from 0 to 1", override.raw);
+  }
+  return override.kind === "set" ? override.overgrowth : null;
 }

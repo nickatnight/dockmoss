@@ -26,9 +26,11 @@ src-tauri/src/
                  #   dock-tracker, launch-log (usage) and spotlight-seed thread glue
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules
-  tracker.rs     # pure: per Dock read -> what to send, log and show, and the poll rate
+  tracker.rs     # pure: per Dock read -> what to send, log and show; the poll rate,
+                 #   Activity (Fast only while something moves) and read deadlines
   geometry.rs    # pure: AX rects -> overlay-local logical pixels (the one conversion)
-  dock.rs        # pure: raw Dock children -> DockItems (application items only)
+  dock.rs        # pure: raw Dock children -> DockItems (application items only), and
+                 #   ReadGate (no AX read while trust is revoked)
   bundle_id.rs   # pure: BundleId newtype
   growth/        # pure: effective last-used -> 0..1 overgrowth, jitter, stages
   usage/         # launch log model and file format (log.rs), atomic store (store.rs),
@@ -41,7 +43,8 @@ src-tauri/capabilities/   # one capability file per window
 src/                      # webview: overlay.ts (one subscription per channel, fanned out),
                           #   ipc.ts, debug.ts / debug.css (dev builds only)
   render/                 # WebGL2 moss: model.ts (pure: mossy icons, item keys and seeds,
-                          #   art box, draw rule, sprites, reach bound, shader constants),
+                          #   art box, draw rule, sprites, reach bound, shader constants,
+                          #   instance attribute layout),
                           #   renderer.ts (draw and sway loop behind an injected schedule
                           #   and MossGl), gl.ts (one instanced draw), index.ts (DOM wiring),
                           #   moss.{vert,frag}.glsl
@@ -66,6 +69,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - Every `unsafe` block lives in `macos/` and has a `// SAFETY:` comment stating the invariant it depends on. Keep each block as small as the call it wraps. `unsafe_code` is denied crate-wide, so the item holding the block opts in with `#[expect(unsafe_code, reason = "...")]`.
 - **AppKit runs on the main thread.** Take a `MainThreadMarker` in any function that touches `NSWindow`/`NSWorkspace`, and reach the main thread from elsewhere with `app.run_on_main_thread(...)`.
 - **AX calls are synchronous IPC to the Dock process** and can block. Run Dock polling on a dedicated thread, or with `tauri::async_runtime::spawn_blocking`, and never on the main thread. Release CF objects through `CFRetained`/RAII wrappers instead of calling `CFRelease` by hand.
+- **Every AX read costs the Dock process CPU** (about 0.4% at 2 Hz). The tracker reads at 60 Hz only while something moves: the pointer near the Dock, a frame sent within 250 ms, or a pointer waiting at a hidden Dock's edge (1 s after its last move). A pointer at rest in the band gets pointer-only checks at 10 Hz, with no AX read. Keep any new reason to poll fast bounded in time, and put it in `tracker.rs`'s `Activity` with table tests (ADR-0012).
 - Get the native window with `window.ns_window()` and cast it to `&NSWindow` inside `macos/overlay.rs` only.
 
 ## Tauri 2 conventions
@@ -75,6 +79,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). For the same reason `src/overlay.ts` subscribes once per channel and passes each frame to every consumer (the renderer, and the debug layer in dev builds). Send only what the webview draws: `DockItem::app_path` stays in Rust (`#[serde(skip_serializing)]`), because a path can hold the user's name. An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
 - **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` and `allow-watch-growth` (the commands that hand Rust its `Channel`s). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
 - **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels, `VITE_DOCKMOSS_OVERGROWTH` and `VITE_DOCKMOSS_SWAY`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). Put Dock data into the DOM with `textContent` only.
+- **Renderer constants have one source.** Shape, sway and sprite constants live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`, and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call (ADR-0012).
 
 ## macOS overlay gotchas
 

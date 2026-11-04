@@ -64,7 +64,7 @@ DockMoss needs the Accessibility grant to read the Dock. macOS gives the grant t
 - An app bundle launched from Finder or with `open` is its own responsible process. Build one with `pnpm tauri build --debug --bundles app` and run `open src-tauri/target/debug/bundle/macos/DockMoss.app`. Without a grant, macOS shows its Accessibility dialog once at launch, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list. macOS 27 titles that list "Device Control and Data Access".
 - Local bundles are ad-hoc signed, so each rebuild has a new signature and macOS treats it as a different app: a grant does not carry over. Signing with a stable identity is milestone 7.
 
-While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. If access is revoked while the app runs, the Dock tracker notices on its next read, stops reading the Dock, and re-checks trust each tick (without prompting) until access returns. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
+While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. If access is revoked while the app runs, the Dock tracker notices on its next read, stops reading the Dock, and re-checks trust at most every 500 ms (without prompting) until access returns. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
 
 ## Launch log
 
@@ -114,9 +114,12 @@ src-tauri/src/
   error.rs          # crate Error, serialized as { kind, message }
   commands.rs       # Tauri commands watch_dock and watch_growth: hand the overlay's
                     #   Channels to the tracker and to the usage thread
-  tracker.rs        # pure: per read, what to send, log and show, and the poll rate
+  tracker.rs        # pure: per read, what to send, log and show; the poll rate and
+                    #   Activity (60 Hz only while something moves, the 10 Hz rest
+                    #   check, the reveal wait) and the absolute read deadlines
   geometry.rs       # pure: AX rects to overlay-local logical pixels
-  dock.rs           # pure: raw Dock children to DockItems (apps only), the trust gate
+  dock.rs           # pure: raw Dock children to DockItems (apps only), and ReadGate,
+                    #   which stops AX reads while trust is revoked
   bundle_id.rs      # BundleId newtype
   tray.rs           # menu-bar icon, Quit, and the Accessibility grant item
   trust.rs          # Trust (trusted or not) and the shared latest reading
@@ -147,10 +150,11 @@ src/                # webview frontend: overlay.ts (one subscription per channel
                     #   (every invoke call, the watchDock and watchGrowth Channels),
                     #   debug.ts / debug.css (dev only: outlines, labels, the override)
   render/           # WebGL2 moss: model.ts (pure: mossy icons, keys and seeds, art box,
-                    #   draw rule, sprites, the reach bound and the shader's constants;
-                    #   model.test.ts), renderer.ts (draw and sway loop behind injected
-                    #   schedule and MossGl; renderer.test.ts), gl.ts (one instanced
-                    #   draw), index.ts (DOM wiring), moss.vert.glsl, moss.frag.glsl
+                    #   draw rule, sprites, the reach bound, the shader's constants and
+                    #   the instance attribute layout; model.test.ts), renderer.ts
+                    #   (draw and sway loop behind injected schedule and MossGl;
+                    #   renderer.test.ts), gl.ts (one instanced draw), index.ts (DOM
+                    #   wiring), moss.vert.glsl, moss.frag.glsl
 ```
 
 ## Icons

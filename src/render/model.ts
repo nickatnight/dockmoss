@@ -45,7 +45,7 @@ export function fnv1a32(text: string): number {
   return hash >>> 0;
 }
 
-export function drawnIcon(
+export function mostOvergrownItem(
   items: readonly DockItem[],
   growth: readonly AppGrowth[],
   overgrowthOverride: number | null,

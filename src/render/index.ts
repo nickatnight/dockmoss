@@ -1,6 +1,6 @@
 import type { AppGrowth, DockItem } from "../ipc";
 import { type MossGl, createMossGl } from "./gl";
-import { type Scene, artBox, drawnIcon, step, toDeviceBox } from "./model";
+import { type Scene, artBox, mostOvergrownItem, step, toDeviceBox } from "./model";
 
 export function startMossRenderer(root: HTMLElement, overgrowthOverride: number | null) {
   const canvas = document.createElement("canvas");
@@ -36,7 +36,7 @@ export function startMossRenderer(root: HTMLElement, overgrowthOverride: number 
   };
 
   const update = (): void => {
-    latest = drawnIcon(items, growth, overgrowthOverride);
+    latest = mostOvergrownItem(items, growth, overgrowthOverride);
     const next = step(drawn, latest);
     if (next.kind === "clear") {
       // At once: the window may be ordered out already, and WebKit runs no

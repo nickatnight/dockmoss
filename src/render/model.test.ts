@@ -5,7 +5,7 @@ import {
   type ItemKey,
   type Scene,
   artBox,
-  drawnIcon,
+  mostOvergrownItem,
   fnv1a32,
   itemKeys,
   parseOvergrowthOverride,
@@ -35,7 +35,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
   };
 }
 
-describe("drawnIcon", () => {
+describe("mostOvergrownItem", () => {
   it("draws the Dock item with the highest overgrowth", () => {
     const items = [
       item("com.apple.finder", 100),
@@ -48,7 +48,7 @@ describe("drawnIcon", () => {
       growth("com.apple.Safari", 0.2),
     ];
 
-    const drawn = drawnIcon(items, frame, null);
+    const drawn = mostOvergrownItem(items, frame, null);
 
     expect(drawn?.key).toBe("com.hnc.Discord#0");
     expect(drawn?.rect.x).toBe(160);
@@ -62,7 +62,7 @@ describe("drawnIcon", () => {
       growth("com.hnc.Discord", 0.4),
     ];
 
-    expect(drawnIcon(items, frame, null)?.key).toBe("com.apple.Safari#0");
+    expect(mostOvergrownItem(items, frame, null)?.key).toBe("com.apple.Safari#0");
   });
 
   it("treats two overgrowths within one visible step as a tie", () => {
@@ -72,14 +72,14 @@ describe("drawnIcon", () => {
       growth("com.hnc.Discord", 0.5 + 1 / 1024),
     ];
 
-    expect(drawnIcon(items, frame, null)?.key).toBe("com.apple.Safari#0");
+    expect(mostOvergrownItem(items, frame, null)?.key).toBe("com.apple.Safari#0");
   });
 
   it("draws the first item, clean, when every item is clean", () => {
     const items = [item("com.apple.finder", 100), item("com.apple.Safari", 160)];
     const frame = [growth("com.apple.finder", 0), growth("com.apple.Safari", 0)];
 
-    const drawn = drawnIcon(items, frame, null);
+    const drawn = mostOvergrownItem(items, frame, null);
 
     expect(drawn?.key).toBe("com.apple.finder#0");
     expect(drawn?.overgrowth).toBe(0);
@@ -88,14 +88,14 @@ describe("drawnIcon", () => {
   it("counts an item with no growth entry yet as clean", () => {
     const items = [item("com.apple.finder", 100), item("com.hnc.Discord", 160)];
 
-    expect(drawnIcon(items, [], null)?.overgrowth).toBe(0);
+    expect(mostOvergrownItem(items, [], null)?.overgrowth).toBe(0);
     expect(
-      drawnIcon(items, [growth("com.hnc.Discord", 0.2)], null)?.key,
+      mostOvergrownItem(items, [growth("com.hnc.Discord", 0.2)], null)?.key,
     ).toBe("com.hnc.Discord#0");
   });
 
   it("draws nothing for an empty Dock", () => {
-    expect(drawnIcon([], [growth("com.hnc.Discord", 1)], null)).toBeNull();
+    expect(mostOvergrownItem([], [growth("com.hnc.Discord", 1)], null)).toBeNull();
   });
 
   it("draws the first of two items that share the most overgrown bundle ID", () => {
@@ -110,7 +110,7 @@ describe("drawnIcon", () => {
       growth("com.microsoft.VSCode", 0.7),
     ];
 
-    const drawn = drawnIcon(items, frame, null);
+    const drawn = mostOvergrownItem(items, frame, null);
 
     expect(drawn?.key).toBe("com.microsoft.VSCode#0");
     expect(drawn?.rect.x).toBe(160);
@@ -121,7 +121,7 @@ describe("drawnIcon", () => {
     const items = [item("com.apple.finder", 100), item("com.hnc.Discord", 160)];
     const frame = [growth("com.apple.finder", 0), growth("com.hnc.Discord", 0.65)];
 
-    const drawn = drawnIcon(items, frame, 0.3);
+    const drawn = mostOvergrownItem(items, frame, 0.3);
 
     expect(drawn?.key).toBe("com.hnc.Discord#0");
     expect(drawn?.overgrowth).toBe(quantize(0.3));
@@ -202,8 +202,8 @@ describe("step", () => {
 
   it("does nothing for an overgrowth change smaller than one visible step", () => {
     const items = [item("com.hnc.Discord", 700)];
-    const before = drawnIcon(items, [growth("com.hnc.Discord", 0.5)], null);
-    const after = drawnIcon(items, [growth("com.hnc.Discord", 0.5 + 1 / 1024)], null);
+    const before = mostOvergrownItem(items, [growth("com.hnc.Discord", 0.5)], null);
+    const after = mostOvergrownItem(items, [growth("com.hnc.Discord", 0.5 + 1 / 1024)], null);
 
     expect(step(before, after)).toEqual({ kind: "none" });
   });

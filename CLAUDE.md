@@ -15,7 +15,7 @@ cargo test
 cargo build
 ```
 
-Run the app with `pnpm tauri dev` from the repo root. The package manager is **pnpm** (`pnpm install`, `pnpm add`, `pnpm <script>`), and `pnpm-lock.yaml` is the only lockfile. Frontend checks come from the scripts in `package.json`.
+Run the app with `pnpm tauri dev` from the repo root. The package manager is **pnpm** (`pnpm install`, `pnpm add`, `pnpm <script>`), and `pnpm-lock.yaml` is the only lockfile. Frontend checks come from the scripts in `package.json`: `pnpm test` runs vitest over the pure TS (`src/**/*.test.ts`), and `pnpm check:task` also builds the frontend and fails if `dist/` carries the debug layer.
 
 ## Layout
 
@@ -38,7 +38,10 @@ src-tauri/src/
   macos/         # every objc2 / AppKit / AX call, the `mdls` subprocess, and every
                  #   `unsafe` block
 src-tauri/capabilities/   # one capability file per window
-src/                      # webview: canvas/WebGL moss renderer, settings UI
+src/                      # webview: overlay.ts (one subscription per channel, fanned out),
+                          #   ipc.ts, debug.ts / debug.css (dev builds only)
+  render/                 # WebGL2 moss: model.ts (pure: drawn icon, item keys and seeds,
+                          #   art box, draw rule), gl.ts, index.ts, moss.{vert,frag}.glsl
 ```
 
 The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `tracker.rs`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
@@ -50,7 +53,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **Panics:** use `?` in non-test code. Release builds abort on panic. `unwrap`, `expect` and slice indexing are denied crate-wide (CONSTRAINTS.md Floor). The only `.expect`s outside tests are named startup invariants: the `MainThreadMarker` in `setup()`, the Tauri build in `run()`, and `build.rs`. Each has its own `#[expect(clippy::expect_used, reason = "...")]`, and the reason states the invariant ("tauri runs setup() on the main thread").
 - **Logging:** use `tracing` macros with structured fields (`tracing::debug!(bundle_id, days, "growth updated")`), wired up through `tauri-plugin-log`.
 - **Types:** use newtypes for domain values: `BundleId(String)`, and `Overgrowth(f32)` clamped to 0..=1 when constructed. Store time as `jiff::Timestamp` (UTC) and convert to local time only for display.
-- **Tests:** unit tests live in `<module>/tests.rs`, declared with `#[cfg(test)] mod tests;`, not in an inline `mod tests { ... }`. CONSTRAINTS.md excludes those files from coverage, so the number measures logic only.
+- **Tests:** unit tests live in `<module>/tests.rs`, declared with `#[cfg(test)] mod tests;`, not in an inline `mod tests { ... }`. CONSTRAINTS.md excludes those files from coverage, so the number measures logic only. Frontend tests sit beside their module as `*.test.ts` and run under vitest; keep what they test pure (no DOM, WebGL or clock), as `src/render/model.ts` is.
 - **Lints:** set them in `Cargo.toml` under `[lints]` instead of crate-level attributes. Enable `clippy::pedantic` as warn, plus `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`. When you allow a lint, add `#[expect(clippy::..., reason = "...")]` at the narrowest scope. A lint attribute covers everything inside the item or statement it sits on, closures included, so never put one on a statement that holds a closure such as `.setup(|app| ...)`; split the statement first.
 - **Dependencies:** check that a new crate is maintained and supports Tauri 2 before you add it. Prefer an official `tauri-plugin-*` when one exists (autostart, store, log).
 
@@ -66,9 +69,9 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 
 - **Commands:** use `async fn` with owned arguments. Shared state goes in through `app.manage(...)` and comes out as `State<'_, T>`. Use `std::sync::Mutex` when the lock never crosses an `.await`; use `tokio::sync::Mutex` only when it does.
 - **Spawning:** use `tauri::async_runtime::spawn`. A bare `tokio::spawn` panics inside `setup()` because no runtime context exists there yet.
-- **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
-- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` (the command that hands Rust its `Channel`). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
-- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures.
+- **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). For the same reason `src/overlay.ts` subscribes once per channel and passes each frame to every consumer (the renderer, and the debug layer in dev builds). Send only what the webview draws: `DockItem::app_path` stays in Rust (`#[serde(skip_serializing)]`), because a path can hold the user's name. An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
+- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` and `allow-watch-growth` (the commands that hand Rust its `Channel`s). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
+- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels and `VITE_DOCKMOSS_OVERGROWTH`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). Put Dock data into the DOM with `textContent` only.
 
 ## macOS overlay gotchas
 

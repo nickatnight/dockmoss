@@ -34,6 +34,9 @@ impl DockError {
 #[serde(rename_all = "camelCase")]
 pub struct DockItem {
     pub bundle_id: BundleId,
+    /// Kept in Rust for the Spotlight read. The path can hold the user's
+    /// name, and the overlay only draws, so it is not sent to the webview.
+    #[serde(skip_serializing)]
     pub app_path: PathBuf,
     pub rect: LogicalRect,
 }

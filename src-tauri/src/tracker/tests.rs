@@ -369,6 +369,48 @@ fn tick_reports_the_rate_for_the_cursor_and_the_read() {
 }
 
 #[test]
+fn tick_reports_a_pointer_awaiting_a_reveal_for_the_cursor_and_the_read() {
+    let hidden_read = || {
+        Ok(vec![RawDockChild {
+            rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        }])
+    };
+    let edge = Some(point(700.0, 982.0));
+    let cases = [
+        (
+            "hidden Dock, pointer at the edge",
+            hidden_read(),
+            edge,
+            true,
+        ),
+        (
+            "hidden Dock, pointer 100 pt above the edge",
+            hidden_read(),
+            Some(point(700.0, 882.0)),
+            false,
+        ),
+        (
+            "shown Dock, pointer at the edge",
+            Ok(vec![raw_app("Safari", 700.0)]),
+            edge,
+            false,
+        ),
+        (
+            "unreadable Dock, pointer at the edge",
+            Err(DockError::CannotComplete),
+            edge,
+            true,
+        ),
+    ];
+
+    for (case, read, cursor, expected) in cases {
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        assert_eq!(tracker.tick(read, cursor).awaits_reveal, expected, "{case}");
+    }
+}
+
+#[test]
 fn tracker_sends_changes_and_logs_errors_once() {
     let safari_frame = || Ok(vec![raw_app("Safari", 700.0)]);
     let expected_frame = vec![item(
@@ -724,6 +766,34 @@ fn a_pointer_at_a_hidden_docks_edge_holds_fast_for_a_bounded_wait() {
             awaits_reveal: false,
             cursor: above,
             at_ms: 1500,
+            expected: PollRate::Slow,
+        },
+        RevealCase {
+            case: "hidden Dock, back at the edge: a new move opens a new wait",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 1600,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge 500 ms after the later move",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 2100,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge 1000 ms after the later move",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 2600,
+            expected: PollRate::Fast,
+        },
+        RevealCase {
+            case: "hidden Dock, at rest at the edge 1100 ms after the later move",
+            awaits_reveal: true,
+            cursor: edge,
+            at_ms: 2700,
             expected: PollRate::Slow,
         },
     ];

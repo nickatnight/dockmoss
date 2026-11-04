@@ -27,6 +27,7 @@ import {
   worstCaseFront,
 } from "./model";
 import * as model from "./model";
+import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const TILE = { y: 918, width: 56, height: 56 };
@@ -490,6 +491,17 @@ describe("glslConstants", () => {
     }
   });
 
+  it("declares every upper-case name moss.frag.glsl uses and does not declare itself", () => {
+    const code = fragmentSource.replace(/\/\/.*$/gm, "");
+    const ownConstants = new Set([...code.matchAll(/\bconst \w+ ([A-Z][A-Z0-9_]+)\b/g)].map(([, name]) => name));
+    const used = new Set([...code.matchAll(/\b[A-Z][A-Z0-9_]*[A-Z0-9]\b/g)].map(([name]) => name));
+    const generated = new Set([...glslConstants().matchAll(/^const \w+ (\w+) =/gm)].map(([, name]) => name));
+    const missing = [...used].filter((name) => !ownConstants.has(name) && !generated.has(name));
+
+    expect(used.size).toBeGreaterThan(ownConstants.size);
+    expect(missing).toEqual([]);
+  });
+
   it("writes every float with a decimal point, as GLSL requires", () => {
     for (const [, value] of glslConstants().matchAll(/^const float \w+ = (.+);$/gm)) {
       expect(value).toMatch(/\./);
@@ -537,6 +549,12 @@ describe("spritesFor", () => {
         expect(y + half, `seed ${seed}`).toBeLessThanOrEqual(0.55);
       }
     }
+  });
+
+  it("leans a sprite's tip by at most 1.5 device px on tile size 45's 74 px art box", () => {
+    const largest = Math.max(...seeds.flatMap((seed) => spritesFor(seed).map(({ size }) => size)));
+
+    expect(SPRITE_TIP_LEAN * largest * 74).toBeLessThanOrEqual(1.5);
   });
 
   it("never overlaps two sprites on one icon", () => {

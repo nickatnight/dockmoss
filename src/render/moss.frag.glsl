@@ -7,6 +7,9 @@ uniform float u_overgrowth;
 
 out vec4 fragColor;
 
+// The macOS icon shape, approximated as a rounded rect.
+const float CORNER_RADIUS_PER_SIDE = 0.225;
+
 // Integer hash (no sin), so the pattern is the same on every GPU.
 float hash(vec2 p) {
   uvec2 q = uvec2(ivec2(floor(p)) + ivec2(32768));
@@ -37,7 +40,7 @@ float fbm(vec2 p) {
   return sum;
 }
 
-float roundedRect(vec2 p, vec2 halfSize, float radius) {
+float roundedRectDistance(vec2 p, vec2 halfSize, float radius) {
   vec2 q = abs(p) - halfSize + radius;
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
@@ -47,7 +50,7 @@ void main() {
   vec2 size = u_box.zw;
   float side = min(size.x, size.y);
 
-  float edge = roundedRect(local - size * 0.5, size * 0.5, 0.225 * side);
+  float edge = roundedRectDistance(local - size * 0.5, size * 0.5, CORNER_RADIUS_PER_SIDE * side);
   float clip = clamp(0.5 - edge, 0.0, 1.0);
   if (clip <= 0.0 || u_overgrowth <= 0.0) {
     fragColor = vec4(0.0);

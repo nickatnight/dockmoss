@@ -1,6 +1,8 @@
-import { type DeviceBox, seedOffset } from "./model";
+import { type DeviceBox, glslConstants, seedOffset } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
+
+const CONSTANTS_LINE = "#pragma moss_constants";
 
 // Keeps the clip's antialiased edge inside the scissor box.
 const SCISSOR_MARGIN_PX = 1;
@@ -87,7 +89,7 @@ function linkProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
   if (vertex === null) {
     return null;
   }
-  const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource.replace(CONSTANTS_LINE, glslConstants()));
   if (fragment === null) {
     gl.deleteShader(vertex);
     return null;

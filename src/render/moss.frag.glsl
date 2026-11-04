@@ -7,19 +7,9 @@ uniform float u_overgrowth;
 
 out vec4 fragColor;
 
-// The macOS icon shape, approximated as a rounded rect.
-const float CORNER_RADIUS_PER_SIDE = 0.225;
-
-// Growth starts at the bottom edge and at the two bottom corners, where the
-// corner arcs sit (icon space: 0 to 1 across, 0 at the bottom). Distance from
-// the bottom edge counts for more, so the corners lead.
-const vec2 LEFT_CORNER = vec2(0.066);
-const vec2 RIGHT_CORNER = vec2(0.934, 0.066);
-const float BOTTOM_DISTANCE_SCALE = 1.7;
-const float CORNER_DISTANCE_SCALE = 1.25;
-// How far growth reaches at overgrowth 1, and the curve up to it.
-const float MAX_REACH = 0.62;
-const float REACH_EXPONENT = 0.8;
+// CORNER_RADIUS_PER_SIDE, the growth shape and the front's caps: model.ts
+// generates them (glslConstants), and gl.ts puts them on this line.
+#pragma moss_constants
 
 // Integer hash (no sin), so the pattern is the same on every GPU.
 float hash(vec2 p) {
@@ -43,7 +33,7 @@ float noise(vec2 p) {
 float fbm(vec2 p) {
   float sum = 0.0;
   float amplitude = 0.5;
-  for (int octave = 0; octave < 5; octave++) {
+  for (int octave = 0; octave < FBM_OCTAVES; octave++) {
     sum += amplitude * noise(p);
     p = mat2(1.6, 1.2, -1.2, 1.6) * p;
     amplitude *= 0.5;
@@ -68,12 +58,13 @@ float mossFront(vec2 uv, vec2 p) {
   float reach = MAX_REACH * pow(u_overgrowth, REACH_EXPONENT);
   float ragged = fbm(p * 5.0) - 0.5;
   float tufts = noise(p * 26.0) - 0.5;
-  return reach - growthDistance(uv) + ragged * min(0.24, reach * 1.2) + tufts * min(0.05, reach * 0.3);
+  return reach - growthDistance(uv) + ragged * min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
+    tufts * min(TUFT_CAP, reach * TUFT_PER_REACH);
 }
 
 float mossCover(float front, float grain) {
   float cover = smoothstep(0.0, 0.03, front);
-  float nearFront = 1.0 - smoothstep(0.0, 0.04, abs(front));
+  float nearFront = 1.0 - smoothstep(0.0, FRONT_FUZZ_WIDTH, abs(front));
   return clamp(cover + nearFront * (grain - 0.55) * 0.9, 0.0, 1.0);
 }
 

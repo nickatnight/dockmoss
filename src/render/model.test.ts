@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
+  CORNER_RADIUS_PER_SIDE,
   type ItemKey,
   type Scene,
   artBox,
+  glslConstants,
   mostOvergrownItem,
   fnv1a32,
   itemKeys,
@@ -13,7 +15,9 @@ import {
   seedOffset,
   step,
   toDeviceBox,
+  worstCaseFront,
 } from "./model";
+import * as model from "./model";
 
 const TILE = { y: 918, width: 56, height: 56 };
 
@@ -281,5 +285,53 @@ describe("seedOffset", () => {
     [0xffffffff, [63.9990234375, 63.9990234375]],
   ])("moves seed %d to its own patch of noise, from the seed's low and high halves", (seed, offset) => {
     expect(seedOffset(seed)).toEqual(offset);
+  });
+});
+
+describe("worstCaseFront", () => {
+  it("keeps moss at overgrowth 1 at or below 0.55 of the art height on the centre column", () => {
+    expect(worstCaseFront(0.5, 1)).toBeLessThanOrEqual(0.55);
+  });
+
+  it.each([0, 0.066, 0.934, 1])("keeps moss below the top corner arcs at x = %d", (x) => {
+    expect(worstCaseFront(x, 1)).toBeLessThan(1 - CORNER_RADIUS_PER_SIDE);
+  });
+
+  it("raises the centre front as overgrowth rises through 0.3, 0.6 and 1.0", () => {
+    const fronts = [0.3, 0.6, 1].map((overgrowth) => worstCaseFront(0.5, overgrowth));
+
+    expect(fronts[0]).toBeGreaterThan(0);
+    expect(fronts[1]).toBeGreaterThan(fronts[0]);
+    expect(fronts[2]).toBeGreaterThan(fronts[1]);
+  });
+
+  it.each([0, 0.5, 1])("draws nothing at overgrowth 0, at x = %d", (x) => {
+    expect(worstCaseFront(x, 0)).toBe(0);
+  });
+});
+
+describe("glslConstants", () => {
+  it("declares each shader constant with the model's own value", () => {
+    const declared = new Map(
+      [...glslConstants().matchAll(/^const (float|int|vec2) (\w+) = (.+);$/gm)].map(
+        ([, , name, value]) => [name, value],
+      ),
+    );
+    const values = model as unknown as Record<string, number | readonly number[]>;
+
+    expect(declared.size).toBeGreaterThan(0);
+    for (const [name, literal] of declared) {
+      const expected = values[name];
+      const parsed = literal.startsWith("vec2(")
+        ? literal.slice(5, -1).split(",").map(Number)
+        : Number(literal);
+      expect(parsed, name).toEqual(expected);
+    }
+  });
+
+  it("writes every float with a decimal point, as GLSL requires", () => {
+    for (const [, value] of glslConstants().matchAll(/^const float \w+ = (.+);$/gm)) {
+      expect(value).toMatch(/\./);
+    }
   });
 });

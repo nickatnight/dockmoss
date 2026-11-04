@@ -4,7 +4,7 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 10 of 13 (moss on every icon). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
+MVP slice 11 of 13 (the shrivel). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden) and moving, or the Dock moved in the last 250 ms, and at 2 Hz otherwise;
@@ -12,7 +12,9 @@ A transparent, click-through window covers the main display one level above the 
 - with the Dock hidden, a pointer within 4 pt of the bottom edge keeps 60 Hz until 1 s after it last moved, longer than the Dock's default auto-hide delay, so the Dock sliding in is read at once rather than at the next 2 Hz read. With `com.apple.dock autohide-delay` set above 1 s, the reveal waits for that 2 Hz read again;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 
-The overlay draws moss on every Dock app whose overgrowth is above 0, all in one instanced WebGL draw. Overgrowth 0 draws nothing. At the Overgrown stage an icon also gets one to three small mushrooms or flowers, placed from its bundle ID and the same on every run. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower half of the icon in the middle, higher at the sides, so the top half of the app's glyph stays visible. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes. Each icon gets its own moss pattern and a shade between olive and blue-green, the same on every run; two Dock items for one app get the same overgrowth and a pattern each. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
+The overlay draws moss on every Dock app whose overgrowth is above 0, all in one instanced WebGL draw. Overgrowth 0 draws nothing. At the Overgrown stage an icon also gets one to three small mushrooms or flowers, placed from its bundle ID and the same on every run. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower half of the icon in the middle, higher at the sides, so the top half of the app's glyph stays visible. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes, except during a shrivel. Each icon gets its own moss pattern and a shade between olive and blue-green, the same on every run; two Dock items for one app get the same overgrowth and a pattern each. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
+
+When you open an app whose icon has moss, the moss shrivels over 600 ms: it turns brown, sinks to the icon's bottom edge, and any mushrooms or flowers shrink with it, then the icon is clean. It plays once, on the icon's tile as it moves, and several icons can shrivel at once. Any drop of a mossy icon to clean plays it; today only use does that. An icon that leaves the Dock, a Dock that hides, a webview reload, or moss growing back ends a shrivel at once. While a shrivel runs, the renderer runs a frame loop at 30 frames a second, and stops it once the icon is clean. With `VITE_DOCKMOSS_OVERGROWTH` set, nothing shrivels, because the override pins every icon's overgrowth.
 
 The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay window itself is still in the Accessibility tree, as an empty web area.
 
@@ -151,10 +153,11 @@ src/                # webview frontend: overlay.ts (one subscription per channel
                     #   debug.ts / debug.css (dev only: outlines, labels, the override)
   render/           # WebGL2 moss: model.ts (pure: mossy icons, keys and seeds, art box,
                     #   draw rule, sprites, the reach bound, the shader's constants and
-                    #   the instance attribute layout; model.test.ts), renderer.ts
-                    #   (draw and sway loop behind injected schedule and MossGl;
-                    #   renderer.test.ts), gl.ts (one instanced draw), index.ts (DOM
-                    #   wiring), moss.vert.glsl, moss.frag.glsl
+                    #   the instance attribute layout, and the shrivel model;
+                    #   model.test.ts), renderer.ts (draws on change, plus a 30 fps
+                    #   loop for sway and the shrivel, behind injected schedule and
+                    #   MossGl; renderer.test.ts), gl.ts (one instanced draw),
+                    #   index.ts (DOM wiring), moss.vert.glsl, moss.frag.glsl
 ```
 
 ## Icons

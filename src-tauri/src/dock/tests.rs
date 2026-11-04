@@ -362,6 +362,92 @@ fn a_latched_gate_rechecks_trust_at_most_once_per_slow_interval() {
     assert_eq!(rechecks.get(), 10);
 }
 
+/// Latches the gate at `start`, then re-checks once at `start + 600 ms`, where
+/// trust is still revoked.
+fn latched_and_rechecked(gate: &mut ReadGate, start: Instant) {
+    let latched = gate.read(
+        Trust::Trusted,
+        start,
+        || panic!("re-checked before the gate latched"),
+        || Err(DockError::ApiDisabled),
+    );
+    assert_eq!(latched, Err(DockError::ApiDisabled));
+    let rechecked = Cell::new(false);
+    let still_revoked = gate.read(
+        Trust::Trusted,
+        start + Duration::from_millis(600),
+        || {
+            rechecked.set(true);
+            Trust::Untrusted
+        },
+        || panic!("read while access is revoked"),
+    );
+    assert_eq!(still_revoked, Err(DockError::ApiDisabled));
+    assert!(rechecked.get(), "the first re-check was held back");
+}
+
+/// One latched tick at `now`: whether trust was re-checked.
+fn rechecks_at(gate: &mut ReadGate, now: Instant) -> bool {
+    let rechecked = Cell::new(false);
+    let result = gate.read(
+        Trust::Trusted,
+        now,
+        || {
+            rechecked.set(true);
+            Trust::Untrusted
+        },
+        || Err(DockError::ApiDisabled),
+    );
+    assert_eq!(result, Err(DockError::ApiDisabled));
+    rechecked.get()
+}
+
+#[test]
+fn a_new_latch_after_a_good_read_rechecks_at_once() {
+    let mut gate = ReadGate::default();
+    let start = Instant::now();
+    latched_and_rechecked(&mut gate, start);
+    let good = gate.read(
+        Trust::Trusted,
+        start + Duration::from_millis(1100),
+        || Trust::Trusted,
+        || Ok(vec![safari()]),
+    );
+    assert!(good.is_ok());
+    let relatched = gate.read(
+        Trust::Trusted,
+        start + Duration::from_millis(1200),
+        || panic!("re-checked before the gate latched again"),
+        || Err(DockError::ApiDisabled),
+    );
+    assert_eq!(relatched, Err(DockError::ApiDisabled));
+
+    assert!(rechecks_at(&mut gate, start + Duration::from_millis(1300)));
+}
+
+#[test]
+fn a_new_latch_after_trust_state_reports_untrusted_rechecks_at_once() {
+    let mut gate = ReadGate::default();
+    let start = Instant::now();
+    latched_and_rechecked(&mut gate, start);
+    let untrusted = gate.read(
+        Trust::Untrusted,
+        start + Duration::from_millis(650),
+        || panic!("re-checked while untrusted"),
+        || panic!("read while untrusted"),
+    );
+    assert_eq!(untrusted, Err(DockError::ApiDisabled));
+    let relatched = gate.read(
+        Trust::Trusted,
+        start + Duration::from_millis(700),
+        || panic!("re-checked before the gate latched again"),
+        || Err(DockError::ApiDisabled),
+    );
+    assert_eq!(relatched, Err(DockError::ApiDisabled));
+
+    assert!(rechecks_at(&mut gate, start + Duration::from_millis(800)));
+}
+
 #[test]
 fn untrusted_state_clears_the_revoked_latch() {
     let mut gate = ReadGate::default();

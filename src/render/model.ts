@@ -234,6 +234,7 @@ export function glslConstants(): string {
     SWAY_REACH,
     MOSS_SWAY_PERIOD,
     SPRITE_SWAY_PERIOD,
+    SPRITE_TIP_LEAN,
   };
   const vec2s = { LEFT_CORNER, RIGHT_CORNER };
   return [
@@ -365,6 +366,8 @@ export const SWAY_MIN_OVERGROWTH = 0.5;
 export const SWAY_MIN_FRAME_INTERVAL_MS = 33;
 export const MOSS_SWAY_PERIOD = 3;
 export const SPRITE_SWAY_PERIOD = 2;
+/** How far a sprite's tip leans, in units of its box: 1.1 device px for the largest sprite at tile size 45. */
+export const SPRITE_TIP_LEAN = 0.08;
 /** Keeps the sway clock small for float32; a whole number of every sway period, so the wrap is seamless. */
 export const SWAY_CYCLE_SECONDS = 60;
 

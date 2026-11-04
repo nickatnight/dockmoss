@@ -247,6 +247,14 @@ describe("the sway loop", () => {
     expect(env.frames.pending).toBe(0);
   });
 
+  it("wraps the sway clock every SWAY_CYCLE_SECONDS", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.8));
+
+    expect(runFrames(env, 1, 61_000)[0]).toBeCloseTo(1, 6);
+  });
+
   it("keeps the last sway pose for a draw after the loop stops", () => {
     const env = setup(true);
     env.renderer.dock([discord]);

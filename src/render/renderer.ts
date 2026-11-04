@@ -85,7 +85,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       // frame callbacks there, so the old moss would show at the next order-in.
       gl?.clear();
       drawn = [];
-    } else if (next.kind === "draw" || loopRuns()) {
+    } else if (next.kind === "draw") {
       requestFrame();
     }
   };

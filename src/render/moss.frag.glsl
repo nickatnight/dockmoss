@@ -70,7 +70,6 @@ float growthDistance(vec2 uv) {
 }
 
 const float TAU = 6.2831853;
-const float SPRITE_TIP_LEAN = 0.08;
 
 // 0 at time 0, so moss that has never swayed is the static moss.
 float swayWave(float period, float phase) {

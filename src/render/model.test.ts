@@ -4,6 +4,7 @@ import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   CORNER_RADIUS_PER_SIDE,
   INSTANCE_ATTRIBUTES,
+  SPRITE_TIP_LEAN,
   type MossInstance,
   type MossOvergrowth,
   type MossyIcon,
@@ -152,6 +153,23 @@ describe("step", () => {
 
   it("does nothing when the scene is unchanged", () => {
     expect(step([icon()], [icon()])).toEqual({ kind: "none" });
+  });
+
+  it("redraws when another app's icon takes a tile with the same overgrowth", () => {
+    const key = "com.apple.Safari#0" as ItemKey;
+
+    expect(step([icon()], [icon({ key, seed: fnv1a32(key) })])).toEqual({ kind: "draw" });
+  });
+
+  it("redraws when two saturated neighbours trade places", () => {
+    const saturated = { overgrowth: mossy(1), overgrown: true };
+    const safariKey = "com.apple.Safari#0" as ItemKey;
+    const left = { x: 700, ...TILE };
+    const right = { x: 760, ...TILE };
+    const discordAt = (tile: typeof left) => icon({ ...saturated, tile });
+    const safariAt = (tile: typeof left) => icon({ ...saturated, key: safariKey, seed: fnv1a32(safariKey), tile });
+
+    expect(step([discordAt(left), safariAt(right)], [safariAt(left), discordAt(right)])).toEqual({ kind: "draw" });
   });
 
   it.each([{ x: 704 }, { y: 912 }, { width: 64 }, { height: 64 }])(
@@ -404,6 +422,22 @@ describe("worstCaseFront", () => {
   it.each([0, 0.5, 1])("draws nothing at overgrowth 0, at x = %d", (x) => {
     expect(worstCaseFront(x, 0)).toBe(0);
   });
+
+  // Derived by hand, not from a run. At overgrowth 1 the reach is 0.62 and the
+  // front peaks at 0.62 + 0.46875 * 0.24 (ragged) + 0.5 * 0.05 (tufts) + 0.012
+  // (sway) + max(0.04, 0.03) (fuzz or shadow) = 0.8095. On x = 0.5 the corner
+  // distance is the smaller one: 1.25 * sqrt(0.434^2 + (y - 0.066)^2) = 0.8095
+  // at y = 0.5467, so the 1/1000 scan returns 0.547. The other rows follow the
+  // same sum (reach 0.62 * 0.6^0.8 and 0.62 * 0.3^0.8), checked in Python.
+  // Dropping any term of the sum moves at least one row.
+  it.each([
+    [0.5, 1, 0.547],
+    [0.066, 1, 0.714],
+    [0.5, 0.6, 0.354],
+    [0.5, 0.3, 0.251],
+  ])("puts the worst front on x = %d at overgrowth %d at %d", (x, overgrowth, expected) => {
+    expect(worstCaseFront(x, overgrowth)).toBe(expected);
+  });
 });
 
 describe("mossHue", () => {
@@ -485,11 +519,19 @@ describe("spritesFor", () => {
     expect([...kinds].sort()).toEqual(["flower", "mushroom"]);
   });
 
-  it("keeps every sprite's box inside the clip and at or below 0.55 of the art height", () => {
+  it("keeps every sprite's box, leaning either way, inside the clip and at or below 0.55 of the art height", () => {
     for (const seed of seeds) {
       for (const { x, y, size } of spritesFor(seed)) {
         const half = size / 2;
-        for (const [cx, cy] of [[x - half, y - half], [x + half, y - half], [x - half, y + half], [x + half, y + half]]) {
+        // The tip leans by up to SPRITE_TIP_LEAN of the box at the top, and not at the foot.
+        const lean = SPRITE_TIP_LEAN * size;
+        const corners = [
+          [x - half, y - half],
+          [x + half, y - half],
+          [x - half - lean, y + half],
+          [x + half + lean, y + half],
+        ];
+        for (const [cx, cy] of corners) {
           expect(clipDistance(cx, cy), `seed ${seed}`).toBeLessThan(0);
         }
         expect(y + half, `seed ${seed}`).toBeLessThanOrEqual(0.55);

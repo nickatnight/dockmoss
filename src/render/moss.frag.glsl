@@ -18,7 +18,7 @@ const vec2 RIGHT_CORNER = vec2(0.934, 0.066);
 const float BOTTOM_DISTANCE_SCALE = 1.7;
 const float CORNER_DISTANCE_SCALE = 1.25;
 // How far growth reaches at overgrowth 1, and the curve up to it.
-const float MAX_REACH = 0.78;
+const float MAX_REACH = 0.62;
 const float REACH_EXPONENT = 0.8;
 
 // Integer hash (no sin), so the pattern is the same on every GPU.

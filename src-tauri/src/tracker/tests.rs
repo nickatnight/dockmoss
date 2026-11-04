@@ -564,94 +564,109 @@ fn ms(millis: u64) -> Duration {
     Duration::from_millis(millis)
 }
 
+struct RateCase {
+    case: &'static str,
+    proximity_rate: PollRate,
+    cursor: Option<ScreenPoint>,
+    sent: bool,
+    at_ms: u64,
+    expected: PollRate,
+}
+
 #[test]
 fn fast_holds_only_while_the_pointer_moves_or_a_frame_was_just_sent() {
     let start = Instant::now();
     let near = PollRate::Fast;
+    let rest = Some(point(720.0, 850.0));
+    let moved = Some(point(721.0, 850.0));
     let cases = [
-        (
-            "first tick near the Dock",
-            near,
-            Some(point(720.0, 850.0)),
-            false,
-            0,
-            PollRate::Fast,
-        ),
-        (
-            "pointer at rest, no frame for 300 ms",
-            near,
-            Some(point(720.0, 850.0)),
-            false,
-            300,
-            PollRate::Slow,
-        ),
-        (
-            "pointer moved",
-            near,
-            Some(point(721.0, 850.0)),
-            false,
-            310,
-            PollRate::Fast,
-        ),
-        (
-            "at rest, frame sent now",
-            near,
-            Some(point(721.0, 850.0)),
-            true,
-            320,
-            PollRate::Fast,
-        ),
-        (
-            "at rest, frame sent 200 ms ago",
-            near,
-            Some(point(721.0, 850.0)),
-            false,
-            520,
-            PollRate::Fast,
-        ),
-        (
-            "at rest, frame sent 250 ms ago",
-            near,
-            Some(point(721.0, 850.0)),
-            false,
-            570,
-            PollRate::Fast,
-        ),
-        (
-            "at rest, frame sent 300 ms ago",
-            near,
-            Some(point(721.0, 850.0)),
-            false,
-            620,
-            PollRate::Slow,
-        ),
-        (
-            "moving, but far from the Dock",
-            PollRate::Slow,
-            Some(point(721.0, 300.0)),
-            true,
-            630,
-            PollRate::Slow,
-        ),
-        ("cursor unknown", near, None, false, 1200, PollRate::Fast),
-        (
-            "cursor still unknown",
-            near,
-            None,
-            false,
-            1500,
-            PollRate::Slow,
-        ),
+        RateCase {
+            case: "first tick near the Dock",
+            proximity_rate: near,
+            cursor: rest,
+            sent: false,
+            at_ms: 0,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "pointer at rest, no frame for 300 ms",
+            proximity_rate: near,
+            cursor: rest,
+            sent: false,
+            at_ms: 300,
+            expected: PollRate::Slow,
+        },
+        RateCase {
+            case: "pointer moved",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 310,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent now",
+            proximity_rate: near,
+            cursor: moved,
+            sent: true,
+            at_ms: 320,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent 200 ms ago",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 520,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent 250 ms ago",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 570,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "at rest, frame sent 300 ms ago",
+            proximity_rate: near,
+            cursor: moved,
+            sent: false,
+            at_ms: 620,
+            expected: PollRate::Slow,
+        },
+        RateCase {
+            case: "moving, but far from the Dock",
+            proximity_rate: PollRate::Slow,
+            cursor: Some(point(721.0, 300.0)),
+            sent: true,
+            at_ms: 630,
+            expected: PollRate::Slow,
+        },
+        RateCase {
+            case: "cursor unknown",
+            proximity_rate: near,
+            cursor: None,
+            sent: false,
+            at_ms: 1200,
+            expected: PollRate::Fast,
+        },
+        RateCase {
+            case: "cursor still unknown",
+            proximity_rate: near,
+            cursor: None,
+            sent: false,
+            at_ms: 1500,
+            expected: PollRate::Slow,
+        },
     ];
     let mut activity = Activity::default();
 
-    for (case, spatial, cursor, sent, at, expected) in cases {
-        let now = start.checked_add(ms(at)).expect("in range");
-        assert_eq!(
-            activity.rate(spatial, cursor, sent, now),
-            expected,
-            "{case}"
-        );
+    for step in cases {
+        let now = start.checked_add(ms(step.at_ms)).expect("in range");
+        let rate = activity.rate(step.proximity_rate, step.cursor, step.sent, now);
+        assert_eq!(rate, step.expected, "{}", step.case);
     }
 }
 
@@ -685,75 +700,89 @@ fn wait_for_read(
     (since_start(read), checks)
 }
 
+struct RestCase {
+    case: &'static str,
+    proximity_rate: PollRate,
+    cursor_at_read: Option<ScreenPoint>,
+    pointer_at_checks: Vec<Option<ScreenPoint>>,
+    expected_read_ms: u64,
+    expected_checks_ms: Vec<u64>,
+}
+
 #[test]
 fn a_pointer_resting_in_the_band_is_checked_at_10_hz_until_it_moves_or_the_read_is_due() {
+    const NOW_MS: u64 = 300;
+    const READ_DUE_MS: u64 = 800;
     let start = Instant::now();
     let rest = Some(point(720.0, 850.0));
     let moved = Some(point(722.0, 850.0));
-    let far = Some(point(720.0, 300.0));
     let cases = [
-        (
-            "at rest: checks every 100 ms, then the Slow read",
-            PollRate::Fast,
-            rest,
-            vec![rest],
-            800,
-            800,
-            vec![400, 500, 600, 700],
-        ),
-        (
-            "moves before the first check: read at that check",
-            PollRate::Fast,
-            rest,
-            vec![moved],
-            800,
-            400,
-            vec![400],
-        ),
-        (
-            "moves before the third check: read at that check",
-            PollRate::Fast,
-            rest,
-            vec![rest, rest, moved],
-            800,
-            600,
-            vec![400, 500, 600],
-        ),
-        (
-            "cursor unknown at rest: checks, then the Slow read",
-            PollRate::Fast,
-            None,
-            vec![None],
-            800,
-            800,
-            vec![400, 500, 600, 700],
-        ),
-        (
-            "away from the Dock: no checks",
-            PollRate::Slow,
-            far,
-            vec![moved],
-            800,
-            800,
-            vec![],
-        ),
+        RestCase {
+            case: "at rest: checks every 100 ms, then the Slow read",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: rest,
+            pointer_at_checks: vec![rest],
+            expected_read_ms: 800,
+            expected_checks_ms: vec![400, 500, 600, 700],
+        },
+        RestCase {
+            case: "moves before the first check: read at that check",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: rest,
+            pointer_at_checks: vec![moved],
+            expected_read_ms: 400,
+            expected_checks_ms: vec![400],
+        },
+        RestCase {
+            case: "moves before the third check: read at that check",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: rest,
+            pointer_at_checks: vec![rest, rest, moved],
+            expected_read_ms: 600,
+            expected_checks_ms: vec![400, 500, 600],
+        },
+        RestCase {
+            case: "cursor unknown at rest: checks, then the Slow read",
+            proximity_rate: PollRate::Fast,
+            cursor_at_read: None,
+            pointer_at_checks: vec![None],
+            expected_read_ms: 800,
+            expected_checks_ms: vec![400, 500, 600, 700],
+        },
+        RestCase {
+            case: "away from the Dock: no checks",
+            proximity_rate: PollRate::Slow,
+            cursor_at_read: Some(point(720.0, 300.0)),
+            pointer_at_checks: vec![moved],
+            expected_read_ms: 800,
+            expected_checks_ms: vec![],
+        },
     ];
 
-    for (case, spatial, cursor, pointer, read_due, expected_read, expected_checks) in cases {
+    for RestCase {
+        case,
+        proximity_rate,
+        cursor_at_read,
+        pointer_at_checks,
+        expected_read_ms,
+        expected_checks_ms,
+    } in cases
+    {
         let mut activity = Activity::default();
-        activity.rate(spatial, cursor, false, start);
+        activity.rate(proximity_rate, cursor_at_read, false, start);
         let rate = activity.rate(
-            spatial,
-            cursor,
+            proximity_rate,
+            cursor_at_read,
             false,
-            start.checked_add(ms(300)).expect("in range"),
+            start.checked_add(ms(NOW_MS)).expect("in range"),
         );
         assert_eq!(rate, PollRate::Slow, "{case}");
 
-        let (read, checks) = wait_for_read(&activity, start, 300, read_due, &pointer);
+        let (read, checks) =
+            wait_for_read(&activity, start, NOW_MS, READ_DUE_MS, &pointer_at_checks);
 
-        assert_eq!(read, expected_read, "{case}: read");
-        assert_eq!(checks, expected_checks, "{case}: checks");
+        assert_eq!(read, expected_read_ms, "{case}: read");
+        assert_eq!(checks, expected_checks_ms, "{case}: checks");
     }
 }
 

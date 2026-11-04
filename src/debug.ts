@@ -78,9 +78,9 @@ export function markNotWatched(root: HTMLElement): void {
 }
 
 export function overgrowthOverride(): number | null {
-  const override = parseOvergrowthOverride(import.meta.env.VITE_DOCKMOSS_OVERGROWTH);
-  if (override.kind === "invalid") {
-    console.warn("VITE_DOCKMOSS_OVERGROWTH ignored: not a number from 0 to 1", override.raw);
+  const parsed = parseOvergrowthOverride(import.meta.env.VITE_DOCKMOSS_OVERGROWTH);
+  if (parsed.kind === "invalid") {
+    console.warn("VITE_DOCKMOSS_OVERGROWTH ignored: not a number from 0 to 1", parsed.raw);
   }
-  return override.kind === "set" ? override.overgrowth : null;
+  return parsed.kind === "set" ? parsed.overgrowth : null;
 }

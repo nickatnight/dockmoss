@@ -599,10 +599,6 @@ mod dock_tracker {
         }
     }
 
-    /// Applies each message that arrives before `deadline`, and returns only
-    /// at `deadline`. A burst of screen notifications (one per frame while the
-    /// Dock slides in) therefore adds no Dock reads; it sets `screen_changed`
-    /// for the next tick.
     fn drain_inbox_until(
         deadline: Instant,
         messages: &Receiver<TrackerMessage>,

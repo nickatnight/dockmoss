@@ -211,8 +211,6 @@ fn two_items_with_one_bundle_id_are_both_kept_in_order() {
 
 /// One gated tick: returns the result, whether the AX read ran and whether
 /// trust was re-checked.
-/// A read through the gate one second after the previous `gated` call, so the
-/// re-check throttle never holds one back.
 fn gated(
     gate: &mut ReadGate,
     trust: Trust,
@@ -347,7 +345,6 @@ fn a_latched_gate_rechecks_trust_at_most_once_per_slow_interval() {
     assert_eq!(revoked, Err(DockError::ApiDisabled));
     let rechecks = Cell::new(0);
 
-    // Five seconds of 60 Hz ticks while TrustState still says trusted.
     for tick in 1..=300_u32 {
         let now = start + Duration::from_nanos(16_666_667) * tick;
         let result = gate.read(

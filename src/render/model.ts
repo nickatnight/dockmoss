@@ -1,18 +1,13 @@
-// Pure: which Dock items get moss, their keys and seeds, and when to redraw.
-// No DOM, no WebGL and no clock, so `model.test.ts` runs it in Node.
-
 import type { AppGrowth, BundleId, DockItem, LogicalRect } from "../ipc";
 
 export type ItemKey = string & { readonly __brand: "ItemKey" };
 
 export type QuantizedOvergrowth = number & { readonly __brand: "QuantizedOvergrowth" };
 
-/** A Dock item with moss on it. */
 export interface Icon {
   key: ItemKey;
   seed: number;
   tile: LogicalRect;
-  /** Above 0: clean items get no icon. */
   overgrowth: QuantizedOvergrowth;
   overgrown: boolean;
 }
@@ -149,39 +144,22 @@ export function toDeviceBox(
   };
 }
 
-// The moss shape, in icon space: 0 to 1 across the art box, 0 at its bottom.
-// moss.frag.glsl gets these as generated `const` lines (glslConstants), so
-// worstCaseFront and the shader share one source.
-
-/** The macOS icon shape, approximated as a rounded rect. */
 export const CORNER_RADIUS_PER_SIDE = 0.225;
-// Growth starts at the bottom edge and at the two bottom corners, where the
-// corner arcs sit. Distance from the bottom edge counts for more, so the
-// corners lead.
 export const LEFT_CORNER = [0.066, 0.066] as const;
 export const RIGHT_CORNER = [0.934, 0.066] as const;
 export const BOTTOM_DISTANCE_SCALE = 1.7;
 export const CORNER_DISTANCE_SCALE = 1.25;
-/** How far growth reaches at overgrowth 1, and the curve up to it. */
 export const MAX_REACH = 0.62;
 export const REACH_EXPONENT = 0.8;
-/** The front's noise: at most this far, and at most this much per unit of reach. */
 export const RAGGED_CAP = 0.24;
 export const RAGGED_PER_REACH = 1.2;
 export const TUFT_CAP = 0.05;
 export const TUFT_PER_REACH = 0.3;
 export const FBM_OCTAVES = 5;
-/** Grain can cover pixels this far beyond the front. */
 export const FRONT_FUZZ_WIDTH = 0.04;
-/** The contact shadow darkens the art this far beyond the front. */
 export const CONTACT_SHADOW_WIDTH = 0.03;
-/**
- * How far sway lifts or lowers the front, at most: 0.9 device px on the 74 px
- * art box of tile size 45.
- */
 export const SWAY_REACH = 0.012;
 
-/** Mirrors `growthDistance` in moss.frag.glsl. */
 function growthDistance(x: number, y: number): number {
   const fromBottom = y * BOTTOM_DISTANCE_SCALE;
   const fromCorner =
@@ -262,14 +240,11 @@ export interface Sprite {
 }
 
 export const MAX_SPRITES = 3;
-// Where a sprite's centre and size are drawn from. The ranges keep every
-// box inside the clip's bottom corners and well below the reach bound.
 const SPRITE_X = [0.2, 0.8] as const;
 const SPRITE_Y = [0.16, 0.3] as const;
 const SPRITE_SIZE = [0.13, 0.19] as const;
 const SPRITE_TRIES = 12;
 
-/** mulberry32: integer arithmetic only, so it is the same on every run. */
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -316,7 +291,6 @@ export function mossHue(seed: number): number {
   return ((Math.imul(seed, 0x9e3779b1) >>> 24) / 0xff) * 2 - 1;
 }
 
-/** One icon's moss, ready for the GPU: one instance of the draw. */
 export interface MossInstance {
   box: DeviceBox;
   seed: number;
@@ -339,14 +313,8 @@ export function mossInstances(
   }));
 }
 
-/** Sway runs while some icon is at least patchy. */
 export const SWAY_MIN_OVERGROWTH = 0.5;
-/** Sway frames closer together than this are skipped: about 30 a second. */
 export const SWAY_FRAME_MS = 33;
-/**
- * The sway clock wraps here, a whole number of every sway period in the
- * shader, so the time stays small enough for float32.
- */
 export const SWAY_CYCLE_SECONDS = 60;
 
 export function swaying(icons: readonly Icon[]): boolean {

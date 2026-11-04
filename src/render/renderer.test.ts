@@ -10,7 +10,6 @@ type Call =
   | { op: "draw"; instances: readonly MossInstance[]; time: number }
   | { op: "clear" };
 
-/** A MossGl that records its calls, and a list of every one created. */
 function fakeGls() {
   const created: Call[][] = [];
   const create = (): MossGl => {
@@ -31,7 +30,6 @@ function fakeGls() {
   return { created, create };
 }
 
-/** Holds scheduled callbacks until the test runs the next frame. */
 function manualScheduler() {
   let pending: ((time: number) => void)[] = [];
   return {
@@ -74,7 +72,6 @@ const mossy: AppGrowth[] = [
   { bundleId: "com.hnc.Discord" as BundleId, overgrowth: 0.6, stage: "patchy" },
 ];
 
-/** A renderer that has drawn Discord's moss once, with its call log emptied. */
 function drawn() {
   const env = setup();
   env.renderer.dock([discord]);
@@ -124,7 +121,6 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(calls()).toContainEqual({ op: "resize", width: 1920, height: 1080 });
-    // The art's bottom edge in CSS px, measured up from the new canvas bottom.
     const artBottom = 918 + (59 + 0.79 * 47) / 2;
     expect(draws()).toHaveLength(1);
     expect(draws()[0][0].box.y).toBeCloseTo(1080 - artBottom, 6);
@@ -186,7 +182,6 @@ describe("the sway loop", () => {
     { bundleId: discord.bundleId, overgrowth, stage: overgrowth >= 0.5 ? "patchy" : "fuzz" },
   ];
 
-  /** Runs `count` frames 1/60 s apart from `start` ms and returns the draw times. */
   function runFrames(env: ReturnType<typeof setup>, count: number, start = 0): number[] {
     const before = env.calls().length;
     for (let index = 0; index < count; index++) {

@@ -9,11 +9,7 @@ use crate::usage::DockApp;
 const MIN_RECT_CHANGE_PX: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
-/// `Fast` holds this long after a frame is sent, with the pointer at rest, so
-/// a magnification or reveal that is still settling is followed to the end.
 const SETTLE: Duration = Duration::from_millis(250);
-/// How often the pointer alone is checked, between `Slow` reads, while it
-/// rests in the band.
 const REST_CHECK: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,8 +50,6 @@ pub struct Tick {
     /// non-empty frame did. Empty frames (Dock hidden or unreadable) never
     /// report, so growth keeps the last known apps.
     pub apps: Option<Vec<DockApp>>,
-    /// `Fast` while the cursor is near the Dock; `Activity` decides whether
-    /// anything there moves.
     pub rate: PollRate,
 }
 
@@ -246,19 +240,15 @@ fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect) -> bool {
 }
 
 /// Keeps the poll at `Fast` only while something there moves: the pointer
-/// moved since the last tick, or a frame was sent within `SETTLE`. A pointer
-/// at rest in the band then costs what `Slow` costs, plus a pointer check
-/// every `REST_CHECK`.
+/// moved since the last tick, or a frame was sent within `SETTLE`.
 #[derive(Debug, Default)]
 pub struct Activity {
     last_cursor: Option<ScreenPoint>,
     last_sent: Option<Instant>,
-    /// Near the Dock with nothing moving, as of the last `rate`.
     resting: bool,
 }
 
 impl Activity {
-    /// `near` is the tick's own rate, from where the cursor is.
     pub fn rate(
         &mut self,
         near: PollRate,
@@ -286,8 +276,7 @@ impl Activity {
     /// Waits, through `wait_until`, for the next Dock read, and returns the
     /// instant it became due: `read_due`, or sooner if the pointer rests in
     /// the band and moves. While it rests there, the pointer alone is checked
-    /// every `REST_CHECK`, with no Dock read, so a magnification started from
-    /// rest is read at `Fast` within one check instead of one `Slow` interval.
+    /// every `REST_CHECK`, with no Dock read.
     pub fn wait_for_read(
         &self,
         read_due: Instant,

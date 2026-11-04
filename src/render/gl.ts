@@ -4,10 +4,6 @@ import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
 
-// Per instance: the device box (4 floats), the seed offset, the overgrowth
-// and the hue (4), then MAX_SPRITES sprites of x, y, size and kind (4 each;
-// kind 0 is no sprite). The locations match the `layout` qualifiers in
-// moss.vert.glsl.
 const BOX_LOCATION = 0;
 const MOSS_LOCATION = 1;
 const FIRST_SPRITE_LOCATION = 2;
@@ -130,7 +126,6 @@ function linkProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
   return program;
 }
 
-/** Logs and deletes a shader that fails to compile. */
 function compile(gl: WebGL2RenderingContext, type: GLenum, source: string): WebGLShader | null {
   const shader = gl.createShader(type);
   if (shader === null) {

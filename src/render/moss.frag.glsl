@@ -6,15 +6,11 @@ flat in vec2 v_seed;
 flat in float v_overgrowth;
 flat in float v_hue;
 
-// The sway clock in s: 0 while sway has never run. It wraps at 60 s
-// (SWAY_CYCLE_SECONDS), a whole number of both sway periods below.
 uniform float u_time;
 flat in vec4 v_sprites[3];
 
 out vec4 fragColor;
 
-// CORNER_RADIUS_PER_SIDE, the growth shape and the front's caps: model.ts
-// generates them (glslConstants), and gl.ts puts them on this line.
 #pragma moss_constants
 
 // Integer hash (no sin), so the pattern is the same on every GPU.
@@ -36,10 +32,6 @@ float noise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Noise finer than about half a lattice cell per device pixel aliases: it
-// speckles at rest and shimmers while the Dock magnifies. Each term fades to
-// its mean on the way there. Frequencies stay fixed in icon space, so the
-// pattern scales with the icon instead of changing as it grows.
 float bandLimit(float cellsPerPixel) {
   return 1.0 - smoothstep(0.375, 0.5, cellsPerPixel);
 }
@@ -48,7 +40,6 @@ float limitedNoise(vec2 p, float cellsPerPixel) {
   return 0.5 + bandLimit(cellsPerPixel) * (noise(p) - 0.5);
 }
 
-// `cellsPerPixel` is the first octave's; each octave doubles it.
 float fbm(vec2 p, float cellsPerPixel) {
   float sum = 0.0;
   float amplitude = 0.5;
@@ -75,11 +66,8 @@ float growthDistance(vec2 uv) {
 const float TAU = 6.2831853;
 const float MOSS_SWAY_PERIOD = 3.0;
 const float SPRITE_SWAY_PERIOD = 2.0;
-// How far a sprite's tip leans, in units of its box: 1.1 device px for the
-// largest sprite at tile size 45.
 const float SPRITE_SWAY = 0.08;
 
-// From -1 to 1, and 0 at time 0, so moss that has never swayed is static moss.
 float swayWave(float period, float phase) {
   return 0.5 * (sin(TAU * u_time / period + phase) - sin(phase));
 }
@@ -90,7 +78,6 @@ float mossFront(vec2 uv, vec2 p, float side) {
   float reach = MAX_REACH * pow(v_overgrowth, REACH_EXPONENT);
   float ragged = fbm(p * 5.0, 5.0 / side) - 0.5;
   float tufts = limitedNoise(p * 26.0, 26.0 / side) - 0.5;
-  // A slow wave along the front: tufts rise and settle in turn.
   float sway = SWAY_REACH * swayWave(MOSS_SWAY_PERIOD, uv.x * 9.0 + v_seed.x);
   return reach - growthDistance(uv) + ragged * min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
     tufts * min(TUFT_CAP, reach * TUFT_PER_REACH) + sway;
@@ -102,11 +89,7 @@ float mossCover(float front, float grain) {
   return clamp(cover + nearFront * (grain - 0.55) * 0.9, 0.0, 1.0);
 }
 
-// Deep enough to read as shade between cushions, light enough not to read as
-// holes on dark art.
 const vec3 CREVICE = vec3(0.10, 0.16, 0.05);
-// What a hue of 1 adds to the body and lit colours: cooler, blue-green moss.
-// A hue of -1 subtracts it: warmer, olive moss.
 const vec3 HUE_SHIFT = vec3(-0.05, 0.0, 0.05);
 
 // Cushions with dark crevices between them, lit from above.
@@ -123,15 +106,12 @@ vec3 mossColour(vec2 p, float grain, float side, float hue) {
   return colour;
 }
 
-// A faint crevice-green rim just beyond the front, so the moss sits on the art.
 const float CONTACT_SHADOW_STRENGTH = 0.18;
 
 float contactShadow(float front, float cover) {
   return CONTACT_SHADOW_STRENGTH * smoothstep(-CONTACT_SHADOW_WIDTH, 0.0, front) * (1.0 - cover);
 }
 
-// Fine mottling: under half a lattice cell per device pixel at tile size 45
-// (a 74 px art box), so it stays whole there and fades on smaller Docks.
 const float GRAIN_FREQUENCY = 28.0;
 
 const float FLOWER = 2.0;
@@ -145,8 +125,6 @@ float boxDistance(vec2 p, vec2 halfSize) {
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
 }
 
-// A sprite's colour (premultiplied) at q, 0 to 1 across its box and 0 at its
-// foot. `pixel` is one device pixel in the same units.
 vec4 mushroom(vec2 q, float pixel) {
   float stem = boxDistance(q - vec2(0.5, 0.28), vec2(0.075, 0.26));
   float cap = max(ellipseDistance(q - vec2(0.5, 0.5), vec2(0.42, 0.36)), 0.47 - q.y);
@@ -174,17 +152,14 @@ vec4 flower(vec2 q, float pixel, float tint) {
   return vec4(colour, max(stemCover, petalCover));
 }
 
-// One sprite (x, y, size, kind) composited at uv, or nothing outside its box.
 vec4 spriteColour(vec4 sprite, vec2 uv, float pixel, float grain) {
   vec2 q = (uv - sprite.xy) / sprite.z + 0.5;
-  // The tip leans more than the foot.
   q.x -= SPRITE_SWAY * q.y * q.y * swayWave(SPRITE_SWAY_PERIOD, sprite.x * 41.0);
   if (sprite.w < 0.5 || any(lessThan(q, vec2(0.0))) || any(greaterThan(q, vec2(1.0)))) {
     return vec4(0.0);
   }
   float spritePixel = pixel / sprite.z;
   vec4 colour = sprite.w < FLOWER - 0.5 ? mushroom(q, spritePixel) : flower(q, spritePixel, step(0.5, fract(sprite.x * 37.0)));
-  // The foot sinks into the moss, unevenly.
   return colour * smoothstep(0.02, 0.2, q.y + (grain - 0.5) * 0.2);
 }
 

@@ -1,7 +1,3 @@
-// The renderer's state and draw rule, without the DOM: index.ts wires the
-// canvas, the window and requestAnimationFrame to it, and renderer.test.ts
-// drives it with a fake MossGl and a manual scheduler.
-
 import type { AppGrowth, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
 import {
@@ -14,7 +10,6 @@ import {
   swaying,
 } from "./model";
 
-/** What `overlay.ts` passes every Dock and growth frame to. */
 export interface FrameSink {
   dock(items: DockItem[]): void;
   growth(frame: AppGrowth[]): void;
@@ -26,7 +21,6 @@ export interface RendererOptions {
   /** A MossGl for the canvas's current context, or null if it has none. */
   createGl(): MossGl | null;
   overgrowthOverride: number | null;
-  /** Off in user builds until a setting turns it on (slice 12). */
   sway: boolean;
 }
 
@@ -42,13 +36,10 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
   let latest: Icon[] = [];
-  /** What the canvas shows, or null when that is unknown. */
   let drawn: Icon[] | null = null;
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
-  /** The schedule time of the last sway frame drawn, in ms. */
   let lastSwayFrame: number | null = null;
-  /** The sway clock, in s, that every draw uses: frozen while sway is off. */
   let swayTime = 0;
 
   const loopRuns = (): boolean => options.sway && swaying(latest);

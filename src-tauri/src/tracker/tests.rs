@@ -569,7 +569,6 @@ fn fast_holds_only_while_the_pointer_moves_or_a_frame_was_just_sent() {
     let start = Instant::now();
     let near = PollRate::Fast;
     let cases = [
-        // (case, spatial rate, cursor, frame sent this tick, ms since start, expected)
         (
             "first tick near the Dock",
             near,
@@ -656,10 +655,6 @@ fn fast_holds_only_while_the_pointer_moves_or_a_frame_was_just_sent() {
     }
 }
 
-/// Runs `wait_for_read` on a fake clock that each wait moves to the instant
-/// waited for. At the nth pointer check the pointer is `pointer[n]`, or the
-/// last entry once the list runs out. Returns when the Dock read became due
-/// and when each pointer check ran, both in ms after `start`.
 fn wait_for_read(
     activity: &Activity,
     start: Instant,
@@ -697,8 +692,6 @@ fn a_pointer_resting_in_the_band_is_checked_at_10_hz_until_it_moves_or_the_read_
     let moved = Some(point(722.0, 850.0));
     let far = Some(point(720.0, 300.0));
     let cases = [
-        // (case, spatial rate, cursor at the last read, pointer at each check,
-        //  read due at ms, expected read at ms, expected checks at ms)
         (
             "at rest: checks every 100 ms, then the Slow read",
             PollRate::Fast,
@@ -749,7 +742,6 @@ fn a_pointer_resting_in_the_band_is_checked_at_10_hz_until_it_moves_or_the_read_
     for (case, spatial, cursor, pointer, read_due, expected_read, expected_checks) in cases {
         let mut activity = Activity::default();
         activity.rate(spatial, cursor, false, start);
-        // 300 ms on, at the same place and with no frame sent: at rest.
         let rate = activity.rate(
             spatial,
             cursor,
@@ -817,8 +809,6 @@ fn deadlines_follow_the_previous_deadline_not_the_end_of_the_read() {
             .expect("in range")
     };
 
-    // The tick ran 2.5 ms late and read for 3 ms: the next one is still one
-    // interval after the last deadline, so the rate stays at 60 Hz.
     assert_eq!(
         next_deadline(start, PollRate::Fast, at(5_500_000)),
         at(16_666_667)
@@ -831,11 +821,9 @@ fn deadlines_follow_the_previous_deadline_not_the_end_of_the_read() {
         next_deadline(at(16_666_667), PollRate::Fast, at(20_000_000)),
         at(33_333_334)
     );
-    // A tick that overruns skips the deadlines it missed instead of bursting.
     let overrun = next_deadline(start, PollRate::Fast, at(40_000_000));
     assert_eq!(overrun, at(50_000_001));
     assert!(overrun > at(40_000_000));
-    // Exactly on a deadline: the next one is a whole interval away.
     assert_eq!(
         next_deadline(start, PollRate::Fast, at(16_666_667)),
         start.checked_add(fast * 2).expect("in range")
@@ -847,7 +835,6 @@ fn sixty_deadlines_span_one_second() {
     let start = Instant::now();
     let mut deadline = start;
     for _ in 0..60 {
-        // Each tick starts 2.5 ms after its deadline and reads for 1 ms.
         let now = deadline
             .checked_add(Duration::from_micros(3_500))
             .expect("in range");

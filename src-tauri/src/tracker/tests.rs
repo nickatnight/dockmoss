@@ -656,6 +656,157 @@ fn fast_holds_only_while_the_pointer_moves_or_a_frame_was_just_sent() {
     }
 }
 
+/// Runs `wait_for_read` on a fake clock that each wait moves to the instant
+/// waited for. At the nth pointer check the pointer is `pointer[n]`, or the
+/// last entry once the list runs out. Returns when the Dock read became due
+/// and when each pointer check ran, both in ms after `start`.
+fn wait_for_read(
+    activity: &Activity,
+    start: Instant,
+    now_ms: u64,
+    read_due_ms: u64,
+    pointer: &[Option<ScreenPoint>],
+) -> (u64, Vec<u64>) {
+    let at = |millis: u64| start.checked_add(ms(millis)).expect("in range");
+    let since_start = |instant: Instant| {
+        u64::try_from(instant.duration_since(start).as_millis()).expect("in range")
+    };
+    let clock = std::cell::Cell::new(at(now_ms));
+    let mut checks = Vec::new();
+    let read = activity.wait_for_read(
+        at(read_due_ms),
+        at(now_ms),
+        |until| clock.set(until),
+        || {
+            let pointer = pointer
+                .get(checks.len())
+                .or(pointer.last())
+                .copied()
+                .flatten();
+            checks.push(since_start(clock.get()));
+            pointer
+        },
+    );
+    (since_start(read), checks)
+}
+
+#[test]
+fn a_pointer_resting_in_the_band_is_checked_at_10_hz_until_it_moves_or_the_read_is_due() {
+    let start = Instant::now();
+    let rest = Some(point(720.0, 850.0));
+    let moved = Some(point(722.0, 850.0));
+    let far = Some(point(720.0, 300.0));
+    let cases = [
+        // (case, spatial rate, cursor at the last read, pointer at each check,
+        //  read due at ms, expected read at ms, expected checks at ms)
+        (
+            "at rest: checks every 100 ms, then the Slow read",
+            PollRate::Fast,
+            rest,
+            vec![rest],
+            800,
+            800,
+            vec![400, 500, 600, 700],
+        ),
+        (
+            "moves before the first check: read at that check",
+            PollRate::Fast,
+            rest,
+            vec![moved],
+            800,
+            400,
+            vec![400],
+        ),
+        (
+            "moves before the third check: read at that check",
+            PollRate::Fast,
+            rest,
+            vec![rest, rest, moved],
+            800,
+            600,
+            vec![400, 500, 600],
+        ),
+        (
+            "cursor unknown at rest: checks, then the Slow read",
+            PollRate::Fast,
+            None,
+            vec![None],
+            800,
+            800,
+            vec![400, 500, 600, 700],
+        ),
+        (
+            "away from the Dock: no checks",
+            PollRate::Slow,
+            far,
+            vec![moved],
+            800,
+            800,
+            vec![],
+        ),
+    ];
+
+    for (case, spatial, cursor, pointer, read_due, expected_read, expected_checks) in cases {
+        let mut activity = Activity::default();
+        activity.rate(spatial, cursor, false, start);
+        // 300 ms on, at the same place and with no frame sent: at rest.
+        let rate = activity.rate(
+            spatial,
+            cursor,
+            false,
+            start.checked_add(ms(300)).expect("in range"),
+        );
+        assert_eq!(rate, PollRate::Slow, "{case}");
+
+        let (read, checks) = wait_for_read(&activity, start, 300, read_due, &pointer);
+
+        assert_eq!(read, expected_read, "{case}: read");
+        assert_eq!(checks, expected_checks, "{case}: checks");
+    }
+}
+
+#[test]
+fn a_moving_pointer_near_the_dock_gets_no_pointer_checks_between_fast_reads() {
+    let start = Instant::now();
+    let mut activity = Activity::default();
+    let rate = activity.rate(PollRate::Fast, Some(point(720.0, 850.0)), false, start);
+    assert_eq!(rate, PollRate::Fast);
+
+    let (read, checks) = wait_for_read(&activity, start, 0, 17, &[Some(point(730.0, 850.0))]);
+
+    assert_eq!(read, 17);
+    assert_eq!(checks, Vec::<u64>::new());
+}
+
+#[test]
+fn a_magnification_started_from_rest_is_read_at_fast_within_one_check() {
+    let start = Instant::now();
+    let rest = Some(point(720.0, 850.0));
+    let moved = Some(point(724.0, 850.0));
+    let mut activity = Activity::default();
+    activity.rate(PollRate::Fast, rest, false, start);
+    assert_eq!(
+        activity.rate(
+            PollRate::Fast,
+            rest,
+            false,
+            start.checked_add(ms(300)).expect("in range")
+        ),
+        PollRate::Slow
+    );
+
+    let (read, _) = wait_for_read(&activity, start, 300, 800, &[moved]);
+    let rate = activity.rate(
+        PollRate::Fast,
+        moved,
+        false,
+        start.checked_add(ms(read)).expect("in range"),
+    );
+
+    assert!(read - 300 <= 100, "read {read} ms");
+    assert_eq!(rate, PollRate::Fast);
+}
+
 #[test]
 fn deadlines_follow_the_previous_deadline_not_the_end_of_the_read() {
     let start = Instant::now();

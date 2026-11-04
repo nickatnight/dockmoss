@@ -581,13 +581,20 @@ mod dock_tracker {
                 rate = next_rate;
             }
             perform(app, tick, &mut watcher);
-            deadline = tracker::next_deadline(deadline, rate, Instant::now());
-            drain_inbox_until(
-                deadline,
-                messages,
-                &mut tracker,
-                &mut watcher,
-                &mut screen_changed,
+            let read_due = tracker::next_deadline(deadline, rate, Instant::now());
+            deadline = activity.wait_for_read(
+                read_due,
+                Instant::now(),
+                |until| {
+                    drain_inbox_until(
+                        until,
+                        messages,
+                        &mut tracker,
+                        &mut watcher,
+                        &mut screen_changed,
+                    );
+                },
+                macos::cursor::location,
             );
         }
     }

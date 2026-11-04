@@ -4,6 +4,7 @@ precision highp float;
 flat in vec4 v_box;
 flat in vec2 v_seed;
 flat in float v_overgrowth;
+flat in vec4 v_sprites[3];
 
 out vec4 fragColor;
 
@@ -87,6 +88,58 @@ float contactShadow(float front, float cover) {
   return 0.4 * smoothstep(-0.06, 0.0, front) * (1.0 - cover);
 }
 
+const float FLOWER = 2.0;
+
+float ellipseDistance(vec2 p, vec2 radii) {
+  return (length(p / radii) - 1.0) * min(radii.x, radii.y);
+}
+
+float boxDistance(vec2 p, vec2 halfSize) {
+  vec2 q = abs(p) - halfSize;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+// A sprite's colour (premultiplied) at q, 0 to 1 across its box and 0 at its
+// foot. `pixel` is one device pixel in the same units.
+vec4 mushroom(vec2 q, float pixel) {
+  float stem = boxDistance(q - vec2(0.5, 0.28), vec2(0.075, 0.26));
+  float cap = max(ellipseDistance(q - vec2(0.5, 0.5), vec2(0.44, 0.36)), 0.47 - q.y);
+  vec3 stemColour = mix(vec3(0.90, 0.85, 0.72), vec3(0.62, 0.55, 0.42), smoothstep(0.45, 0.6, q.x));
+  vec3 capColour = mix(vec3(0.52, 0.14, 0.07), vec3(0.86, 0.36, 0.18), smoothstep(0.5, 0.85, q.y));
+  float capCover = clamp(0.5 - cap / pixel, 0.0, 1.0);
+  float stemCover = clamp(0.5 - stem / pixel, 0.0, 1.0);
+  vec3 colour = mix(stemColour * stemCover, capColour, capCover);
+  return vec4(colour, max(capCover, stemCover));
+}
+
+vec4 flower(vec2 q, float pixel, float tint) {
+  float stem = boxDistance(q - vec2(0.5, 0.3), vec2(0.04, 0.3));
+  vec2 head = q - vec2(0.5, 0.68);
+  float angle = atan(head.y, head.x);
+  float petals = length(head) - (0.21 + 0.09 * cos(5.0 * angle));
+  float centre = length(head) - 0.09;
+  vec3 petalColour = mix(vec3(0.97, 0.95, 0.90), vec3(0.86, 0.72, 0.94), tint);
+  float stemCover = clamp(0.5 - stem / pixel, 0.0, 1.0);
+  float petalCover = clamp(0.5 - petals / pixel, 0.0, 1.0);
+  float centreCover = clamp(0.5 - centre / pixel, 0.0, 1.0);
+  vec3 colour = vec3(0.20, 0.42, 0.12) * stemCover;
+  colour = mix(colour, petalColour, petalCover);
+  colour = mix(colour, vec3(0.98, 0.76, 0.20), centreCover);
+  return vec4(colour, max(stemCover, petalCover));
+}
+
+// One sprite (x, y, size, kind) composited at uv, or nothing outside its box.
+vec4 spriteColour(vec4 sprite, vec2 uv, float pixel, float grain) {
+  vec2 q = (uv - sprite.xy) / sprite.z + 0.5;
+  if (sprite.w < 0.5 || any(lessThan(q, vec2(0.0))) || any(greaterThan(q, vec2(1.0)))) {
+    return vec4(0.0);
+  }
+  float spritePixel = pixel / sprite.z;
+  vec4 colour = sprite.w < FLOWER - 0.5 ? mushroom(q, spritePixel) : flower(q, spritePixel, step(0.5, fract(sprite.x * 37.0)));
+  // The foot sinks into the moss, unevenly.
+  return colour * smoothstep(0.02, 0.2, q.y + (grain - 0.5) * 0.2);
+}
+
 void main() {
   vec2 local = gl_FragCoord.xy - v_box.xy;
   vec2 size = v_box.zw;
@@ -107,6 +160,13 @@ void main() {
   vec3 colour = mossColour(p, grain);
   float shadow = contactShadow(front, cover);
 
-  float alpha = (cover + shadow) * clip;
-  fragColor = vec4(colour * cover * clip, alpha);
+  vec4 moss = vec4(colour * cover, cover + shadow);
+  if (v_sprites[0].w > 0.5) {
+    float pixel = 1.0 / side;
+    for (int index = 0; index < 3; index++) {
+      vec4 drawn = spriteColour(v_sprites[index], uv, pixel, grain);
+      moss = drawn + moss * (1.0 - drawn.a);
+    }
+  }
+  fragColor = moss * clip;
 }

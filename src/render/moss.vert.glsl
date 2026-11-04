@@ -1,15 +1,20 @@
 #version 300 es
 
 // One instance per mossy icon: its art box in canvas device pixels (origin
-// bottom-left), then its seed offset and overgrowth.
+// bottom-left), its seed offset and overgrowth, and up to three sprites as
+// (x, y, size, kind) in icon space, kind 0 for none.
 layout(location = 0) in vec4 a_box;
 layout(location = 1) in vec3 a_moss;
+layout(location = 2) in vec4 a_sprite0;
+layout(location = 3) in vec4 a_sprite1;
+layout(location = 4) in vec4 a_sprite2;
 
 uniform vec2 u_resolution;
 
 flat out vec4 v_box;
 flat out vec2 v_seed;
 flat out float v_overgrowth;
+flat out vec4 v_sprites[3];
 
 // Keeps the clip's antialiased edge inside the quad.
 const float MARGIN_PX = 1.0;
@@ -21,4 +26,7 @@ void main() {
   v_box = a_box;
   v_seed = a_moss.xy;
   v_overgrowth = a_moss.z;
+  v_sprites[0] = a_sprite0;
+  v_sprites[1] = a_sprite1;
+  v_sprites[2] = a_sprite2;
 }

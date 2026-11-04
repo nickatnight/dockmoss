@@ -1,15 +1,20 @@
-import { type MossInstance, glslConstants, seedOffset } from "./model";
+import { MAX_SPRITES, type MossInstance, type Sprite, glslConstants, seedOffset } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
 
-// Per instance: the device box (4 floats), then the seed offset and the
-// overgrowth (3). The locations match the `layout` qualifiers in moss.vert.glsl.
+// Per instance: the device box (4 floats), the seed offset and the
+// overgrowth (3), then MAX_SPRITES sprites of x, y, size and kind (4 each;
+// kind 0 is no sprite). The locations match the `layout` qualifiers in
+// moss.vert.glsl.
 const BOX_LOCATION = 0;
 const MOSS_LOCATION = 1;
-const FLOATS_PER_INSTANCE = 7;
+const FIRST_SPRITE_LOCATION = 2;
+const FLOATS_PER_SPRITE = 4;
+const FLOATS_PER_INSTANCE = 7 + MAX_SPRITES * FLOATS_PER_SPRITE;
 const BYTES_PER_FLOAT = 4;
+const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: 1, flower: 2 };
 
 export interface MossGl {
   /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
@@ -51,6 +56,13 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   gl.enableVertexAttribArray(MOSS_LOCATION);
   gl.vertexAttribPointer(MOSS_LOCATION, 3, gl.FLOAT, false, stride, 4 * BYTES_PER_FLOAT);
   gl.vertexAttribDivisor(MOSS_LOCATION, 1);
+  for (let index = 0; index < MAX_SPRITES; index++) {
+    const location = FIRST_SPRITE_LOCATION + index;
+    const offset = (7 + index * FLOATS_PER_SPRITE) * BYTES_PER_FLOAT;
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, FLOATS_PER_SPRITE, gl.FLOAT, false, stride, offset);
+    gl.vertexAttribDivisor(location, 1);
+  }
   let data = new Float32Array(0);
 
   const clear = (): void => {
@@ -74,8 +86,13 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       if (data.length < length) {
         data = new Float32Array(length);
       }
-      instances.forEach(({ box, seed, overgrowth }, index) => {
-        data.set([box.x, box.y, box.width, box.height, ...seedOffset(seed), overgrowth], index * FLOATS_PER_INSTANCE);
+      data.fill(0, 0, length);
+      instances.forEach(({ box, seed, overgrowth, sprites }, index) => {
+        const start = index * FLOATS_PER_INSTANCE;
+        data.set([box.x, box.y, box.width, box.height, ...seedOffset(seed), overgrowth], start);
+        sprites.slice(0, MAX_SPRITES).forEach(({ x, y, size, kind }, slot) => {
+          data.set([x, y, size, SPRITE_KINDS[kind]], start + 7 + slot * FLOATS_PER_SPRITE);
+        });
       });
       gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, length), gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, instances.length);

@@ -242,11 +242,67 @@ export function glslConstants(): string {
   ].join("\n");
 }
 
+/** A mushroom or flower on an overgrown icon. Icon space; `size` is its box's side. */
+export interface Sprite {
+  kind: "mushroom" | "flower";
+  x: number;
+  y: number;
+  size: number;
+}
+
+export const MAX_SPRITES = 3;
+// Where a sprite's centre and size are drawn from. The ranges keep every
+// box inside the clip's bottom corners and well below the reach bound.
+const SPRITE_X = [0.2, 0.8] as const;
+const SPRITE_Y = [0.16, 0.3] as const;
+const SPRITE_SIZE = [0.13, 0.19] as const;
+const SPRITE_TRIES = 12;
+
+/** mulberry32: integer arithmetic only, so it is the same on every run. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), state | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 0x100000000;
+  };
+}
+
+function between([low, high]: readonly [number, number], random: () => number): number {
+  return low + (high - low) * random();
+}
+
+/** 1 to 3 sprites that do not overlap, chosen and placed from the icon's seed. */
+export function spritesFor(seed: number): Sprite[] {
+  const random = seededRandom(seed);
+  const wanted = 1 + Math.floor(random() * MAX_SPRITES);
+  const sprites: Sprite[] = [];
+  for (let attempt = 0; attempt < SPRITE_TRIES && sprites.length < wanted; attempt++) {
+    const candidate: Sprite = {
+      kind: random() < 0.5 ? "mushroom" : "flower",
+      x: between(SPRITE_X, random),
+      y: between(SPRITE_Y, random),
+      size: between(SPRITE_SIZE, random),
+    };
+    const clear = sprites.every(
+      (other) =>
+        Math.max(Math.abs(other.x - candidate.x), Math.abs(other.y - candidate.y)) >=
+        (other.size + candidate.size) / 2,
+    );
+    if (clear) {
+      sprites.push(candidate);
+    }
+  }
+  return sprites;
+}
+
 /** One icon's moss, ready for the GPU: one instance of the draw. */
 export interface MossInstance {
   box: DeviceBox;
   seed: number;
   overgrowth: QuantizedOvergrowth;
+  sprites: readonly Sprite[];
 }
 
 export function mossInstances(
@@ -254,10 +310,11 @@ export function mossInstances(
   pixelRatio: number,
   canvasHeight: number,
 ): MossInstance[] {
-  return icons.map(({ tile, seed, overgrowth }) => ({
+  return icons.map(({ tile, seed, overgrowth, overgrown }) => ({
     box: toDeviceBox(artBox(tile), pixelRatio, canvasHeight),
     seed,
     overgrowth,
+    sprites: overgrown ? spritesFor(seed) : [],
   }));
 }
 

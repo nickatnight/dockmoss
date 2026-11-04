@@ -14,6 +14,7 @@ import {
   parseOvergrowthOverride,
   quantize,
   seedOffset,
+  spritesFor,
   step,
   toDeviceBox,
   worstCaseFront,
@@ -194,6 +195,18 @@ describe("step", () => {
 });
 
 describe("mossInstances", () => {
+  it("gives an overgrown icon its sprites, and any other icon none", () => {
+    const [overgrown, patchy] = mossInstances(
+      [icon({ overgrowth: quantize(1), overgrown: true }), icon({ overgrowth: quantize(0.9) })],
+      2,
+      1964,
+    );
+
+    expect(overgrown.sprites).toEqual(spritesFor(3244016102));
+    expect(overgrown.sprites.length).toBeGreaterThan(0);
+    expect(patchy.sprites).toEqual([]);
+  });
+
   it("puts each icon's art box in canvas device pixels, with its seed and overgrowth", () => {
     const tile = { x: 711, y: 918, width: 47, height: 59 };
     const icons = [icon({ tile, overgrowth: quantize(0.6) })];
@@ -371,5 +384,71 @@ describe("glslConstants", () => {
     for (const [, value] of glslConstants().matchAll(/^const float \w+ = (.+);$/gm)) {
       expect(value).toMatch(/\./);
     }
+  });
+});
+
+describe("spritesFor", () => {
+  const seeds = Array.from({ length: 2000 }, (_, index) => fnv1a32(`app.${index}#0`));
+
+  /** Signed distance to the clip's rounded rect in icon space: negative inside. */
+  function clipDistance(x: number, y: number): number {
+    const r = CORNER_RADIUS_PER_SIDE;
+    const qx = Math.abs(x - 0.5) - 0.5 + r;
+    const qy = Math.abs(y - 0.5) - 0.5 + r;
+    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+  }
+
+  it("gives every seed 1 to 3 sprites, and each count to some seed", () => {
+    const counts = new Set(seeds.map((seed) => spritesFor(seed).length));
+
+    expect([...counts].sort()).toEqual([1, 2, 3]);
+  });
+
+  it("uses both mushrooms and flowers", () => {
+    const kinds = new Set(seeds.flatMap((seed) => spritesFor(seed).map(({ kind }) => kind)));
+
+    expect([...kinds].sort()).toEqual(["flower", "mushroom"]);
+  });
+
+  it("keeps every sprite's box inside the clip and at or below 0.55 of the art height", () => {
+    for (const seed of seeds) {
+      for (const { x, y, size } of spritesFor(seed)) {
+        const half = size / 2;
+        for (const [cx, cy] of [[x - half, y - half], [x + half, y - half], [x - half, y + half], [x + half, y + half]]) {
+          expect(clipDistance(cx, cy), `seed ${seed}`).toBeLessThan(0);
+        }
+        expect(y + half, `seed ${seed}`).toBeLessThanOrEqual(0.55);
+      }
+    }
+  });
+
+  it("never overlaps two sprites on one icon", () => {
+    for (const seed of seeds) {
+      const sprites = spritesFor(seed);
+      for (const [index, a] of sprites.entries()) {
+        for (const b of sprites.slice(index + 1)) {
+          const apart = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) >= (a.size + b.size) / 2;
+          expect(apart, `seed ${seed}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  // Golden values: a change here moves every overgrown icon's sprites.
+  it.each([
+    [
+      "com.hnc.Discord#0",
+      [
+        { kind: "flower", x: 0.37352608400397, y: 0.22917886829003692, size: 0.18107235140632838 },
+        { kind: "mushroom", x: 0.7711941741872579, y: 0.16338266673963517, size: 0.15032056090887636 },
+        { kind: "mushroom", x: 0.581096185836941, y: 0.1918341681500897, size: 0.16903756269719453 },
+      ],
+    ],
+    [
+      "ru.keepcoder.Telegram#0",
+      [{ kind: "mushroom", x: 0.6663523845374585, y: 0.1644334005890414, size: 0.17918860734906047 }],
+    ],
+  ])("places the same sprites for %s on every run", (key, sprites) => {
+    expect(spritesFor(fnv1a32(key))).toEqual(sprites);
   });
 });

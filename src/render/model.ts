@@ -421,7 +421,7 @@ export function shrivelInstance(
 ): MossInstance | null {
   const remaining = 1 - smoothstep(0, 1, progress);
   const overgrowth = mossOvergrowth(icon.overgrowth * remaining);
-  if (progress >= 1 || overgrowth === null) {
+  if (overgrowth === null) {
     return null;
   }
   const [instance] = mossInstances([{ ...icon, overgrowth }], pixelRatio, canvasHeight);

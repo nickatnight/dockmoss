@@ -236,12 +236,13 @@ export function glslConstants(): string {
     SPRITE_SWAY_PERIOD,
     SPRITE_TIP_LEAN,
   };
-  const vec2s = { LEFT_CORNER, RIGHT_CORNER };
+  const vectors = { LEFT_CORNER, RIGHT_CORNER, WITHER_TINT };
   return [
     ...Object.entries(floats).map(([name, value]) => `const float ${name} = ${glslFloat(value)};`),
-    ...Object.entries(vec2s).map(
-      ([name, [x, y]]) => `const vec2 ${name} = vec2(${glslFloat(x)}, ${glslFloat(y)});`,
-    ),
+    ...Object.entries(vectors).map(([name, components]) => {
+      const type = `vec${components.length}`;
+      return `const ${type} ${name} = ${type}(${components.map(glslFloat).join(", ")});`;
+    }),
     ...Object.entries({ FBM_OCTAVES, MAX_SPRITES, NO_SPRITE, MUSHROOM, FLOWER }).map(
       ([name, value]) => `const int ${name} = ${value};`,
     ),
@@ -317,6 +318,8 @@ export interface MossInstance {
   seed: number;
   overgrowth: MossOvergrowth;
   hue: number;
+  /** 0 for living moss, 1 for moss browned all the way by a shrivel. */
+  wither: number;
   sprites: readonly Sprite[];
 }
 
@@ -330,8 +333,129 @@ export function mossInstances(
     seed,
     overgrowth,
     hue: mossHue(seed),
+    wither: 0,
     sprites: overgrown ? spritesFor(seed) : [],
   }));
+}
+
+/** How long an icon's moss takes to shrivel away, from its first shrivel frame. */
+export const SHRIVEL_MS = 600;
+/** The progress by which the moss has browned all the way, so it withers before most of it recedes. */
+export const SHRIVEL_WITHER_END = 0.4;
+/**
+ * Withered moss is its own luminance times this dry brown. No channel is above
+ * 1, so a premultiplied colour stays premultiplied.
+ */
+export const WITHER_TINT = [1, 0.74, 0.42] as const;
+
+/** An icon whose moss is shrivelling away because its app went clean. */
+export interface Shrivel {
+  /** The icon as the canvas last drew it, at its item's tile now. */
+  icon: MossyIcon;
+  /** The time of its first shrivel frame, or null until that frame. */
+  startMs: number | null;
+}
+
+export type Shrivels = ReadonlyMap<ItemKey, Shrivel>;
+
+/**
+ * The shrivels after a scene update. One starts for each item that is mossy in
+ * what the canvas last drew and whose app the next growth frame lists as clean,
+ * while the item is still in the Dock. One in progress follows its item's tile,
+ * and ends when the item has moss again or leaves the Dock. None starts after
+ * a load or a restore ("unknown"), or while the dev override pins every item
+ * mossy in `next`.
+ */
+export function shrivelsAfter(
+  shrivels: Shrivels,
+  drawn: Drawn,
+  items: readonly DockItem[],
+  growth: readonly AppGrowth[],
+  next: readonly MossyIcon[],
+): Shrivels {
+  const keys = itemKeys(items);
+  const inDock = new Map(keys.map((key, index) => [key, items[index]]));
+  const mossy = new Set(next.map(({ key }) => key));
+  const cleanApps = new Set(
+    growth.filter(({ overgrowth }) => quantize(overgrowth) === 0).map(({ bundleId }) => bundleId),
+  );
+  const after = new Map<ItemKey, Shrivel>();
+  for (const [key, shrivel] of shrivels) {
+    const item = inDock.get(key);
+    if (item !== undefined && !mossy.has(key)) {
+      after.set(key, { ...shrivel, icon: { ...shrivel.icon, tile: item.rect } });
+    }
+  }
+  for (const icon of drawn === "unknown" ? [] : drawn) {
+    const item = inDock.get(icon.key);
+    if (item !== undefined && cleanApps.has(item.bundleId) && !mossy.has(icon.key) && !after.has(icon.key)) {
+      after.set(icon.key, { icon: { ...icon, tile: item.rect }, startMs: null });
+    }
+  }
+  return after;
+}
+
+/** How far a shrivel is, from 0 on its first frame to 1 at SHRIVEL_MS. */
+export function shrivelProgress(startMs: number, timeMs: number): number {
+  return Math.min(1, Math.max(0, (timeMs - startMs) / SHRIVEL_MS));
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** A sprite at `remaining` of its size, standing on the same foot. */
+function shrunk(sprite: Sprite, remaining: number): Sprite {
+  return { ...sprite, y: sprite.y - (sprite.size * (1 - remaining)) / 2, size: sprite.size * remaining };
+}
+
+/**
+ * A shrivelling icon at `progress`: its moss browns by SHRIVEL_WITHER_END while
+ * the front eases down to the bottom edge, and its sprites shrink toward their
+ * feet with it. Null once nothing is left, at progress 1 at the latest.
+ */
+export function shrivelInstance(
+  icon: MossyIcon,
+  progress: number,
+  pixelRatio: number,
+  canvasHeight: number,
+): MossInstance | null {
+  const remaining = 1 - smoothstep(0, 1, progress);
+  const overgrowth = mossOvergrowth(icon.overgrowth * remaining);
+  if (progress >= 1 || overgrowth === null) {
+    return null;
+  }
+  const [instance] = mossInstances([{ ...icon, overgrowth }], pixelRatio, canvasHeight);
+  return {
+    ...instance,
+    wither: smoothstep(0, SHRIVEL_WITHER_END, progress),
+    sprites: instance.sprites.map((sprite) => shrunk(sprite, remaining)),
+  };
+}
+
+/**
+ * One frame of every shrivel: each one's instance at `timeMs`, and the
+ * shrivels still running after it. A shrivel's clock starts on its first
+ * frame; one with nothing left to draw has ended.
+ */
+export function shrivelFrame(
+  shrivels: Shrivels,
+  timeMs: number,
+  pixelRatio: number,
+  canvasHeight: number,
+): { instances: MossInstance[]; running: Shrivels } {
+  const instances: MossInstance[] = [];
+  const running = new Map<ItemKey, Shrivel>();
+  for (const [key, { icon, startMs }] of shrivels) {
+    const start = startMs ?? timeMs;
+    const instance = shrivelInstance(icon, shrivelProgress(start, timeMs), pixelRatio, canvasHeight);
+    if (instance !== null) {
+      instances.push(instance);
+      running.set(key, { icon, startMs: start });
+    }
+  }
+  return { instances, running };
 }
 
 const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: MUSHROOM, flower: FLOWER };
@@ -355,6 +479,7 @@ export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
   { name: "a_seed", size: 2, values: ({ seed }) => seedOffset(seed) },
   { name: "a_overgrowth", size: 1, values: ({ overgrowth }) => [overgrowth] },
   { name: "a_hue", size: 1, values: ({ hue }) => [hue] },
+  { name: "a_wither", size: 1, values: ({ wither }) => [wither] },
   ...Array.from({ length: MAX_SPRITES }, (_, slot) => ({
     name: `a_sprite${slot}`,
     size: 4,

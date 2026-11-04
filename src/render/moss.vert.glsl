@@ -4,6 +4,7 @@ in vec4 a_box;
 in vec2 a_seed;
 in float a_overgrowth;
 in float a_hue;
+in float a_wither;
 in vec4 a_sprite0;
 in vec4 a_sprite1;
 in vec4 a_sprite2;
@@ -14,6 +15,7 @@ flat out vec4 v_box;
 flat out vec2 v_seed;
 flat out float v_overgrowth;
 flat out float v_hue;
+flat out float v_wither;
 flat out vec4 v_sprites[3];
 
 const float CLIP_AA_MARGIN_PX = 1.0;
@@ -26,6 +28,7 @@ void main() {
   v_seed = a_seed;
   v_overgrowth = a_overgrowth;
   v_hue = a_hue;
+  v_wither = a_wither;
   v_sprites[0] = a_sprite0;
   v_sprites[1] = a_sprite1;
   v_sprites[2] = a_sprite2;

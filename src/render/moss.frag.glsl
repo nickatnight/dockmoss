@@ -10,6 +10,17 @@ out vec4 fragColor;
 // The macOS icon shape, approximated as a rounded rect.
 const float CORNER_RADIUS_PER_SIDE = 0.225;
 
+// Growth starts at the bottom edge and at the two bottom corners, where the
+// corner arcs sit (icon space: 0 to 1 across, 0 at the bottom). Distance from
+// the bottom edge counts for more, so the corners lead.
+const vec2 LEFT_CORNER = vec2(0.066);
+const vec2 RIGHT_CORNER = vec2(0.934, 0.066);
+const float BOTTOM_DISTANCE_SCALE = 1.7;
+const float CORNER_DISTANCE_SCALE = 1.25;
+// How far growth reaches at overgrowth 1, and the curve up to it.
+const float MAX_REACH = 0.78;
+const float REACH_EXPONENT = 0.8;
+
 // Integer hash (no sin), so the pattern is the same on every GPU.
 float hash(vec2 p) {
   uvec2 q = uvec2(ivec2(floor(p)) + ivec2(32768));
@@ -45,6 +56,46 @@ float roundedRectDistance(vec2 p, vec2 halfSize, float radius) {
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
+float growthDistance(vec2 uv) {
+  float fromBottom = uv.y * BOTTOM_DISTANCE_SCALE;
+  float fromCorner = CORNER_DISTANCE_SCALE * min(length(uv - LEFT_CORNER), length(uv - RIGHT_CORNER));
+  return min(fromBottom, fromCorner);
+}
+
+// Positive inside the moss, negative beyond its front. The front's noise is
+// scaled down at low reach, so the first step of overgrowth is a thin fringe.
+float mossFront(vec2 uv, vec2 p) {
+  float reach = MAX_REACH * pow(u_overgrowth, REACH_EXPONENT);
+  float ragged = fbm(p * 5.0) - 0.5;
+  float tufts = noise(p * 26.0) - 0.5;
+  return reach - growthDistance(uv) + ragged * min(0.24, reach * 1.2) + tufts * min(0.05, reach * 0.3);
+}
+
+float mossCover(float front, float grain) {
+  float cover = smoothstep(0.0, 0.03, front);
+  float nearFront = 1.0 - smoothstep(0.0, 0.04, abs(front));
+  return clamp(cover + nearFront * (grain - 0.55) * 0.9, 0.0, 1.0);
+}
+
+// Cushions with dark crevices between them, lit from above.
+vec3 mossColour(vec2 p, float grain) {
+  float clump = fbm(p * 13.0 + 7.3);
+  float cushion = smoothstep(0.3, 0.62, clump);
+  float lift = clamp((fbm(p * 13.0 + 7.3 - vec2(0.0, 0.025)) - clump) * -14.0, -1.0, 1.0);
+
+  vec3 crevice = vec3(0.06, 0.09, 0.03);
+  vec3 body = mix(vec3(0.25, 0.42, 0.09), vec3(0.18, 0.38, 0.14), fbm(p * 2.0));
+  vec3 lit = vec3(0.64, 0.76, 0.24);
+  vec3 colour = mix(crevice, body, cushion);
+  colour = mix(colour, lit, clamp(lift * 1.4 + cushion * 0.25 - 0.1, 0.0, 1.0) * cushion);
+  colour *= mix(0.78, 1.12, grain);
+  return colour;
+}
+
+float contactShadow(float front, float cover) {
+  return 0.4 * smoothstep(-0.06, 0.0, front) * (1.0 - cover);
+}
+
 void main() {
   vec2 local = gl_FragCoord.xy - u_box.xy;
   vec2 size = u_box.zw;
@@ -59,33 +110,11 @@ void main() {
 
   vec2 uv = local / size;
   vec2 p = uv + u_seed;
-
-  float fromBottom = uv.y * 1.7;
-  float fromCorner = 1.25 * min(length(uv - vec2(0.066)), length(uv - vec2(0.934, 0.066)));
-  float grown = min(fromBottom, fromCorner);
-  float reach = 0.78 * pow(u_overgrowth, 0.8);
-
-  float ragged = fbm(p * 5.0) - 0.5;
-  float tufts = noise(p * 26.0) - 0.5;
-  float front = reach - grown + ragged * min(0.24, reach * 1.2) + tufts * min(0.05, reach * 0.3);
-  float cover = smoothstep(0.0, 0.03, front);
-
-  float clump = fbm(p * 13.0 + 7.3);
-  float cushion = smoothstep(0.3, 0.62, clump);
-  float lift = clamp((fbm(p * 13.0 + 7.3 - vec2(0.0, 0.025)) - clump) * -14.0, -1.0, 1.0);
+  float front = mossFront(uv, p);
   float grain = noise(p * 95.0);
-
-  vec3 crevice = vec3(0.06, 0.09, 0.03);
-  vec3 body = mix(vec3(0.25, 0.42, 0.09), vec3(0.18, 0.38, 0.14), fbm(p * 2.0));
-  vec3 lit = vec3(0.64, 0.76, 0.24);
-  vec3 colour = mix(crevice, body, cushion);
-  colour = mix(colour, lit, clamp(lift * 1.4 + cushion * 0.25 - 0.1, 0.0, 1.0) * cushion);
-  colour *= mix(0.78, 1.12, grain);
-
-  float nearFront = 1.0 - smoothstep(0.0, 0.04, abs(front));
-  cover = clamp(cover + nearFront * (grain - 0.55) * 0.9, 0.0, 1.0);
-
-  float shadow = 0.4 * smoothstep(-0.06, 0.0, front) * (1.0 - cover);
+  float cover = mossCover(front, grain);
+  vec3 colour = mossColour(p, grain);
+  float shadow = contactShadow(front, cover);
 
   float alpha = (cover + shadow) * clip;
   fragColor = vec4(colour * cover * clip, alpha);

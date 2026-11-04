@@ -1,6 +1,3 @@
-// Dev builds only: overlay.ts loads this module under import.meta.env.DEV,
-// so `pnpm build` leaves it, and its CSS, out of the bundle.
-
 import "./debug.css";
 import type { AppGrowth, BundleId, DockItem } from "./ipc";
 import { parseOvergrowthOverride } from "./render/model";
@@ -10,7 +7,6 @@ interface Outline {
   label: HTMLSpanElement;
 }
 
-/** Outlines each Dock app item and labels it with its growth. */
 export function outlineDockItems(root: HTMLElement) {
   const layer = document.createElement("div");
   layer.className = "debug-layer";
@@ -71,7 +67,6 @@ export function outlineDockItems(root: HTMLElement) {
   };
 }
 
-/** A 2 pt red bar along the bottom edge, for a rejected watch call. */
 export function markNotWatched(root: HTMLElement): void {
   if (root.querySelector(".debug-not-watched") !== null) {
     return;
@@ -82,7 +77,6 @@ export function markNotWatched(root: HTMLElement): void {
   root.append(bar);
 }
 
-/** `VITE_DOCKMOSS_OVERGROWTH=<0..1>` at `pnpm tauri dev` sets the drawn icon's overgrowth. */
 export function overgrowthOverride(): number | null {
   const override = parseOvergrowthOverride(import.meta.env.VITE_DOCKMOSS_OVERGROWTH);
   if (override.kind === "invalid") {

@@ -2,11 +2,6 @@ import type { AppGrowth, DockItem } from "../ipc";
 import { type MossGl, createMossGl } from "./gl";
 import { type Scene, artBox, drawnIcon, step, toDeviceBox } from "./model";
 
-/**
- * Draws moss on one Dock icon. Feed it every Dock and growth frame; it
- * draws one frame per visible change and runs nothing while idle.
- * `override` (dev builds only) sets the drawn icon's overgrowth.
- */
 export function startMossRenderer(root: HTMLElement, override: number | null) {
   const canvas = document.createElement("canvas");
   canvas.className = "moss";

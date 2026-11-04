@@ -3,21 +3,15 @@
 
 import type { AppGrowth, BundleId, DockItem, LogicalRect } from "../ipc";
 
-/** A bundle ID plus its occurrence among the items that share it: `com.microsoft.VSCode#1`. */
 export type ItemKey = string & { readonly __brand: "ItemKey" };
 
-/** The drawn icon, as the renderer sees it. */
 export interface Scene {
   key: ItemKey;
-  /** FNV-1a 32 of the key, so an item's moss pattern is the same on every run. */
   seed: number;
-  /** The Dock tile, in overlay-local CSS pixels. */
   rect: LogicalRect;
-  /** Quantized to `OVERGROWTH_STEPS`. */
   overgrowth: number;
 }
 
-/** The smallest overgrowth change the renderer shows. */
 export const OVERGROWTH_STEPS = 256;
 
 export function quantize(overgrowth: number): number {
@@ -41,11 +35,6 @@ export function fnv1a32(text: string): number {
   return hash >>> 0;
 }
 
-/**
- * The most overgrown Dock item, ties going to the first in Dock order. An
- * item with no growth entry yet counts as clean. `override` (dev builds
- * only) replaces the chosen item's overgrowth. Null for an empty Dock.
- */
 export function drawnIcon(
   items: readonly DockItem[],
   growth: readonly AppGrowth[],
@@ -69,7 +58,6 @@ export function drawnIcon(
   return { ...best, overgrowth: quantize(override) };
 }
 
-/** What a redraw has to upload. A new drawn icon needs all of it. */
 export interface Changes {
   geometry: boolean;
   moss: boolean;
@@ -78,12 +66,9 @@ export interface Changes {
 
 export type Step =
   | { kind: "none" }
-  /** The Dock is empty: clear now, not in a frame callback, because the
-   * window may already be ordered out and WebKit runs none there. */
   | { kind: "clear" }
   | { kind: "draw"; changes: Changes };
 
-/** What to do to get from the scene on the canvas to the next one. */
 export function step(drawn: Scene | null, next: Scene | null): Step {
   if (next === null) {
     return drawn === null ? { kind: "none" } : { kind: "clear" };
@@ -146,7 +131,6 @@ export type OvergrowthOverride =
   | { kind: "set"; overgrowth: number }
   | { kind: "invalid"; raw: string };
 
-/** Reads the dev overgrowth override: a plain decimal from 0 to 1. */
 export function parseOvergrowthOverride(raw: string | undefined): OvergrowthOverride {
   if (raw === undefined || raw === "") {
     return { kind: "unset" };

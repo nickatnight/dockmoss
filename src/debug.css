@@ -31,9 +31,6 @@
   background: rgb(0 0 0 / 0.7);
 }
 
-/* Each label is two lines, the overgrowth over the stage. Every second
-   label sits a label higher, so labels on one row are two tiles apart,
-   wider than the longest line ("overgrown"). */
 .debug-dock-item:nth-child(even) .debug-dock-item-label {
   margin-bottom: calc(2px + 2.6em);
 }
@@ -42,8 +39,6 @@
   display: none;
 }
 
-/* A watch call was rejected: without this, a capture of a failed
-   subscription looks the same as an empty Dock. */
 .debug-not-watched {
   position: fixed;
   right: 0;

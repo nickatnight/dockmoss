@@ -1,5 +1,3 @@
-// The WebGL2 side of the renderer: one program, one quad, three uniforms.
-
 import type { DeviceBox } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
@@ -9,12 +7,10 @@ export interface MossGl {
   resize(width: number, height: number): void;
   setBox(box: DeviceBox): void;
   setMoss(seed: number, overgrowth: number): void;
-  /** Draws the moss on a cleared canvas. */
   draw(): void;
   clear(): void;
 }
 
-/** Null when WebGL2 is unavailable or the shaders fail; the reason is logged once. */
 export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   const gl = canvas.getContext("webgl2", {
     alpha: true,
@@ -54,13 +50,11 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
     },
     setBox(box) {
       gl.uniform4f(uniforms.box, box.x, box.y, box.width, box.height);
-      // One pixel of margin keeps the antialiased edge inside the scissor.
       const x = Math.floor(box.x) - 1;
       const y = Math.floor(box.y) - 1;
       scissor = [x, y, Math.ceil(box.x + box.width) + 1 - x, Math.ceil(box.y + box.height) + 1 - y];
     },
     setMoss(seed, value) {
-      // Two offsets from the seed's halves move each item to its own patch of noise.
       gl.uniform2f(uniforms.seed, ((seed & 0xffff) / 0x10000) * 64, ((seed >>> 16) / 0x10000) * 64);
       gl.uniform1f(uniforms.overgrowth, value);
       overgrowth = value;

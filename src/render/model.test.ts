@@ -260,9 +260,6 @@ describe("toDeviceBox", () => {
 });
 
 describe("artBox", () => {
-  // Measured on this Mac's Dock (tilesize 45, largesize 66); see job 009's
-  // build.md. Magnified readings scatter by about a point, because the AX
-  // rect and the capture are read at two moments and AX rounds to points.
   it.each([
     ["a normal 47 x 59 tile", { x: 711, y: 918, width: 47, height: 59 }, { x: 716, y: 929, side: 37 }, 0.5],
     ["a magnified 57 x 69 tile", { x: 578, y: 907, width: 57, height: 69 }, { x: 584, y: 919, side: 46 }, 1],

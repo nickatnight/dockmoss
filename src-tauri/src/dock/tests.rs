@@ -162,8 +162,6 @@ fn kept_items_stay_in_dock_order() {
     );
 }
 
-/// The app path can hold the user's name (`~/Applications`), and the
-/// webview only draws, so it gets the bundle ID and the rect and no more.
 #[test]
 fn dock_item_serializes_only_its_bundle_id_and_rect_in_camel_case() {
     let item = DockItem {

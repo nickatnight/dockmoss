@@ -20,6 +20,7 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
     premultipliedAlpha: true,
     antialias: false,
     preserveDrawingBuffer: false,
+    powerPreference: "low-power",
   });
   if (gl === null) {
     console.error("moss renderer: WebGL2 is not available");
@@ -47,6 +48,10 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
 
   return {
     resize(width, height) {
+      // Assigning the size reallocates the buffer and clears it, even unchanged.
+      if (canvas.width === width && canvas.height === height) {
+        return;
+      }
       canvas.width = width;
       canvas.height = height;
       gl.viewport(0, 0, width, height);
@@ -79,23 +84,31 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
 
 function linkProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
   const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
+  if (vertex === null) {
+    return null;
+  }
   const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
-  if (vertex === null || fragment === null) {
+  if (fragment === null) {
+    gl.deleteShader(vertex);
     return null;
   }
   const program = gl.createProgram();
   gl.attachShader(program, vertex);
   gl.attachShader(program, fragment);
   gl.linkProgram(program);
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     if (!gl.isContextLost()) {
       console.error("moss renderer: shader link failed", gl.getProgramInfoLog(program));
     }
+    gl.deleteProgram(program);
     return null;
   }
   return program;
 }
 
+/** Logs and deletes a shader that fails to compile. */
 function compile(gl: WebGL2RenderingContext, type: GLenum, source: string): WebGLShader | null {
   const shader = gl.createShader(type);
   if (shader === null) {
@@ -108,6 +121,7 @@ function compile(gl: WebGL2RenderingContext, type: GLenum, source: string): WebG
       const stage = type === gl.VERTEX_SHADER ? "vertex" : "fragment";
       console.error(`moss renderer: ${stage} shader failed to compile`, gl.getShaderInfoLog(shader));
     }
+    gl.deleteShader(shader);
     return null;
   }
   return shader;

@@ -1,13 +1,14 @@
 import "./debug.css";
 import type { AppGrowth, BundleId, DockItem } from "./ipc";
 import { parseOvergrowthOverride } from "./render/model";
+import type { FrameSink } from "./render/renderer";
 
 interface Outline {
   box: HTMLDivElement;
   label: HTMLSpanElement;
 }
 
-export function outlineDockItems(root: HTMLElement) {
+export function outlineDockItems(root: HTMLElement): FrameSink {
   const layer = document.createElement("div");
   layer.className = "debug-layer";
   layer.setAttribute("aria-hidden", "true");

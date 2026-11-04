@@ -1,18 +1,21 @@
-import { type DeviceBox, glslConstants, seedOffset } from "./model";
+import { type MossInstance, glslConstants, seedOffset } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
 
-// Keeps the clip's antialiased edge inside the scissor box.
-const SCISSOR_MARGIN_PX = 1;
+// Per instance: the device box (4 floats), then the seed offset and the
+// overgrowth (3). The locations match the `layout` qualifiers in moss.vert.glsl.
+const BOX_LOCATION = 0;
+const MOSS_LOCATION = 1;
+const FLOATS_PER_INSTANCE = 7;
+const BYTES_PER_FLOAT = 4;
 
 export interface MossGl {
-  /** Sets the backing store size in device pixels. Clears the canvas. */
+  /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
   resize(width: number, height: number): void;
-  setBox(box: DeviceBox): void;
-  setMoss(seed: number, overgrowth: number): void;
-  draw(): void;
+  /** Clears the canvas, then draws every instance in one call. */
+  draw(instances: readonly MossInstance[]): void;
   clear(): void;
 }
 
@@ -35,16 +38,22 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   gl.useProgram(program);
   gl.disable(gl.BLEND);
   gl.clearColor(0, 0, 0, 0);
-  const uniforms = {
-    box: gl.getUniformLocation(program, "u_box"),
-    seed: gl.getUniformLocation(program, "u_seed"),
-    overgrowth: gl.getUniformLocation(program, "u_overgrowth"),
-  };
-  let scissor: [number, number, number, number] = [0, 0, 0, 0];
-  let overgrowth = 0;
+  const resolution = gl.getUniformLocation(program, "u_resolution");
+  gl.uniform2f(resolution, canvas.width, canvas.height);
+
+  const buffer = gl.createBuffer();
+  gl.bindVertexArray(gl.createVertexArray());
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  const stride = FLOATS_PER_INSTANCE * BYTES_PER_FLOAT;
+  gl.enableVertexAttribArray(BOX_LOCATION);
+  gl.vertexAttribPointer(BOX_LOCATION, 4, gl.FLOAT, false, stride, 0);
+  gl.vertexAttribDivisor(BOX_LOCATION, 1);
+  gl.enableVertexAttribArray(MOSS_LOCATION);
+  gl.vertexAttribPointer(MOSS_LOCATION, 3, gl.FLOAT, false, stride, 4 * BYTES_PER_FLOAT);
+  gl.vertexAttribDivisor(MOSS_LOCATION, 1);
+  let data = new Float32Array(0);
 
   const clear = (): void => {
-    gl.disable(gl.SCISSOR_TEST);
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
 
@@ -57,28 +66,19 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       canvas.width = width;
       canvas.height = height;
       gl.viewport(0, 0, width, height);
+      gl.uniform2f(resolution, width, height);
     },
-    setBox(box) {
-      gl.uniform4f(uniforms.box, box.x, box.y, box.width, box.height);
-      const x = Math.floor(box.x) - SCISSOR_MARGIN_PX;
-      const y = Math.floor(box.y) - SCISSOR_MARGIN_PX;
-      const right = Math.ceil(box.x + box.width) + SCISSOR_MARGIN_PX;
-      const top = Math.ceil(box.y + box.height) + SCISSOR_MARGIN_PX;
-      scissor = [x, y, right - x, top - y];
-    },
-    setMoss(seed, value) {
-      gl.uniform2f(uniforms.seed, ...seedOffset(seed));
-      gl.uniform1f(uniforms.overgrowth, value);
-      overgrowth = value;
-    },
-    draw() {
+    draw(instances) {
       clear();
-      if (overgrowth <= 0) {
-        return;
+      const length = instances.length * FLOATS_PER_INSTANCE;
+      if (data.length < length) {
+        data = new Float32Array(length);
       }
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(...scissor);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      instances.forEach(({ box, seed, overgrowth }, index) => {
+        data.set([box.x, box.y, box.width, box.height, ...seedOffset(seed), overgrowth], index * FLOATS_PER_INSTANCE);
+      });
+      gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, length), gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, instances.length);
     },
     clear,
   };

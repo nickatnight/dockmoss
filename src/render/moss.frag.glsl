@@ -1,9 +1,9 @@
 #version 300 es
 precision highp float;
 
-uniform vec4 u_box;
-uniform vec2 u_seed;
-uniform float u_overgrowth;
+flat in vec4 v_box;
+flat in vec2 v_seed;
+flat in float v_overgrowth;
 
 out vec4 fragColor;
 
@@ -55,7 +55,7 @@ float growthDistance(vec2 uv) {
 // Positive inside the moss, negative beyond its front. The front's noise is
 // scaled down at low reach, so the first step of overgrowth is a thin fringe.
 float mossFront(vec2 uv, vec2 p) {
-  float reach = MAX_REACH * pow(u_overgrowth, REACH_EXPONENT);
+  float reach = MAX_REACH * pow(v_overgrowth, REACH_EXPONENT);
   float ragged = fbm(p * 5.0) - 0.5;
   float tufts = noise(p * 26.0) - 0.5;
   return reach - growthDistance(uv) + ragged * min(RAGGED_CAP, reach * RAGGED_PER_REACH) +
@@ -88,19 +88,19 @@ float contactShadow(float front, float cover) {
 }
 
 void main() {
-  vec2 local = gl_FragCoord.xy - u_box.xy;
-  vec2 size = u_box.zw;
+  vec2 local = gl_FragCoord.xy - v_box.xy;
+  vec2 size = v_box.zw;
   float side = min(size.x, size.y);
 
   float edge = roundedRectDistance(local - size * 0.5, size * 0.5, CORNER_RADIUS_PER_SIDE * side);
   float clip = clamp(0.5 - edge, 0.0, 1.0);
-  if (clip <= 0.0 || u_overgrowth <= 0.0) {
+  if (clip <= 0.0 || v_overgrowth <= 0.0) {
     fragColor = vec4(0.0);
     return;
   }
 
   vec2 uv = local / size;
-  vec2 p = uv + u_seed;
+  vec2 p = uv + v_seed;
   float front = mossFront(uv, p);
   float grain = noise(p * 95.0);
   float cover = mossCover(front, grain);

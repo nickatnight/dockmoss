@@ -2,14 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
-import type { DeviceBox } from "./model";
+import type { MossInstance } from "./model";
 import { createRenderer } from "./renderer";
 
 type Call =
   | { op: "resize"; width: number; height: number }
-  | { op: "setBox"; box: DeviceBox }
-  | { op: "setMoss"; seed: number; overgrowth: number }
-  | { op: "draw" }
+  | { op: "draw"; instances: readonly MossInstance[] }
   | { op: "clear" };
 
 /** A MossGl that records its calls, and a list of every one created. */
@@ -20,9 +18,7 @@ function fakeGls() {
     created.push(calls);
     return {
       resize: (width, height) => calls.push({ op: "resize", width, height }),
-      setBox: (box) => calls.push({ op: "setBox", box }),
-      setMoss: (seed, overgrowth) => calls.push({ op: "setMoss", seed, overgrowth }),
-      draw: () => calls.push({ op: "draw" }),
+      draw: (instances) => calls.push({ op: "draw", instances }),
       clear: () => calls.push({ op: "clear" }),
     };
   };
@@ -58,7 +54,8 @@ function setup() {
   renderer.resize(1512, 982, 2);
   const calls = (): Call[] => gls.created[gls.created.length - 1] ?? [];
   const ops = () => calls().map((call) => call.op);
-  return { renderer, frames, gls, calls, ops };
+  const draws = () => calls().flatMap((call) => (call.op === "draw" ? [call.instances] : []));
+  return { renderer, frames, gls, calls, ops, draws };
 }
 
 const discord: DockItem = {
@@ -114,18 +111,16 @@ describe("createRenderer", () => {
   });
 
   it("redraws the same scene after a resize, at the new size", () => {
-    const { renderer, frames, calls } = drawn();
+    const { renderer, frames, calls, draws } = drawn();
 
     renderer.resize(1920, 1080, 1);
     frames.runFrame();
 
     expect(calls()).toContainEqual({ op: "resize", width: 1920, height: 1080 });
-    expect(calls()[calls().length - 1]).toEqual({ op: "draw" });
     // The art's bottom edge in CSS px, measured up from the new canvas bottom.
     const artBottom = 918 + (59 + 0.79 * 47) / 2;
-    const boxes = calls().flatMap((call) => (call.op === "setBox" ? [call.box] : []));
-    expect(boxes).toHaveLength(1);
-    expect(boxes[0].y).toBeCloseTo(1080 - artBottom, 6);
+    expect(draws()).toHaveLength(1);
+    expect(draws()[0][0].box.y).toBeCloseTo(1080 - artBottom, 6);
   });
 
   it("redraws on a new context after the old one is lost and restored", () => {
@@ -138,7 +133,34 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(gls.created).toHaveLength(2);
-    expect(gls.created[1][gls.created[1].length - 1]).toEqual({ op: "draw" });
+    expect(gls.created[1].map((call) => call.op)).toContain("draw");
+  });
+
+  it("draws every mossy icon in one draw, and no clean one", () => {
+    const { renderer, frames, draws } = setup();
+    const telegram = { bundleId: "ru.keepcoder.Telegram" as BundleId, rect: { ...discord.rect, x: 664 } };
+    const finder = { bundleId: "com.apple.finder" as BundleId, rect: { ...discord.rect, x: 476 } };
+
+    renderer.dock([finder, discord, telegram]);
+    renderer.growth([...mossy, { bundleId: telegram.bundleId, overgrowth: 1, stage: "overgrown" }]);
+    frames.runFrame();
+
+    expect(draws()).toHaveLength(1);
+    expect(draws()[0].map(({ overgrowth }) => overgrowth)).toEqual([0.6015625, 1]);
+  });
+
+  it("draws nothing, and schedules nothing, for a clean Dock whose tiles move", () => {
+    const { renderer, frames, ops } = setup();
+    renderer.growth([{ bundleId: discord.bundleId, overgrowth: 0, stage: "clean" }]);
+    renderer.dock([discord]);
+    frames.runFrame();
+    const before = ops().length;
+
+    renderer.dock([{ ...discord, rect: { ...discord.rect, x: 600, width: 60 } }]);
+    renderer.dock([{ ...discord, rect: { ...discord.rect, x: 590, width: 66 } }]);
+
+    expect(frames.pending).toBe(0);
+    expect(ops().slice(before)).toEqual([]);
   });
 
   it("does nothing while the scene is unchanged", () => {

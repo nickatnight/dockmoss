@@ -1,4 +1,4 @@
-// Pure: which Dock item gets moss, its key and seed, and when to redraw.
+// Pure: which Dock items get moss, their keys and seeds, and when to redraw.
 // No DOM, no WebGL and no clock, so `model.test.ts` runs it in Node.
 
 import type { AppGrowth, BundleId, DockItem, LogicalRect } from "../ipc";
@@ -7,14 +7,17 @@ export type ItemKey = string & { readonly __brand: "ItemKey" };
 
 export type QuantizedOvergrowth = number & { readonly __brand: "QuantizedOvergrowth" };
 
-export interface Scene {
+/** A Dock item with moss on it. */
+export interface Icon {
   key: ItemKey;
   seed: number;
   tile: LogicalRect;
+  /** Above 0: clean items get no icon. */
   overgrowth: QuantizedOvergrowth;
+  overgrown: boolean;
 }
 
-export const OVERGROWTH_STEPS = 256;
+const OVERGROWTH_STEPS = 256;
 
 export function quantize(overgrowth: number): QuantizedOvergrowth {
   return (Math.round(overgrowth * OVERGROWTH_STEPS) / OVERGROWTH_STEPS) as QuantizedOvergrowth;
@@ -39,60 +42,69 @@ export function itemKeys(items: readonly DockItem[]): ItemKey[] {
   });
 }
 
+const utf8 = new TextEncoder();
+
 export function fnv1a32(text: string): number {
   let hash = 0x811c9dc5;
-  for (const byte of new TextEncoder().encode(text)) {
+  for (const byte of utf8.encode(text)) {
     hash = Math.imul(hash ^ byte, 0x01000193);
   }
   return hash >>> 0;
 }
 
-export function mostOvergrownItem(
+/**
+ * Every Dock item with visible moss, in Dock order. The dev override gives
+ * every item its overgrowth, and makes every item overgrown at 1.
+ */
+export function mossyIcons(
   items: readonly DockItem[],
   growth: readonly AppGrowth[],
   overgrowthOverride: number | null,
-): Scene | null {
-  const byBundleId = new Map(
-    growth.map(({ bundleId, overgrowth }) => [bundleId, quantize(overgrowth)]),
-  );
+): Icon[] {
+  const byBundleId = new Map(growth.map((app) => [app.bundleId, app]));
   const keys = itemKeys(items);
-  let best: Scene | null = null;
-  for (const [index, { bundleId, rect }] of items.entries()) {
-    const overgrowth = byBundleId.get(bundleId) ?? quantize(0);
-    if (best === null || overgrowth > best.overgrowth) {
-      const key = keys[index];
-      best = { key, seed: fnv1a32(key), tile: rect, overgrowth };
+  return items.flatMap(({ bundleId, rect }, index) => {
+    const app = byBundleId.get(bundleId);
+    const overgrowth = quantize(overgrowthOverride ?? app?.overgrowth ?? 0);
+    if (overgrowth <= 0) {
+      return [];
     }
-  }
-  if (best === null || overgrowthOverride === null) {
-    return best;
-  }
-  return { ...best, overgrowth: quantize(overgrowthOverride) };
+    const overgrown =
+      overgrowthOverride === null ? app?.stage === "overgrown" : overgrowthOverride === 1;
+    const key = keys[index];
+    return [{ key, seed: fnv1a32(key), tile: rect, overgrowth, overgrown }];
+  });
 }
 
-export interface Changes {
-  geometry: boolean;
-  moss: boolean;
-}
+export type Step = { kind: "none" } | { kind: "clear" } | { kind: "draw" };
 
-export type Step =
-  | { kind: "none" }
-  | { kind: "clear" }
-  | { kind: "draw"; changes: Changes };
-
-export function step(drawn: Scene | null, next: Scene | null): Step {
-  if (next === null) {
-    return drawn === null ? { kind: "none" } : { kind: "clear" };
+/**
+ * `drawn` is what the canvas shows: null when that is unknown (after a
+ * resize or a context restore), and empty when it shows nothing.
+ */
+export function step(drawn: readonly Icon[] | null, next: readonly Icon[]): Step {
+  if (next.length === 0) {
+    return drawn !== null && drawn.length === 0 ? { kind: "none" } : { kind: "clear" };
   }
-  if (drawn === null || drawn.key !== next.key) {
-    return { kind: "draw", changes: { geometry: true, moss: true } };
-  }
-  const geometry = !sameRect(drawn.tile, next.tile);
-  const moss = drawn.overgrowth !== next.overgrowth;
-  if (!geometry && !moss) {
+  if (drawn !== null && sameIcons(drawn, next)) {
     return { kind: "none" };
   }
-  return { kind: "draw", changes: { geometry, moss } };
+  return { kind: "draw" };
+}
+
+function sameIcons(a: readonly Icon[], b: readonly Icon[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((icon, index) => {
+      const other = b[index];
+      return (
+        icon.key === other.key &&
+        icon.overgrowth === other.overgrowth &&
+        icon.overgrown === other.overgrown &&
+        sameRect(icon.tile, other.tile)
+      );
+    })
+  );
 }
 
 function sameRect(a: LogicalRect, b: LogicalRect): boolean {
@@ -228,6 +240,25 @@ export function glslConstants(): string {
     ),
     `const int FBM_OCTAVES = ${FBM_OCTAVES};`,
   ].join("\n");
+}
+
+/** One icon's moss, ready for the GPU: one instance of the draw. */
+export interface MossInstance {
+  box: DeviceBox;
+  seed: number;
+  overgrowth: QuantizedOvergrowth;
+}
+
+export function mossInstances(
+  icons: readonly Icon[],
+  pixelRatio: number,
+  canvasHeight: number,
+): MossInstance[] {
+  return icons.map(({ tile, seed, overgrowth }) => ({
+    box: toDeviceBox(artBox(tile), pixelRatio, canvasHeight),
+    seed,
+    overgrowth,
+  }));
 }
 
 export type OvergrowthOverride =

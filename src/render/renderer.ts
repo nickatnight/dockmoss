@@ -4,7 +4,7 @@
 
 import type { AppGrowth, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
-import { type Scene, artBox, mostOvergrownItem, step, toDeviceBox } from "./model";
+import { type Icon, mossInstances, mossyIcons, step } from "./model";
 
 /** What `overlay.ts` passes every Dock and growth frame to. */
 export interface FrameSink {
@@ -31,40 +31,30 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let gl = options.createGl();
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
-  let latest: Scene | null = null;
-  let drawn: Scene | null = null;
+  let latest: Icon[] = [];
+  /** What the canvas shows, or null when that is unknown. */
+  let drawn: Icon[] | null = null;
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
 
   const frame = (): void => {
     frameRequested = false;
-    const scene = latest;
-    if (gl === null || scene === null) {
+    if (gl === null || step(drawn, latest).kind !== "draw") {
       return;
     }
-    const next = step(drawn, scene);
-    if (next.kind !== "draw") {
-      return;
-    }
-    if (next.changes.geometry) {
-      const canvasHeight = Math.round(size.height * size.pixelRatio);
-      gl.setBox(toDeviceBox(artBox(scene.tile), size.pixelRatio, canvasHeight));
-    }
-    if (next.changes.moss) {
-      gl.setMoss(scene.seed, scene.overgrowth);
-    }
-    gl.draw();
-    drawn = scene;
+    const canvasHeight = Math.round(size.height * size.pixelRatio);
+    gl.draw(mossInstances(latest, size.pixelRatio, canvasHeight));
+    drawn = latest;
   };
 
   const update = (): void => {
-    latest = mostOvergrownItem(items, growth, options.overgrowthOverride);
+    latest = mossyIcons(items, growth, options.overgrowthOverride);
     const next = step(drawn, latest);
     if (next.kind === "clear") {
       // At once: the window may be ordered out already, and WebKit runs no
       // frame callbacks there, so the old moss would show at the next order-in.
       gl?.clear();
-      drawn = null;
+      drawn = [];
     } else if (next.kind === "draw" && gl !== null && !frameRequested) {
       frameRequested = true;
       options.schedule(frame);

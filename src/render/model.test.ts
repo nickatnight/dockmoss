@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   CORNER_RADIUS_PER_SIDE,
+  type Icon,
   type ItemKey,
-  type Scene,
   artBox,
   glslConstants,
-  mostOvergrownItem,
   fnv1a32,
   itemKeys,
+  mossInstances,
+  mossyIcons,
   parseOvergrowthOverride,
   quantize,
   seedOffset,
@@ -25,110 +26,183 @@ function item(bundleId: string, x: number): DockItem {
   return { bundleId: bundleId as BundleId, rect: { x, ...TILE } };
 }
 
-function growth(bundleId: string, overgrowth: number): AppGrowth {
-  return { bundleId: bundleId as BundleId, overgrowth, stage: "patchy" };
+function growth(
+  bundleId: string,
+  overgrowth: number,
+  stage: AppGrowth["stage"] = "patchy",
+): AppGrowth {
+  return { bundleId: bundleId as BundleId, overgrowth, stage };
 }
 
-function scene(overrides: Partial<Scene> = {}): Scene {
+function icon(overrides: Partial<Icon> = {}): Icon {
   return {
     key: "com.hnc.Discord#0" as ItemKey,
     seed: 3244016102,
     tile: { x: 700, ...TILE },
     overgrowth: quantize(0.5),
+    overgrown: false,
     ...overrides,
   };
 }
 
-describe("mostOvergrownItem", () => {
-  it("draws the Dock item with the highest overgrowth", () => {
+describe("mossyIcons", () => {
+  it("gives every Dock item with moss an icon, in Dock order, and leaves clean items out", () => {
     const items = [
       item("com.apple.finder", 100),
       item("com.hnc.Discord", 160),
       item("com.apple.Safari", 220),
+      item("ru.keepcoder.Telegram", 280),
     ];
     const frame = [
-      growth("com.apple.finder", 0),
+      growth("com.apple.finder", 0, "clean"),
       growth("com.hnc.Discord", 0.65),
-      growth("com.apple.Safari", 0.2),
+      growth("com.apple.Safari", 0.2, "fuzz"),
+      growth("ru.keepcoder.Telegram", 1, "overgrown"),
     ];
 
-    const drawn = mostOvergrownItem(items, frame, null);
+    const icons = mossyIcons(items, frame, null);
 
-    expect(drawn?.key).toBe("com.hnc.Discord#0");
-    expect(drawn?.tile.x).toBe(160);
-    expect(drawn?.overgrowth).toBe(quantize(0.65));
+    expect(icons.map(({ key, tile, overgrowth, overgrown }) => ({ key, x: tile.x, overgrowth, overgrown }))).toEqual([
+      { key: "com.hnc.Discord#0", x: 160, overgrowth: quantize(0.65), overgrown: false },
+      { key: "com.apple.Safari#0", x: 220, overgrowth: quantize(0.2), overgrown: false },
+      { key: "ru.keepcoder.Telegram#0", x: 280, overgrowth: 1, overgrown: true },
+    ]);
   });
 
-  it("breaks a tie in favour of the first item in Dock order", () => {
-    const items = [item("com.apple.Safari", 100), item("com.hnc.Discord", 160)];
-    const frame = [
-      growth("com.apple.Safari", 0.4),
-      growth("com.hnc.Discord", 0.4),
-    ];
+  it("leaves out an item whose overgrowth rounds to 0", () => {
+    const items = [item("com.hnc.Discord", 160)];
 
-    expect(mostOvergrownItem(items, frame, null)?.key).toBe("com.apple.Safari#0");
-  });
-
-  it("treats two overgrowths within one visible step as a tie", () => {
-    const items = [item("com.apple.Safari", 100), item("com.hnc.Discord", 160)];
-    const frame = [
-      growth("com.apple.Safari", 0.5),
-      growth("com.hnc.Discord", 0.5 + 1 / 1024),
-    ];
-
-    expect(mostOvergrownItem(items, frame, null)?.key).toBe("com.apple.Safari#0");
-  });
-
-  it("draws the first item, clean, when every item is clean", () => {
-    const items = [item("com.apple.finder", 100), item("com.apple.Safari", 160)];
-    const frame = [growth("com.apple.finder", 0), growth("com.apple.Safari", 0)];
-
-    const drawn = mostOvergrownItem(items, frame, null);
-
-    expect(drawn?.key).toBe("com.apple.finder#0");
-    expect(drawn?.overgrowth).toBe(0);
+    expect(mossyIcons(items, [growth("com.hnc.Discord", 1 / 1024, "fuzz")], null)).toEqual([]);
   });
 
   it("counts an item with no growth entry yet as clean", () => {
     const items = [item("com.apple.finder", 100), item("com.hnc.Discord", 160)];
 
-    expect(mostOvergrownItem(items, [], null)?.overgrowth).toBe(0);
-    expect(
-      mostOvergrownItem(items, [growth("com.hnc.Discord", 0.2)], null)?.key,
-    ).toBe("com.hnc.Discord#0");
+    expect(mossyIcons(items, [growth("com.hnc.Discord", 0.2)], null).map(({ key }) => key)).toEqual([
+      "com.hnc.Discord#0",
+    ]);
   });
 
   it("draws nothing for an empty Dock", () => {
-    expect(mostOvergrownItem([], [growth("com.hnc.Discord", 1)], null)).toBeNull();
+    expect(mossyIcons([], [growth("com.hnc.Discord", 1)], null)).toEqual([]);
+    expect(mossyIcons([], [], 0.5)).toEqual([]);
   });
 
-  it("draws the first of two items that share the most overgrown bundle ID", () => {
+  it("gives two items for one app the app's overgrowth and a seed each", () => {
     const items = [
       item("com.apple.Safari", 100),
       item("com.microsoft.VSCode", 160),
       item("com.microsoft.VSCode", 220),
     ];
-    const frame = [
-      growth("com.apple.Safari", 0),
-      growth("com.microsoft.VSCode", 0.7),
-      growth("com.microsoft.VSCode", 0.7),
-    ];
+    const frame = [growth("com.apple.Safari", 0, "clean"), growth("com.microsoft.VSCode", 0.7)];
 
-    const drawn = mostOvergrownItem(items, frame, null);
+    const icons = mossyIcons(items, frame, null);
 
-    expect(drawn?.key).toBe("com.microsoft.VSCode#0");
-    expect(drawn?.tile.x).toBe(160);
-    expect(drawn?.seed).toBe(0x96d9fb5b);
+    expect(icons.map(({ key, seed, overgrowth }) => ({ key, seed, overgrowth }))).toEqual([
+      { key: "com.microsoft.VSCode#0", seed: 0x96d9fb5b, overgrowth: quantize(0.7) },
+      { key: "com.microsoft.VSCode#1", seed: 0x95d9f9c8, overgrowth: quantize(0.7) },
+    ]);
   });
 
-  it("gives the drawn icon the dev override's overgrowth", () => {
+  it("gives every Dock item the dev override's overgrowth, clean or not", () => {
     const items = [item("com.apple.finder", 100), item("com.hnc.Discord", 160)];
-    const frame = [growth("com.apple.finder", 0), growth("com.hnc.Discord", 0.65)];
+    const frame = [growth("com.apple.finder", 0, "clean"), growth("com.hnc.Discord", 1, "overgrown")];
 
-    const drawn = mostOvergrownItem(items, frame, 0.3);
+    const icons = mossyIcons(items, frame, 0.3);
 
-    expect(drawn?.key).toBe("com.hnc.Discord#0");
-    expect(drawn?.overgrowth).toBe(quantize(0.3));
+    expect(icons.map(({ key, overgrowth, overgrown }) => ({ key, overgrowth, overgrown }))).toEqual([
+      { key: "com.apple.finder#0", overgrowth: quantize(0.3), overgrown: false },
+      { key: "com.hnc.Discord#0", overgrowth: quantize(0.3), overgrown: false },
+    ]);
+  });
+
+  it("makes every Dock item overgrown under an override of 1", () => {
+    const items = [item("com.apple.finder", 100)];
+
+    expect(mossyIcons(items, [], 1)).toMatchObject([{ overgrowth: 1, overgrown: true }]);
+  });
+
+  it("draws nothing under an override of 0", () => {
+    const items = [item("com.hnc.Discord", 160)];
+
+    expect(mossyIcons(items, [growth("com.hnc.Discord", 1, "overgrown")], 0)).toEqual([]);
+  });
+});
+
+describe("step", () => {
+  it("draws the first scene", () => {
+    expect(step(null, [icon()])).toEqual({ kind: "draw" });
+  });
+
+  it("does nothing when the scene is unchanged", () => {
+    expect(step([icon()], [icon()])).toEqual({ kind: "none" });
+  });
+
+  it.each([{ x: 704 }, { y: 912 }, { width: 64 }, { height: 64 }])(
+    "redraws when one field of a mossy icon's tile moves: %j",
+    (moved) => {
+      const next = icon({ tile: { ...icon().tile, ...moved } });
+
+      expect(step([icon()], [next])).toEqual({ kind: "draw" });
+    },
+  );
+
+  it("redraws when a mossy icon's overgrowth moves by a visible step", () => {
+    expect(step([icon()], [icon({ overgrowth: quantize(0.5 + 1 / 256) })])).toEqual({ kind: "draw" });
+  });
+
+  it("redraws when a mossy icon becomes overgrown", () => {
+    expect(step([icon({ overgrowth: quantize(1) })], [icon({ overgrowth: quantize(1), overgrown: true })])).toEqual({
+      kind: "draw",
+    });
+  });
+
+  it("does nothing for an overgrowth change smaller than one visible step", () => {
+    const items = [item("com.hnc.Discord", 700)];
+    const before = mossyIcons(items, [growth("com.hnc.Discord", 0.5)], null);
+    const after = mossyIcons(items, [growth("com.hnc.Discord", 0.5 + 1 / 1024)], null);
+
+    expect(step(before, after)).toEqual({ kind: "none" });
+  });
+
+  it("redraws when an icon gains moss or loses it", () => {
+    const safari = icon({ key: "com.apple.Safari#0" as ItemKey, seed: 1184891789, tile: { x: 760, ...TILE } });
+
+    expect(step([icon()], [icon(), safari])).toEqual({ kind: "draw" });
+    expect(step([icon(), safari], [safari])).toEqual({ kind: "draw" });
+  });
+
+  it("draws nothing for a clean Dock whose tiles move", () => {
+    const frame = [growth("com.apple.finder", 0, "clean"), growth("com.hnc.Discord", 0, "clean")];
+    const before = mossyIcons([item("com.apple.finder", 100), item("com.hnc.Discord", 160)], frame, null);
+    const after = mossyIcons([item("com.apple.finder", 96), item("com.hnc.Discord", 152)], frame, null);
+
+    expect(step(before, after)).toEqual({ kind: "none" });
+  });
+
+  it("clears at once when the last mossy icon goes", () => {
+    expect(step([icon()], [])).toEqual({ kind: "clear" });
+  });
+
+  it("clears a canvas in an unknown state, after a resize or a restore, when nothing is mossy", () => {
+    expect(step(null, [])).toEqual({ kind: "clear" });
+  });
+
+  it("does nothing while nothing is mossy", () => {
+    expect(step([], [])).toEqual({ kind: "none" });
+  });
+});
+
+describe("mossInstances", () => {
+  it("puts each icon's art box in canvas device pixels, with its seed and overgrowth", () => {
+    const tile = { x: 711, y: 918, width: 47, height: 59 };
+    const icons = [icon({ tile, overgrowth: quantize(0.6) })];
+
+    const [instance] = mossInstances(icons, 2, 1964);
+
+    expect(instance.box).toEqual(toDeviceBox(artBox(tile), 2, 1964));
+    expect(instance.seed).toBe(3244016102);
+    expect(instance.overgrowth).toBe(quantize(0.6));
   });
 });
 
@@ -172,58 +246,6 @@ describe("quantize", () => {
     [1 / 1024, 0],
   ])("rounds %d to the nearest 1/256", (overgrowth, expected) => {
     expect(quantize(overgrowth)).toBe(expected);
-  });
-});
-
-describe("step", () => {
-  const all = { geometry: true, moss: true };
-
-  it("draws everything for the first scene", () => {
-    expect(step(null, scene())).toEqual({ kind: "draw", changes: all });
-  });
-
-  it("does nothing when the scene is unchanged", () => {
-    expect(step(scene(), scene())).toEqual({ kind: "none" });
-  });
-
-  it("updates only the geometry when the drawn icon's tile moves", () => {
-    const moved = scene({ tile: { x: 704, y: 912, width: 64, height: 64 } });
-
-    expect(step(scene(), moved)).toEqual({
-      kind: "draw",
-      changes: { geometry: true, moss: false },
-    });
-  });
-
-  it("updates only the moss when the overgrowth moves by a visible step", () => {
-    const grown = scene({ overgrowth: quantize(0.5 + 1 / 256) });
-
-    expect(step(scene(), grown)).toEqual({
-      kind: "draw",
-      changes: { geometry: false, moss: true },
-    });
-  });
-
-  it("does nothing for an overgrowth change smaller than one visible step", () => {
-    const items = [item("com.hnc.Discord", 700)];
-    const before = mostOvergrownItem(items, [growth("com.hnc.Discord", 0.5)], null);
-    const after = mostOvergrownItem(items, [growth("com.hnc.Discord", 0.5 + 1 / 1024)], null);
-
-    expect(step(before, after)).toEqual({ kind: "none" });
-  });
-
-  it("redraws everything when another icon becomes the drawn one", () => {
-    const other = scene({ key: "com.apple.Safari#0" as ItemKey, seed: 1184891789 });
-
-    expect(step(scene(), other)).toEqual({ kind: "draw", changes: all });
-  });
-
-  it("clears at once when the Dock becomes empty", () => {
-    expect(step(scene(), null)).toEqual({ kind: "clear" });
-  });
-
-  it("does nothing while the Dock stays empty", () => {
-    expect(step(null, null)).toEqual({ kind: "none" });
   });
 });
 
@@ -275,6 +297,22 @@ describe("artBox", () => {
     expect(Math.abs(box.width - art.side)).toBeLessThanOrEqual(tolerance);
     expect(Math.abs(box.x - art.x)).toBeLessThanOrEqual(tolerance);
     expect(Math.abs(box.y - art.y)).toBeLessThanOrEqual(tolerance);
+  });
+});
+
+describe("art boxes", () => {
+  // AX tile rects in points, normal and magnified over Discord (job 009's
+  // tools/ax-tiles-normal.txt and ax-tiles-magnified.txt), app tiles only.
+  it.each([
+    ["normal", [[476, 46], [523, 47], [570, 47], [617, 47], [664, 47], [711, 47]]],
+    ["magnified", [[435, 46], [482, 46], [529, 48], [578, 57], [635, 65], [701, 67], [769, 65]]],
+  ])("of adjacent %s tiles leave at least 1 pt between them", (_, tiles) => {
+    const boxes = tiles.map(([x, width]) => artBox({ x, y: 918, width, height: width + 12 }));
+
+    for (let index = 1; index < boxes.length; index++) {
+      const left = boxes[index - 1];
+      expect(boxes[index].x - (left.x + left.width)).toBeGreaterThanOrEqual(1);
+    }
   });
 });
 

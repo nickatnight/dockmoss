@@ -12,9 +12,6 @@ pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
     ScreenParametersChanged,
     OverlayOrderFailed,
-    /// The Dock process quit: clear and order out now, without waiting for
-    /// the next read to time out on it.
-    DockExited,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);

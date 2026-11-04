@@ -88,17 +88,6 @@ pub fn run() {
                 Visibility::Hidden
             };
             dock_tracker::spawn(app.handle().clone(), messages, display, shown)?;
-            let dock_exits = screen_changes.clone();
-            macos::workspace::on_app_events(
-                move |event| {
-                    if tracker::is_dock_exit(&event)
-                        && dock_exits.send(TrackerMessage::DockExited).is_err()
-                    {
-                        tracing::warn!("dock exit not passed on: the dock tracker stopped");
-                    }
-                },
-                mtm,
-            );
             macos::screen::on_screen_parameters_change(
                 move || {
                     if screen_changes
@@ -537,7 +526,7 @@ mod dock_tracker {
     use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
 
     use crate::commands::{TrackerInbox, TrackerMessage};
-    use crate::dock::{self, DockError, DockItem};
+    use crate::dock::{self, DockItem};
     use crate::geometry::Display;
     use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
     use crate::tracker::{self, Activity, PollRate, Tick, TickLog, Tracker, Visibility};
@@ -573,24 +562,17 @@ mod dock_tracker {
         let mut activity = Activity::default();
         let mut watcher = None;
         let mut rate = PollRate::Slow;
-        let mut inbox = Inbox::default();
+        let mut screen_changed = false;
         let mut deadline = Instant::now();
         loop {
             let started = Instant::now();
-            if std::mem::take(&mut inbox.screen_changed) {
+            if std::mem::take(&mut screen_changed) {
                 follow_display(app, &mut tracker);
             }
             let cursor = macos::cursor::location();
-            let read = if std::mem::take(&mut inbox.dock_exited) {
-                // The old element would only time out; the next read finds the new Dock.
-                tracing::info!("dock process exited; clearing the overlay");
-                reader.forget_dock();
-                Err(DockError::NotRunning)
-            } else {
-                gate.read(trust.current(), started, macos::ax::check_trust, || {
-                    reader.read()
-                })
-            };
+            let read = gate.read(trust.current(), started, macos::ax::check_trust, || {
+                reader.read()
+            });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
             let tick = tracker.tick(read, cursor);
             let next_rate = activity.rate(tick.rate, cursor, tick.send.is_some(), started);
@@ -600,39 +582,27 @@ mod dock_tracker {
             }
             perform(app, tick, &mut watcher);
             deadline = tracker::next_deadline(deadline, rate, Instant::now());
-            if drain_inbox_until(deadline, messages, &mut tracker, &mut watcher, &mut inbox)
-                == Drained::Early
-            {
-                deadline = Instant::now();
-            }
+            drain_inbox_until(
+                deadline,
+                messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+            );
         }
     }
 
-    /// What arrived in the inbox for the next tick to act on.
-    #[derive(Default)]
-    struct Inbox {
-        screen_changed: bool,
-        dock_exited: bool,
-    }
-
-    #[derive(Debug, PartialEq, Eq)]
-    enum Drained {
-        AtDeadline,
-        /// The Dock quit: tick now.
-        Early,
-    }
-
     /// Applies each message that arrives before `deadline`, and returns only
-    /// at `deadline`, unless the Dock quits. A burst of screen notifications
-    /// (one per frame while the Dock slides in) therefore adds no Dock reads;
-    /// it sets `screen_changed` for the next tick.
+    /// at `deadline`. A burst of screen notifications (one per frame while the
+    /// Dock slides in) therefore adds no Dock reads; it sets `screen_changed`
+    /// for the next tick.
     fn drain_inbox_until(
         deadline: Instant,
         messages: &Receiver<TrackerMessage>,
         tracker: &mut Tracker,
         watcher: &mut Option<Channel<Vec<DockItem>>>,
-        inbox: &mut Inbox,
-    ) -> Drained {
+        screen_changed: &mut bool,
+    ) {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match messages.recv_timeout(left) {
@@ -640,16 +610,12 @@ mod dock_tracker {
                     *watcher = Some(channel);
                     tracker.resend_on_next_tick();
                 }
-                Ok(TrackerMessage::ScreenParametersChanged) => inbox.screen_changed = true,
+                Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
-                Ok(TrackerMessage::DockExited) => {
-                    inbox.dock_exited = true;
-                    return Drained::Early;
-                }
-                Err(RecvTimeoutError::Timeout) => return Drained::AtDeadline,
+                Err(RecvTimeoutError::Timeout) => return,
                 Err(RecvTimeoutError::Disconnected) => {
                     std::thread::sleep(left);
-                    return Drained::AtDeadline;
+                    return;
                 }
             }
         }

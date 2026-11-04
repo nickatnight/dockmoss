@@ -2,13 +2,13 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use super::{
-    Activity, PollRate, Tick, TickLog, Tracker, Visibility, changed, dock_bounds, is_dock_exit,
-    next_deadline, poll_rate,
+    Activity, PollRate, Tick, TickLog, Tracker, Visibility, changed, dock_bounds, next_deadline,
+    poll_rate,
 };
 use crate::bundle_id::BundleId;
 use crate::dock::{DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, LogicalRect, ScreenPoint, ScreenRect};
-use crate::usage::{AppEvent, AppEventKind, DockApp, RunningApp};
+use crate::usage::DockApp;
 
 const PRIMARY_2X: Display = Display {
     physical_x: 0,
@@ -721,37 +721,6 @@ fn a_dock_that_stops_answering_or_running_clears_and_orders_out_on_that_tick() {
         assert_eq!(tick.send, Some(Vec::new()), "{error}");
         assert_eq!(tick.overlay, Some(Visibility::Hidden), "{error}");
     }
-}
-
-#[test]
-fn only_the_dock_terminating_is_a_dock_exit() {
-    let event = |kind, bundle_id: &str| AppEvent {
-        kind,
-        app: RunningApp {
-            bundle_id: Some(bundle_id.into()),
-            can_have_dock_icon: false,
-        },
-    };
-
-    assert!(is_dock_exit(&event(
-        AppEventKind::Terminated,
-        "com.apple.dock"
-    )));
-    assert!(!is_dock_exit(&event(
-        AppEventKind::Launched,
-        "com.apple.dock"
-    )));
-    assert!(!is_dock_exit(&event(
-        AppEventKind::Terminated,
-        "com.apple.Safari"
-    )));
-    assert!(!is_dock_exit(&AppEvent {
-        kind: AppEventKind::Terminated,
-        app: RunningApp {
-            bundle_id: None,
-            can_have_dock_icon: false,
-        },
-    }));
 }
 
 #[test]

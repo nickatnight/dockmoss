@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::dock::{self, DockError, DockItem, RawDockChild};
 use crate::geometry::{Display, ScreenPoint, ScreenRect};
-use crate::usage::{AppEvent, AppEventKind, DockApp};
+use crate::usage::DockApp;
 
 /// Overlay-local logical pixels a rect field must move, from the last frame
 /// sent, to count as a change.
@@ -12,7 +12,6 @@ const PROXIMITY: f64 = 150.0;
 /// `Fast` holds this long after a frame is sent, with the pointer at rest, so
 /// a magnification or reveal that is still settling is followed to the end.
 const SETTLE: Duration = Duration::from_millis(250);
-const DOCK_BUNDLE_ID: &str = "com.apple.dock";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -289,12 +288,6 @@ pub fn next_deadline(previous: Instant, rate: PollRate, now: Instant) -> Instant
         .checked_mul(intervals)
         .and_then(|ahead| previous.checked_add(ahead))
         .unwrap_or(now)
-}
-
-/// True for the workspace notification that the Dock process quit, which
-/// arrives before an AX read would time out on it.
-pub fn is_dock_exit(event: &AppEvent) -> bool {
-    event.kind == AppEventKind::Terminated && event.app.bundle_id.as_deref() == Some(DOCK_BUNDLE_ID)
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ export type ItemKey = string & { readonly __brand: "ItemKey" };
 export interface Scene {
   key: ItemKey;
   seed: number;
-  rect: LogicalRect;
+  tile: LogicalRect;
   overgrowth: number;
 }
 
@@ -59,7 +59,7 @@ export function mostOvergrownItem(
     const overgrowth = byBundleId.get(bundleId) ?? 0;
     if (best === null || overgrowth > best.overgrowth) {
       const key = keys[index];
-      best = { key, seed: fnv1a32(key), rect, overgrowth };
+      best = { key, seed: fnv1a32(key), tile: rect, overgrowth };
     }
   }
   if (best === null || overgrowthOverride === null) {
@@ -85,7 +85,7 @@ export function step(drawn: Scene | null, next: Scene | null): Step {
   if (drawn === null || drawn.key !== next.key) {
     return { kind: "draw", changes: { geometry: true, moss: true } };
   }
-  const geometry = !sameRect(drawn.rect, next.rect);
+  const geometry = !sameRect(drawn.tile, next.tile);
   const moss = drawn.overgrowth !== next.overgrowth;
   if (!geometry && !moss) {
     return { kind: "none" };

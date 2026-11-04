@@ -26,7 +26,7 @@ export function startMossRenderer(root: HTMLElement, overgrowthOverride: number 
       return;
     }
     if (next.changes.geometry) {
-      moss.setBox(toDeviceBox(artBox(scene.rect), devicePixelRatio, canvas.height));
+      moss.setBox(toDeviceBox(artBox(scene.tile), devicePixelRatio, canvas.height));
     }
     if (next.changes.moss) {
       moss.setMoss(scene.seed, scene.overgrowth);

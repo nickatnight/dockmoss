@@ -29,7 +29,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
   return {
     key: "com.hnc.Discord#0" as ItemKey,
     seed: 3244016102,
-    rect: { x: 700, ...TILE },
+    tile: { x: 700, ...TILE },
     overgrowth: 0.5,
     ...overrides,
   };
@@ -51,7 +51,7 @@ describe("mostOvergrownItem", () => {
     const drawn = mostOvergrownItem(items, frame, null);
 
     expect(drawn?.key).toBe("com.hnc.Discord#0");
-    expect(drawn?.rect.x).toBe(160);
+    expect(drawn?.tile.x).toBe(160);
     expect(drawn?.overgrowth).toBe(quantize(0.65));
   });
 
@@ -113,7 +113,7 @@ describe("mostOvergrownItem", () => {
     const drawn = mostOvergrownItem(items, frame, null);
 
     expect(drawn?.key).toBe("com.microsoft.VSCode#0");
-    expect(drawn?.rect.x).toBe(160);
+    expect(drawn?.tile.x).toBe(160);
     expect(drawn?.seed).toBe(0x96d9fb5b);
   });
 
@@ -182,8 +182,8 @@ describe("step", () => {
     expect(step(scene(), scene())).toEqual({ kind: "none" });
   });
 
-  it("updates only the geometry when the drawn icon's rect moves", () => {
-    const moved = scene({ rect: { x: 704, y: 912, width: 64, height: 64 } });
+  it("updates only the geometry when the drawn icon's tile moves", () => {
+    const moved = scene({ tile: { x: 704, y: 912, width: 64, height: 64 } });
 
     expect(step(scene(), moved)).toEqual({
       kind: "draw",

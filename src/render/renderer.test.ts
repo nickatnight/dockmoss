@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
-import type { MossInstance } from "./model";
+import { type MossInstance, SHRIVEL_MS, artBox, fnv1a32, toDeviceBox } from "./model";
 import { createRenderer } from "./renderer";
 
 type Call =
@@ -32,12 +32,18 @@ function fakeGls() {
 
 function manualScheduler() {
   let pending: ((time: number) => void)[] = [];
+  let scheduled = 0;
   return {
     schedule: (callback: (time: number) => void) => {
+      scheduled += 1;
       pending.push(callback);
     },
     get pending() {
       return pending.length;
+    },
+    /** Every schedule call so far. */
+    get scheduled() {
+      return scheduled;
     },
     runFrame(time = 0) {
       const due = pending;
@@ -255,6 +261,31 @@ describe("the sway loop", () => {
     expect(runFrames(env, 1, 61_000)[0]).toBeCloseTo(1, 6);
   });
 
+  it("draws a restarted loop's first frame at its own time, when it stopped in a frame", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.9));
+    runFrames(env, 1, 2000);
+    env.renderer.growth(patchy(0.3));
+    runFrames(env, 1, 2010);
+
+    env.renderer.growth(patchy(0.9));
+
+    expect(runFrames(env, 1, 2020)).toEqual([2.02]);
+  });
+
+  it("draws a restarted loop's first frame at its own time, when the Dock emptied between frames", () => {
+    const env = setup(true);
+    env.renderer.dock([discord]);
+    env.renderer.growth(patchy(0.9));
+    runFrames(env, 1, 2000);
+    env.renderer.dock([]);
+
+    env.renderer.dock([discord]);
+
+    expect(runFrames(env, 1, 2020)).toEqual([2.02]);
+  });
+
   it("keeps the last sway pose for a draw after the loop stops", () => {
     const env = setup(true);
     env.renderer.dock([discord]);
@@ -265,5 +296,250 @@ describe("the sway loop", () => {
     const settled = runFrames(env, 1, 3000);
 
     expect(settled).toEqual([swayed[swayed.length - 1]]);
+  });
+});
+
+describe("the shrivel", () => {
+  const chess: DockItem = {
+    bundleId: "com.apple.Chess" as BundleId,
+    rect: { x: 664, y: 918, width: 47, height: 59 },
+  };
+  const chessSeed = fnv1a32("com.apple.Chess#0");
+  const overgrownChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 1, stage: "overgrown" }];
+  const launchedChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" }];
+
+  /** Discord at 0.6 and Chess overgrown, drawn once at 500 ms. */
+  function mossyDock(sway = false) {
+    const env = setup(sway);
+    env.renderer.dock([discord, chess]);
+    env.renderer.growth(overgrownChess);
+    env.frames.runFrame(500);
+    env.calls().length = 0;
+    return env;
+  }
+
+  type Drawn = { time: number; instances: readonly MossInstance[] };
+
+  /** Runs a 60 Hz frame at `start` and every 1/60 s after it until `start + ms`, and returns each draw. */
+  function run(env: ReturnType<typeof setup>, start: number, ms: number): Drawn[] {
+    const drawnFrames: Drawn[] = [];
+    for (let index = 0; index * (1000 / 60) <= ms; index++) {
+      const time = start + index * (1000 / 60);
+      const before = env.calls().length;
+      env.frames.runFrame(time);
+      for (const call of env.calls().slice(before)) {
+        if (call.op === "draw") drawnFrames.push({ time, instances: call.instances });
+      }
+    }
+    return drawnFrames;
+  }
+
+  const chessIn = ({ instances }: Drawn) => instances.find(({ seed }) => seed === chessSeed);
+
+  /** Launches Chess and runs its shrivel from 1000 ms to 1100 ms, checking that it shows. */
+  function shrivelling(env: ReturnType<typeof setup>): void {
+    env.renderer.growth(launchedChess);
+    const drawnFrames = run(env, 1000, 100);
+    expect(chessIn(drawnFrames[drawnFrames.length - 1])?.wither).toBeGreaterThan(0);
+  }
+
+  it("starts when a growth frame zeroes a mossy icon, from the icon as last drawn", () => {
+    const env = mossyDock();
+
+    env.renderer.growth(launchedChess);
+
+    expect(env.frames.pending).toBe(1);
+    const [first] = run(env, 1000, 0);
+    expect(chessIn(first)).toMatchObject({ overgrowth: 1, wither: 0 });
+    expect(first.instances).toHaveLength(2);
+  });
+
+  it("draws at no more than 30 frames a second, withering as it goes", () => {
+    const env = mossyDock();
+    env.renderer.growth(launchedChess);
+
+    const drawnFrames = run(env, 1000, 1000);
+
+    const times = drawnFrames.map(({ time }) => time);
+    for (let index = 1; index < times.length; index++) {
+      expect(times[index] - times[index - 1]).toBeGreaterThanOrEqual(1000 / 30 - 1e-9);
+    }
+    const withers = drawnFrames.flatMap((drawn) => chessIn(drawn)?.wither ?? []);
+    expect(withers.length).toBeGreaterThan(10);
+    expect(withers[withers.length - 1]).toBe(1);
+  });
+
+  it("ends within SHRIVEL_MS with a frame that has no instance for the icon, then schedules nothing", () => {
+    const env = mossyDock();
+    env.renderer.growth(launchedChess);
+
+    const drawnFrames = run(env, 1000, 1000);
+
+    const last = drawnFrames[drawnFrames.length - 1];
+    expect(drawnFrames.length).toBeGreaterThan(10);
+    expect(last.time).toBeLessThanOrEqual(1000 + SHRIVEL_MS);
+    expect(chessIn(last)).toBeUndefined();
+    expect(last.instances.map(({ overgrowth }) => overgrowth)).toEqual([0.6015625]);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("stays idle after it ends: updates that change nothing make no schedule call", () => {
+    const env = mossyDock();
+    shrivelling(env);
+    run(env, 1100, 900);
+    const scheduled = env.frames.scheduled;
+    const ops = env.calls().length;
+
+    env.renderer.dock([discord, chess]);
+    env.renderer.growth(launchedChess);
+    env.renderer.growth(launchedChess);
+
+    expect(env.frames.scheduled).toBe(scheduled);
+    expect(env.calls().length).toBe(ops);
+  });
+
+  it("follows the icon's tile while the Dock magnifies", () => {
+    const env = mossyDock();
+    shrivelling(env);
+    const magnified = { ...chess, rect: { x: 655, y: 905, width: 66, height: 78 } };
+
+    env.renderer.dock([discord, magnified]);
+    const [next] = run(env, 1150, 0);
+
+    expect(chessIn(next)?.box).toEqual(toDeviceBox(artBox(magnified.rect), 2, 1964));
+  });
+
+  it("draws the new state, and stops, when the app has moss again", () => {
+    const env = mossyDock();
+    shrivelling(env);
+
+    env.renderer.growth([...mossy, { bundleId: chess.bundleId, overgrowth: 0.3, stage: "fuzz" }]);
+    const drawnFrames = run(env, 1150, 500);
+
+    expect(drawnFrames).toHaveLength(1);
+    expect(chessIn(drawnFrames[0])).toMatchObject({ overgrowth: 77 / 256, wither: 0 });
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("ends when the item leaves the Dock, with one clean frame", () => {
+    const env = mossyDock();
+    shrivelling(env);
+
+    env.renderer.dock([discord]);
+    const drawnFrames = run(env, 1150, 500);
+
+    expect(drawnFrames).toHaveLength(1);
+    expect(chessIn(drawnFrames[0])).toBeUndefined();
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("ends when the item that alone had moss leaves the Dock, clearing the canvas at once", () => {
+    const env = setup();
+    env.renderer.dock([chess]);
+    env.renderer.growth(overgrownChess);
+    env.frames.runFrame(500);
+    shrivelling(env);
+    env.calls().length = 0;
+
+    env.renderer.dock([{ bundleId: "com.apple.finder" as BundleId, rect: chess.rect }]);
+    run(env, 1150, 500);
+
+    expect(env.ops()).toEqual(["clear"]);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("clears at once when the Dock empties, and draws nothing after", () => {
+    const env = mossyDock();
+    shrivelling(env);
+    env.calls().length = 0;
+
+    env.renderer.dock([]);
+
+    expect(env.ops()).toEqual(["clear"]);
+    expect(run(env, 1150, 500)).toEqual([]);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("drops every shrivel on context loss, and the restore draws the clean scene once", () => {
+    const env = mossyDock();
+    shrivelling(env);
+
+    env.renderer.contextLost();
+    env.renderer.contextRestored();
+    const drawnFrames = run(env, 1150, 500);
+
+    expect(env.gls.created).toHaveLength(2);
+    expect(drawnFrames).toHaveLength(1);
+    expect(chessIn(drawnFrames[0])).toBeUndefined();
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("starts none on the first frame after a context restore", () => {
+    const env = mossyDock();
+    env.renderer.contextLost();
+    env.renderer.growth(launchedChess);
+    env.renderer.contextRestored();
+
+    const drawnFrames = run(env, 1000, 500);
+
+    expect(drawnFrames).toHaveLength(1);
+    expect(chessIn(drawnFrames[0])).toBeUndefined();
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("starts none on the first frame after load", () => {
+    const env = setup();
+    env.renderer.dock([discord, chess]);
+    env.renderer.growth(launchedChess);
+
+    const drawnFrames = run(env, 1000, 500);
+
+    expect(drawnFrames).toHaveLength(1);
+    expect(chessIn(drawnFrames[0])).toBeUndefined();
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("shrivels two icons at once in the one draw, each to its end", () => {
+    const env = mossyDock();
+
+    env.renderer.growth([
+      { bundleId: discord.bundleId, overgrowth: 0, stage: "clean" },
+      { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" },
+    ]);
+    const drawnFrames = run(env, 1000, 1000);
+
+    expect(drawnFrames[0].instances).toHaveLength(2);
+    expect(drawnFrames[5].instances.map(({ wither }) => wither > 0)).toEqual([true, true]);
+    expect(drawnFrames[drawnFrames.length - 1].instances).toEqual([]);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("shrivels both Dock items of an app pinned twice", () => {
+    const env = setup();
+    const chessAgain = { ...chess, rect: { ...chess.rect, x: 760 } };
+    env.renderer.dock([chess, chessAgain]);
+    env.renderer.growth(overgrownChess);
+    env.frames.runFrame(500);
+
+    env.renderer.growth(launchedChess);
+    const drawnFrames = run(env, 1000, 1000);
+
+    expect(drawnFrames[5].instances.map(({ seed, wither }) => ({ seed, withered: wither > 0 }))).toEqual([
+      { seed: chessSeed, withered: true },
+      { seed: fnv1a32("com.apple.Chess#1"), withered: true },
+    ]);
+    expect(drawnFrames[drawnFrames.length - 1].instances).toEqual([]);
+  });
+
+  it("does not sway the moss while it shrivels with sway off", () => {
+    const env = mossyDock(false);
+    env.renderer.growth(launchedChess);
+
+    const drawnFrames = run(env, 1000, 1000);
+
+    expect(drawnFrames.length).toBeGreaterThan(10);
+    expect(env.calls().flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []))).toEqual(
+      drawnFrames.map(() => 0),
+    );
   });
 });

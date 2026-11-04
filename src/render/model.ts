@@ -488,7 +488,8 @@ export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
 ];
 
 export const SWAY_MIN_OVERGROWTH = 0.5;
-export const SWAY_MIN_FRAME_INTERVAL_MS = 33;
+/** The time-limited frame loop (sway and shrivel) draws at most every 33 ms: 30 fps on a 60 Hz display. */
+export const LOOP_MIN_FRAME_INTERVAL_MS = 33;
 export const MOSS_SWAY_PERIOD = 3;
 export const SPRITE_SWAY_PERIOD = 2;
 /** How far a sprite's tip leans, in units of its box: 1.1 device px for the largest sprite at tile size 45. */

@@ -77,7 +77,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight);
       shrivels = shrivelling.running;
       gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight), ...shrivelling.instances], swaySeconds);
-      drawn = { icons: latest, shrivelFrame: shrivelling.instances.length > 0 };
+      drawn = { icons: latest, showsShrivel: shrivelling.instances.length > 0 };
     }
     if (loopRuns()) {
       requestFrame();
@@ -96,6 +96,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       gl?.clear();
       drawn = NOTHING_DRAWN;
     } else if (next.kind === "draw" || shrivels.size > 0) {
+      // A running shrivel always has a frame pending already; the size check states that it needs one.
       requestFrame();
     }
     if (!loopRuns()) {

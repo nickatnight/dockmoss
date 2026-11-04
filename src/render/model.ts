@@ -85,9 +85,9 @@ export type Step = { kind: "none" } | { kind: "clear" } | { kind: "draw" };
  * What the canvas shows: its static icons and whether its last frame drew a
  * shrivel, or "unknown" after a resize or a context restore.
  */
-export type Drawn = { icons: readonly MossyIcon[]; shrivelFrame: boolean } | "unknown";
+export type Drawn = { icons: readonly MossyIcon[]; showsShrivel: boolean } | "unknown";
 
-export const NOTHING_DRAWN: Drawn = { icons: [], shrivelFrame: false };
+export const NOTHING_DRAWN: Drawn = { icons: [], showsShrivel: false };
 
 /**
  * What the canvas needs to show the static icons `next` while `shrivels` run.
@@ -96,7 +96,7 @@ export const NOTHING_DRAWN: Drawn = { icons: [], shrivelFrame: false };
  */
 export function step(drawn: Drawn, next: readonly MossyIcon[], shrivels: Shrivels): Step {
   const running = shrivels.size > 0;
-  const shownIcons = drawn === "unknown" || (drawn.shrivelFrame && !running) ? null : drawn.icons;
+  const shownIcons = drawn === "unknown" || (drawn.showsShrivel && !running) ? null : drawn.icons;
   if (next.length === 0 && !running) {
     return shownIcons !== null && shownIcons.length === 0 ? { kind: "none" } : { kind: "clear" };
   }

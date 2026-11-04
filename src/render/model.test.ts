@@ -75,7 +75,7 @@ function icon(overrides: Partial<MossyIcon> = {}): MossyIcon {
 
 /** A canvas showing `icons` and no shrivel frame. */
 function shown(icons: readonly MossyIcon[]): Drawn {
-  return { icons, shrivelFrame: false };
+  return { icons, showsShrivel: false };
 }
 
 const noShrivels: Shrivels = new Map();
@@ -245,23 +245,23 @@ describe("step", () => {
   });
 
   describe("with a shrivel frame on the canvas", () => {
-    const withShrivelFrame = (icons: readonly MossyIcon[]): Drawn => ({ icons, shrivelFrame: true });
+    const showingShrivel = (icons: readonly MossyIcon[]): Drawn => ({ icons, showsShrivel: true });
     const shrivelling: Shrivels = new Map([[icon().key, { icon: icon(), startMs: 1000 }]]);
 
     it("redraws the scene once no shrivel runs", () => {
-      expect(step(withShrivelFrame([icon()]), [icon()], noShrivels)).toEqual({ kind: "draw" });
+      expect(step(showingShrivel([icon()]), [icon()], noShrivels)).toEqual({ kind: "draw" });
     });
 
     it("clears at once when no shrivel runs and nothing is mossy", () => {
-      expect(step(withShrivelFrame([]), [], noShrivels)).toEqual({ kind: "clear" });
+      expect(step(showingShrivel([]), [], noShrivels)).toEqual({ kind: "clear" });
     });
 
     it("leaves the redraws to the shrivel loop while one runs", () => {
-      expect(step(withShrivelFrame([icon()]), [icon()], shrivelling)).toEqual({ kind: "none" });
+      expect(step(showingShrivel([icon()]), [icon()], shrivelling)).toEqual({ kind: "none" });
     });
 
     it("does not clear while a shrivel runs and nothing else is mossy", () => {
-      expect(step(withShrivelFrame([]), [], shrivelling)).toEqual({ kind: "none" });
+      expect(step(showingShrivel([]), [], shrivelling)).toEqual({ kind: "none" });
     });
 
     it("draws when an icon drops out to shrivel", () => {
@@ -953,8 +953,8 @@ describe("shrivelFrame", () => {
 });
 
 describe("WITHER_TINT", () => {
-  // Withered moss is WITHER_TINT times the colour's luminance. With weights
-  // that sum to 1, the luminance of a premultiplied colour is at most its
+  // Withered moss is WITHER_TINT times the colour's luma. With weights
+  // that sum to 1, the luma of a premultiplied colour is at most its
   // alpha, so a tint no channel of which is above 1 keeps it premultiplied.
   it("keeps a withered premultiplied colour premultiplied", () => {
     const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource);

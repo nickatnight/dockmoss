@@ -316,10 +316,10 @@ describe("the shrivel", () => {
     return env;
   }
 
-  type Drawn = { time: number; instances: readonly MossInstance[] };
+  type DrawCall = { time: number; instances: readonly MossInstance[] };
 
-  function runAt60Hz(env: ReturnType<typeof setup>, start: number, ms: number): Drawn[] {
-    const drawnFrames: Drawn[] = [];
+  function runAt60Hz(env: ReturnType<typeof setup>, start: number, ms: number): DrawCall[] {
+    const drawnFrames: DrawCall[] = [];
     for (let index = 0; index * (1000 / 60) <= ms; index++) {
       const time = start + index * (1000 / 60);
       const before = env.calls().length;
@@ -331,7 +331,7 @@ describe("the shrivel", () => {
     return drawnFrames;
   }
 
-  const chessIn = ({ instances }: Drawn) => instances.find(({ seed }) => seed === chessSeed);
+  const chessIn = ({ instances }: DrawCall) => instances.find(({ seed }) => seed === chessSeed);
 
   function shrivelling(env: ReturnType<typeof setup>): void {
     env.renderer.growth(launchedChess);

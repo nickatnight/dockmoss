@@ -10,6 +10,7 @@ import {
   itemKeys,
   parseOvergrowthOverride,
   quantize,
+  seedOffset,
   step,
   toDeviceBox,
 } from "./model";
@@ -270,5 +271,15 @@ describe("artBox", () => {
     expect(Math.abs(box.width - art.side)).toBeLessThanOrEqual(tolerance);
     expect(Math.abs(box.x - art.x)).toBeLessThanOrEqual(tolerance);
     expect(Math.abs(box.y - art.y)).toBeLessThanOrEqual(tolerance);
+  });
+});
+
+describe("seedOffset", () => {
+  it.each([
+    [0, [0, 0]],
+    [0x96d9fb5b, [62.8388671875, 37.7119140625]],
+    [0xffffffff, [63.9990234375, 63.9990234375]],
+  ])("moves seed %d to its own patch of noise, from the seed's low and high halves", (seed, offset) => {
+    expect(seedOffset(seed)).toEqual(offset);
   });
 });

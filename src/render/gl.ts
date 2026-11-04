@@ -1,4 +1,4 @@
-import type { DeviceBox } from "./model";
+import { type DeviceBox, seedOffset } from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
@@ -60,7 +60,7 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       scissor = [x, y, right - x, top - y];
     },
     setMoss(seed, value) {
-      gl.uniform2f(uniforms.seed, ((seed & 0xffff) / 0x10000) * 64, ((seed >>> 16) / 0x10000) * 64);
+      gl.uniform2f(uniforms.seed, ...seedOffset(seed));
       gl.uniform1f(uniforms.overgrowth, value);
       overgrowth = value;
     },

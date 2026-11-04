@@ -18,6 +18,16 @@ export function quantize(overgrowth: number): number {
   return Math.round(overgrowth * OVERGROWTH_STEPS) / OVERGROWTH_STEPS;
 }
 
+// Noise coordinates to move each item's pattern by, at most, on each axis.
+const SEED_OFFSET_RANGE = 64;
+
+export function seedOffset(seed: number): [number, number] {
+  return [
+    ((seed & 0xffff) / 0x10000) * SEED_OFFSET_RANGE,
+    ((seed >>> 16) / 0x10000) * SEED_OFFSET_RANGE,
+  ];
+}
+
 export function itemKeys(items: readonly DockItem[]): ItemKey[] {
   const seen = new Map<BundleId, number>();
   return items.map(({ bundleId }) => {

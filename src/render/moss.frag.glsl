@@ -1,17 +1,17 @@
 #version 300 es
 precision highp float;
 
+#pragma moss_constants
+
 flat in vec4 v_box;
 flat in vec2 v_seed;
 flat in float v_overgrowth;
 flat in float v_hue;
+flat in vec4 v_sprites[MAX_SPRITES];
 
 uniform float u_sway_seconds;
-flat in vec4 v_sprites[3];
 
 out vec4 fragColor;
-
-#pragma moss_constants
 
 // Integer hash (no sin), so the pattern is the same on every GPU.
 float hash(vec2 p) {
@@ -195,7 +195,7 @@ void main() {
   vec4 moss = vec4(colour * cover + CREVICE * shadow, cover + shadow);
   if (spriteKind(v_sprites[0]) != NO_SPRITE) {
     float devicePixelInIcon = 1.0 / side;
-    for (int index = 0; index < 3; index++) {
+    for (int index = 0; index < MAX_SPRITES; index++) {
       vec4 drawn = spriteColour(v_sprites[index], uv, devicePixelInIcon, grain);
       moss = drawn + moss * (1.0 - drawn.a);
     }

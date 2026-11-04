@@ -241,7 +241,7 @@ export function glslConstants(): string {
     ...Object.entries(vec2s).map(
       ([name, [x, y]]) => `const vec2 ${name} = vec2(${glslFloat(x)}, ${glslFloat(y)});`,
     ),
-    ...Object.entries({ FBM_OCTAVES, NO_SPRITE, MUSHROOM, FLOWER }).map(
+    ...Object.entries({ FBM_OCTAVES, MAX_SPRITES, NO_SPRITE, MUSHROOM, FLOWER }).map(
       ([name, value]) => `const int ${name} = ${value};`,
     ),
   ].join("\n");
@@ -336,7 +336,10 @@ export function mossInstances(
 const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: MUSHROOM, flower: FLOWER };
 
 function spriteValues(sprite: Sprite | undefined): number[] {
-  return sprite === undefined ? [0, 0, 0, NO_SPRITE] : [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
+  if (sprite === undefined) {
+    return [0, 0, 0, NO_SPRITE];
+  }
+  return [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
 }
 
 export interface InstanceAttribute {

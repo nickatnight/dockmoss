@@ -1,14 +1,16 @@
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::bundle_id::BundleId;
 use crate::geometry::{Display, LogicalRect, ScreenRect, to_overlay_local};
-use crate::tracker::PollRate;
 use crate::trust::Trust;
 
 const APPLICATION_SUBROLE: &str = "AXApplicationDockItem";
+/// A latched gate re-checks trust at most this often: the tracker's `Slow`
+/// interval, so a revoked grant costs one query per slow poll.
+const RECHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DockError {
@@ -82,9 +84,9 @@ impl ReadGate {
                 return Err(DockError::ApiDisabled);
             }
             Trust::Trusted if self.revoked => {
-                let due = self.last_recheck.is_none_or(|last| {
-                    now.saturating_duration_since(last) >= PollRate::Slow.interval()
-                });
+                let due = self
+                    .last_recheck
+                    .is_none_or(|last| now.saturating_duration_since(last) >= RECHECK_INTERVAL);
                 if !due {
                     return Err(DockError::ApiDisabled);
                 }

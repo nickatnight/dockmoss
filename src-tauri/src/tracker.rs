@@ -12,6 +12,13 @@ const PROXIMITY: f64 = 150.0;
 /// Long enough to follow a magnification or reveal that is still settling.
 const FAST_AFTER_SEND: Duration = Duration::from_millis(250);
 const REST_POINTER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+/// With the Dock hidden, a pointer this close to the bottom edge may be
+/// waiting for it to slide in.
+const REVEAL_EDGE: f64 = 4.0;
+/// `Fast` holds this long for a pointer resting at that edge: longer than the
+/// Dock's default auto-hide delay, after which its slide sends frames. Bounded,
+/// so a pointer parked over a hidden Dock goes back to `Slow`.
+const REVEAL_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -52,6 +59,8 @@ pub struct Tick {
     /// report, so growth keeps the last known apps.
     pub apps: Option<Vec<DockApp>>,
     pub proximity_rate: PollRate,
+    /// The Dock is hidden and the pointer is at the edge it slides in from.
+    pub awaits_reveal: bool,
 }
 
 pub struct Tracker {
@@ -128,6 +137,7 @@ impl Tracker {
             overlay,
             apps,
             proximity_rate: poll_rate(cursor, bounds, self.display),
+            awaits_reveal: awaits_reveal(cursor, bounds, self.display),
         }
     }
 
@@ -215,9 +225,19 @@ pub fn poll_rate(
     let frame = display.frame();
     let near = match dock_bounds.filter(|bounds| overlaps(*bounds, frame)) {
         Some(bounds) => distance(cursor, bounds) <= PROXIMITY,
-        None => near_bottom_edge(cursor, frame),
+        None => near_bottom_edge(cursor, frame, PROXIMITY),
     };
     if near { PollRate::Fast } else { PollRate::Slow }
+}
+
+pub fn awaits_reveal(
+    cursor: Option<ScreenPoint>,
+    dock_bounds: Option<ScreenRect>,
+    display: Display,
+) -> bool {
+    let frame = display.frame();
+    let hidden = !dock_bounds.is_some_and(|bounds| overlaps(bounds, frame));
+    hidden && cursor.is_some_and(|cursor| near_bottom_edge(cursor, frame, REVEAL_EDGE))
 }
 
 fn overlaps(a: ScreenRect, b: ScreenRect) -> bool {
@@ -234,17 +254,19 @@ fn distance(point: ScreenPoint, rect: ScreenRect) -> f64 {
     dx.hypot(dy)
 }
 
-fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect) -> bool {
+fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect, reach: f64) -> bool {
     let bottom = frame.y + frame.height;
     (frame.x..=frame.x + frame.width).contains(&point.x)
-        && (bottom - PROXIMITY..=bottom).contains(&point.y)
+        && (bottom - reach..=bottom).contains(&point.y)
 }
 
 /// Keeps the poll at `Fast` only while something there moves: the pointer
-/// moved since the last tick, or a frame was sent within `FAST_AFTER_SEND`.
+/// moved since the last tick, a frame was sent within `FAST_AFTER_SEND`, or
+/// the pointer moved within `REVEAL_WAIT` and waits at a hidden Dock's edge.
 #[derive(Debug, Default)]
 pub struct Activity {
     last_cursor: Option<ScreenPoint>,
+    last_moved: Option<Instant>,
     last_sent: Option<Instant>,
     resting: bool,
 }
@@ -253,6 +275,7 @@ impl Activity {
     pub fn rate(
         &mut self,
         proximity_rate: PollRate,
+        awaits_reveal: bool,
         cursor: Option<ScreenPoint>,
         sent: bool,
         now: Instant,
@@ -262,11 +285,16 @@ impl Activity {
         }
         let moved = cursor != self.last_cursor;
         self.last_cursor = cursor;
-        let settling = self
-            .last_sent
-            .is_some_and(|sent| now.saturating_duration_since(sent) <= FAST_AFTER_SEND);
+        if moved {
+            self.last_moved = Some(now);
+        }
+        let within = |since: Option<Instant>, window: Duration| {
+            since.is_some_and(|since| now.saturating_duration_since(since) <= window)
+        };
+        let settling = within(self.last_sent, FAST_AFTER_SEND);
+        let revealing = awaits_reveal && within(self.last_moved, REVEAL_WAIT);
         let near = proximity_rate == PollRate::Fast;
-        let moving = moved || settling;
+        let moving = moved || settling || revealing;
         self.resting = near && !moving;
         if near && moving {
             PollRate::Fast

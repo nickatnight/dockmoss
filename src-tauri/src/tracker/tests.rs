@@ -359,10 +359,10 @@ fn tick_reports_the_rate_for_the_cursor_and_the_read() {
     let failed_near_bottom =
         tracker.tick(Err(DockError::CannotComplete), Some(point(720.0, 900.0)));
 
-    assert_eq!(near.rate, PollRate::Fast, "near the Dock");
-    assert_eq!(far.rate, PollRate::Slow, "away from the Dock");
+    assert_eq!(near.proximity_rate, PollRate::Fast, "near the Dock");
+    assert_eq!(far.proximity_rate, PollRate::Slow, "away from the Dock");
     assert_eq!(
-        failed_near_bottom.rate,
+        failed_near_bottom.proximity_rate,
         PollRate::Fast,
         "failed read, near the bottom edge"
     );

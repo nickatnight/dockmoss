@@ -9,8 +9,8 @@ use crate::usage::DockApp;
 const MIN_RECT_CHANGE_PX: f64 = 0.5;
 /// The cursor polls fast within this many points of the Dock.
 const PROXIMITY: f64 = 150.0;
-const SETTLE: Duration = Duration::from_millis(250);
-const REST_CHECK: Duration = Duration::from_millis(100);
+const FAST_AFTER_SEND: Duration = Duration::from_millis(250);
+const REST_POINTER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -50,7 +50,7 @@ pub struct Tick {
     /// non-empty frame did. Empty frames (Dock hidden or unreadable) never
     /// report, so growth keeps the last known apps.
     pub apps: Option<Vec<DockApp>>,
-    pub rate: PollRate,
+    pub proximity_rate: PollRate,
 }
 
 pub struct Tracker {
@@ -126,7 +126,7 @@ impl Tracker {
             log,
             overlay,
             apps,
-            rate: poll_rate(cursor, bounds, self.display),
+            proximity_rate: poll_rate(cursor, bounds, self.display),
         }
     }
 
@@ -240,7 +240,7 @@ fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect) -> bool {
 }
 
 /// Keeps the poll at `Fast` only while something there moves: the pointer
-/// moved since the last tick, or a frame was sent within `SETTLE`.
+/// moved since the last tick, or a frame was sent within `FAST_AFTER_SEND`.
 #[derive(Debug, Default)]
 pub struct Activity {
     last_cursor: Option<ScreenPoint>,
@@ -251,7 +251,7 @@ pub struct Activity {
 impl Activity {
     pub fn rate(
         &mut self,
-        near: PollRate,
+        proximity_rate: PollRate,
         cursor: Option<ScreenPoint>,
         sent: bool,
         now: Instant,
@@ -263,10 +263,10 @@ impl Activity {
         self.last_cursor = cursor;
         let settling = self
             .last_sent
-            .is_some_and(|sent| now.saturating_duration_since(sent) <= SETTLE);
+            .is_some_and(|sent| now.saturating_duration_since(sent) <= FAST_AFTER_SEND);
         let moving = moved || settling;
-        self.resting = near == PollRate::Fast && !moving;
-        if near == PollRate::Fast && moving {
+        self.resting = proximity_rate == PollRate::Fast && !moving;
+        if proximity_rate == PollRate::Fast && moving {
             PollRate::Fast
         } else {
             PollRate::Slow
@@ -276,7 +276,7 @@ impl Activity {
     /// Waits, through `wait_until`, for the next Dock read, and returns the
     /// instant it became due: `read_due`, or sooner if the pointer rests in
     /// the band and moves. While it rests there, the pointer alone is checked
-    /// every `REST_CHECK`, with no Dock read.
+    /// every `REST_POINTER_CHECK_INTERVAL`, with no Dock read.
     pub fn wait_for_read(
         &self,
         read_due: Instant,
@@ -286,7 +286,7 @@ impl Activity {
     ) -> Instant {
         let mut checked = now;
         while self.resting
-            && let Some(check) = checked.checked_add(REST_CHECK)
+            && let Some(check) = checked.checked_add(REST_POINTER_CHECK_INTERVAL)
             && check < read_due
         {
             wait_until(check);

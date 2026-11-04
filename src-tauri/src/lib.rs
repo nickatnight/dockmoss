@@ -575,7 +575,8 @@ mod dock_tracker {
             });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
             let tick = tracker.tick(read, cursor);
-            let next_rate = activity.rate(tick.rate, cursor, tick.send.is_some(), started);
+            let next_rate =
+                activity.rate(tick.proximity_rate, cursor, tick.send.is_some(), started);
             if next_rate != rate {
                 tracing::debug!(rate = ?next_rate, "dock poll rate changed");
                 rate = next_rate;

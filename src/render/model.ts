@@ -4,11 +4,14 @@ export type ItemKey = string & { readonly __brand: "ItemKey" };
 
 export type QuantizedOvergrowth = number & { readonly __brand: "QuantizedOvergrowth" };
 
+/** A quantized overgrowth above 0: the only kind that gets moss. */
+export type MossOvergrowth = QuantizedOvergrowth & { readonly __mossy: true };
+
 export interface MossyIcon {
   key: ItemKey;
   seed: number;
   tile: LogicalRect;
-  overgrowth: QuantizedOvergrowth;
+  overgrowth: MossOvergrowth;
   overgrown: boolean;
 }
 
@@ -16,6 +19,11 @@ const OVERGROWTH_STEPS = 256;
 
 export function quantize(overgrowth: number): QuantizedOvergrowth {
   return (Math.round(overgrowth * OVERGROWTH_STEPS) / OVERGROWTH_STEPS) as QuantizedOvergrowth;
+}
+
+export function mossOvergrowth(overgrowth: number): MossOvergrowth | null {
+  const quantized = quantize(overgrowth);
+  return quantized > 0 ? (quantized as MossOvergrowth) : null;
 }
 
 // Noise coordinates to move each item's pattern by, at most, on each axis.
@@ -60,8 +68,8 @@ export function mossyIcons(
   const keys = itemKeys(items);
   return items.flatMap(({ bundleId, rect }, index) => {
     const app = byBundleId.get(bundleId);
-    const overgrowth = quantize(overgrowthOverride ?? app?.overgrowth ?? 0);
-    if (overgrowth <= 0) {
+    const overgrowth = mossOvergrowth(overgrowthOverride ?? app?.overgrowth ?? 0);
+    if (overgrowth === null) {
       return [];
     }
     const overgrown =
@@ -302,7 +310,7 @@ export function mossHue(seed: number): number {
 export interface MossInstance {
   box: DeviceBox;
   seed: number;
-  overgrowth: QuantizedOvergrowth;
+  overgrowth: MossOvergrowth;
   hue: number;
   sprites: readonly Sprite[];
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   CORNER_RADIUS_PER_SIDE,
+  type MossOvergrowth,
   type MossyIcon,
   type ItemKey,
   artBox,
@@ -14,6 +15,7 @@ import {
   mossyIcons,
   parseOvergrowthOverride,
   parseSwayFlag,
+  mossOvergrowth,
   quantize,
   seedOffset,
   spritesFor,
@@ -37,12 +39,20 @@ function growth(
   return { bundleId: bundleId as BundleId, overgrowth, stage };
 }
 
+function mossy(overgrowth: number): MossOvergrowth {
+  const value = mossOvergrowth(overgrowth);
+  if (value === null) {
+    throw new Error(`no moss at overgrowth ${overgrowth}`);
+  }
+  return value;
+}
+
 function icon(overrides: Partial<MossyIcon> = {}): MossyIcon {
   return {
     key: "com.hnc.Discord#0" as ItemKey,
     seed: 3244016102,
     tile: { x: 700, ...TILE },
-    overgrowth: quantize(0.5),
+    overgrowth: mossy(0.5),
     overgrown: false,
     ...overrides,
   };
@@ -151,11 +161,11 @@ describe("step", () => {
   );
 
   it("redraws when a mossy icon's overgrowth moves by a visible step", () => {
-    expect(step([icon()], [icon({ overgrowth: quantize(0.5 + 1 / 256) })])).toEqual({ kind: "draw" });
+    expect(step([icon()], [icon({ overgrowth: mossy(0.5 + 1 / 256) })])).toEqual({ kind: "draw" });
   });
 
   it("redraws when a mossy icon becomes overgrown", () => {
-    expect(step([icon({ overgrowth: quantize(1) })], [icon({ overgrowth: quantize(1), overgrown: true })])).toEqual({
+    expect(step([icon({ overgrowth: mossy(1) })], [icon({ overgrowth: mossy(1), overgrown: true })])).toEqual({
       kind: "draw",
     });
   });
@@ -199,7 +209,7 @@ describe("step", () => {
 describe("mossInstances", () => {
   it("gives an overgrown icon its sprites, and any other icon none", () => {
     const [overgrown, patchy] = mossInstances(
-      [icon({ overgrowth: quantize(1), overgrown: true }), icon({ overgrowth: quantize(0.9) })],
+      [icon({ overgrowth: mossy(1), overgrown: true }), icon({ overgrowth: mossy(0.9) })],
       2,
       1964,
     );
@@ -211,7 +221,7 @@ describe("mossInstances", () => {
 
   it("puts each icon's art box in canvas device pixels, with its seed and overgrowth", () => {
     const tile = { x: 711, y: 918, width: 47, height: 59 };
-    const icons = [icon({ tile, overgrowth: quantize(0.6) })];
+    const icons = [icon({ tile, overgrowth: mossy(0.6) })];
 
     const [instance] = mossInstances(icons, 2, 1964);
 
@@ -249,6 +259,18 @@ describe("fnv1a32", () => {
     ["é#0", 0x5d848442],
   ])("hashes the UTF-8 bytes of %j to the golden value", (text, expected) => {
     expect(fnv1a32(text)).toBe(expected);
+  });
+});
+
+describe("mossOvergrowth", () => {
+  it.each([
+    [0, null],
+    [1 / 1024, null],
+    [1 / 256, 1 / 256],
+    [0.6, quantize(0.6)],
+    [1, 1],
+  ])("of %d is %s", (overgrowth, expected) => {
+    expect(mossOvergrowth(overgrowth)).toBe(expected);
   });
 });
 

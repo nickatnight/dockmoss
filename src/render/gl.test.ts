@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { INSTANCE_ATTRIBUTES } from "./gl";
-import { type MossInstance, quantize } from "./model";
+import { type MossInstance, type MossOvergrowth, quantize } from "./model";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const GLSL_SIZES: Record<string, number> = { float: 1, vec2: 2, vec3: 3, vec4: 4 };
@@ -8,7 +8,7 @@ const GLSL_SIZES: Record<string, number> = { float: 1, vec2: 2, vec3: 3, vec4: 4
 const instance: MossInstance = {
   box: { x: 10, y: 20, width: 74, height: 74 },
   seed: 0x12345678,
-  overgrowth: quantize(0.6),
+  overgrowth: quantize(0.6) as MossOvergrowth,
   hue: -0.5,
   sprites: [{ kind: "flower", x: 0.4, y: 0.2, size: 0.15 }],
 };

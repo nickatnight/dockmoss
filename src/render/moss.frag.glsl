@@ -111,7 +111,6 @@ vec3 mossColour(vec2 p, float grain, float side, float hue) {
   return colour;
 }
 
-// Rec. 709 weights. Linear in colour, so a premultiplied colour keeps its alpha.
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 const float CONTACT_SHADOW_STRENGTH = 0.18;
@@ -203,7 +202,6 @@ void main() {
       moss = drawn + moss * (1.0 - drawn.a);
     }
   }
-  // A shrivel browns the moss and its sprites: their own luminance in a dry brown.
   moss.rgb = mix(moss.rgb, WITHER_TINT * dot(moss.rgb, LUMA), v_wither);
   fragColor = moss * clip;
 }

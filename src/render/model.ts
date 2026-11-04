@@ -338,17 +338,10 @@ export function mossInstances(
   }));
 }
 
-/** How long an icon's moss takes to shrivel away, from its first shrivel frame. */
 export const SHRIVEL_MS = 600;
-/** The progress by which the moss has browned all the way, so it withers before most of it recedes. */
 export const SHRIVEL_WITHER_END = 0.4;
-/**
- * Withered moss is its own luminance times this dry brown. No channel is above
- * 1, so a premultiplied colour stays premultiplied.
- */
 export const WITHER_TINT = [1, 0.74, 0.42] as const;
 
-/** An icon whose moss is shrivelling away because its app went clean. */
 export interface Shrivel {
   /** The icon as the canvas last drew it, at its item's tile now. */
   icon: MossyIcon;
@@ -405,7 +398,6 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** A sprite at `remaining` of its size, standing on the same foot. */
 function shrunk(sprite: Sprite, remaining: number): Sprite {
   return { ...sprite, y: sprite.y - (sprite.size * (1 - remaining)) / 2, size: sprite.size * remaining };
 }
@@ -488,7 +480,6 @@ export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
 ];
 
 export const SWAY_MIN_OVERGROWTH = 0.5;
-/** The time-limited frame loop (sway and shrivel) draws at most every 33 ms: 30 fps on a 60 Hz display. */
 export const LOOP_MIN_FRAME_INTERVAL_MS = 33;
 export const MOSS_SWAY_PERIOD = 3;
 export const SPRITE_SWAY_PERIOD = 2;

@@ -42,7 +42,6 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let latest: MossyIcon[] = [];
   let drawn: Drawn = "unknown";
   let shrivels: Shrivels = new Map();
-  // The canvas shows a shrivel frame, which `drawn` does not describe.
   let shrivelDrawn = false;
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
@@ -104,7 +103,6 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       requestFrame();
     }
     if (!loopRuns()) {
-      // A loop that starts again draws on its first frame.
       lastLoopFrameMs = null;
     }
   };

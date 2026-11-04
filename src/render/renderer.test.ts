@@ -41,7 +41,6 @@ function manualScheduler() {
     get pending() {
       return pending.length;
     },
-    /** Every schedule call so far. */
     get scheduled() {
       return scheduled;
     },
@@ -308,7 +307,6 @@ describe("the shrivel", () => {
   const overgrownChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 1, stage: "overgrown" }];
   const launchedChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" }];
 
-  /** Discord at 0.6 and Chess overgrown, drawn once at 500 ms. */
   function mossyDock(sway = false) {
     const env = setup(sway);
     env.renderer.dock([discord, chess]);
@@ -320,7 +318,6 @@ describe("the shrivel", () => {
 
   type Drawn = { time: number; instances: readonly MossInstance[] };
 
-  /** Runs a 60 Hz frame at `start` and every 1/60 s after it until `start + ms`, and returns each draw. */
   function run(env: ReturnType<typeof setup>, start: number, ms: number): Drawn[] {
     const drawnFrames: Drawn[] = [];
     for (let index = 0; index * (1000 / 60) <= ms; index++) {
@@ -336,7 +333,6 @@ describe("the shrivel", () => {
 
   const chessIn = ({ instances }: Drawn) => instances.find(({ seed }) => seed === chessSeed);
 
-  /** Launches Chess and runs its shrivel from 1000 ms to 1100 ms, checking that it shows. */
   function shrivelling(env: ReturnType<typeof setup>): void {
     env.renderer.growth(launchedChess);
     const drawnFrames = run(env, 1000, 100);

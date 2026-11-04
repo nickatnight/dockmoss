@@ -524,7 +524,6 @@ describe("glslConstants", () => {
   });
 });
 
-/** Signed distance from the icon's rounded-rect clip, in MossyIcon space: negative inside. */
 function clipDistance(x: number, y: number): number {
   const r = CORNER_RADIUS_PER_SIDE;
   const qx = Math.abs(x - 0.5) - 0.5 + r;
@@ -532,7 +531,6 @@ function clipDistance(x: number, y: number): number {
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-/** A sprite box's corners, its tip leaning either way by up to SPRITE_TIP_LEAN of the box. */
 function leanedCorners({ x, y, size }: Sprite): [number, number][] {
   const half = size / 2;
   const lean = SPRITE_TIP_LEAN * size;
@@ -717,7 +715,6 @@ describe("shrivelsAfter", () => {
     const running = new Map([[drawnChess.key, { icon: drawnChess, startMs: 1000 }]]);
 
     function after(items: DockItem[], frame: AppGrowth[]): Shrivel[] {
-      // The canvas last drew the scene without Chess, as the loop does once Chess shrivels.
       const drawn = mossyIcons(items, cleanChess, null);
       return [...shrivelsAfter(running, drawn, items, frame, mossyIcons(items, frame, null)).values()];
     }

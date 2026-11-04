@@ -1,6 +1,7 @@
 import type { AppGrowth, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
 import {
+  type Drawn,
   type MossyIcon,
   SWAY_CYCLE_SECONDS,
   SWAY_MIN_FRAME_INTERVAL_MS,
@@ -36,7 +37,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
   let latest: MossyIcon[] = [];
-  let drawn: MossyIcon[] | null = null;
+  let drawn: Drawn = "unknown";
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
   let lastSwayFrameMs: number | null = null;
@@ -92,7 +93,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   const resize = (width: number, height: number, pixelRatio: number): void => {
     size = { width, height, pixelRatio };
     gl?.resize(Math.round(width * pixelRatio), Math.round(height * pixelRatio));
-    drawn = null;
+    drawn = "unknown";
     update();
   };
 
@@ -108,7 +109,7 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     resize,
     contextLost() {
       gl = null;
-      drawn = null;
+      drawn = "unknown";
     },
     contextRestored() {
       gl = options.createGl();

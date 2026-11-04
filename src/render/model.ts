@@ -82,14 +82,16 @@ export function mossyIcons(
 export type Step = { kind: "none" } | { kind: "clear" } | { kind: "draw" };
 
 /**
- * `drawn` is what the canvas shows: null when that is unknown (after a
- * resize or a context restore), and empty when it shows nothing.
+ * What the canvas shows: its icons, none when it is empty, or "unknown"
+ * after a resize or a context restore.
  */
-export function step(drawn: readonly MossyIcon[] | null, next: readonly MossyIcon[]): Step {
+export type Drawn = readonly MossyIcon[] | "unknown";
+
+export function step(drawn: Drawn, next: readonly MossyIcon[]): Step {
   if (next.length === 0) {
-    return drawn !== null && drawn.length === 0 ? { kind: "none" } : { kind: "clear" };
+    return drawn !== "unknown" && drawn.length === 0 ? { kind: "none" } : { kind: "clear" };
   }
-  if (drawn !== null && sameIcons(drawn, next)) {
+  if (drawn !== "unknown" && sameIcons(drawn, next)) {
     return { kind: "none" };
   }
   return { kind: "draw" };

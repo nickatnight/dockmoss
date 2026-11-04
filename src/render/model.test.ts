@@ -144,7 +144,7 @@ describe("mossyIcons", () => {
 
 describe("step", () => {
   it("draws the first scene", () => {
-    expect(step(null, [icon()])).toEqual({ kind: "draw" });
+    expect(step("unknown", [icon()])).toEqual({ kind: "draw" });
   });
 
   it("does nothing when the scene is unchanged", () => {
@@ -198,7 +198,7 @@ describe("step", () => {
   });
 
   it("clears a canvas in an unknown state, after a resize or a restore, when nothing is mossy", () => {
-    expect(step(null, [])).toEqual({ kind: "clear" });
+    expect(step("unknown", [])).toEqual({ kind: "clear" });
   });
 
   it("does nothing while nothing is mossy", () => {

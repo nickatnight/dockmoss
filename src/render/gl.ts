@@ -4,14 +4,33 @@ import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
 
-const BOX_LOCATION = 0;
-const MOSS_LOCATION = 1;
-const FIRST_SPRITE_LOCATION = 2;
-const FLOATS_PER_SPRITE = 4;
-const FLOATS_BEFORE_SPRITES = 8;
-const FLOATS_PER_INSTANCE = FLOATS_BEFORE_SPRITES + MAX_SPRITES * FLOATS_PER_SPRITE;
-const BYTES_PER_FLOAT = 4;
 const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: 1, flower: 2 };
+
+function spriteValues(sprite: Sprite | undefined): number[] {
+  return sprite === undefined ? [0, 0, 0, 0] : [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
+}
+
+export interface InstanceAttribute {
+  name: string;
+  size: number;
+  values(instance: MossInstance): readonly number[];
+}
+
+/** One instance's attributes in buffer order, each an `in` of moss.vert.glsl. */
+export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
+  { name: "a_box", size: 4, values: ({ box }) => [box.x, box.y, box.width, box.height] },
+  { name: "a_seed", size: 2, values: ({ seed }) => seedOffset(seed) },
+  { name: "a_overgrowth", size: 1, values: ({ overgrowth }) => [overgrowth] },
+  { name: "a_hue", size: 1, values: ({ hue }) => [hue] },
+  ...Array.from({ length: MAX_SPRITES }, (_, slot) => ({
+    name: `a_sprite${slot}`,
+    size: 4,
+    values: ({ sprites }: MossInstance) => spriteValues(sprites[slot]),
+  })),
+];
+
+const FLOATS_PER_INSTANCE = INSTANCE_ATTRIBUTES.reduce((sum, { size }) => sum + size, 0);
+const BYTES_PER_FLOAT = 4;
 
 export interface MossGl {
   /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
@@ -48,18 +67,15 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   gl.bindVertexArray(gl.createVertexArray());
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   const stride = FLOATS_PER_INSTANCE * BYTES_PER_FLOAT;
-  gl.enableVertexAttribArray(BOX_LOCATION);
-  gl.vertexAttribPointer(BOX_LOCATION, 4, gl.FLOAT, false, stride, 0);
-  gl.vertexAttribDivisor(BOX_LOCATION, 1);
-  gl.enableVertexAttribArray(MOSS_LOCATION);
-  gl.vertexAttribPointer(MOSS_LOCATION, 4, gl.FLOAT, false, stride, 4 * BYTES_PER_FLOAT);
-  gl.vertexAttribDivisor(MOSS_LOCATION, 1);
-  for (let index = 0; index < MAX_SPRITES; index++) {
-    const location = FIRST_SPRITE_LOCATION + index;
-    const offset = (FLOATS_BEFORE_SPRITES + index * FLOATS_PER_SPRITE) * BYTES_PER_FLOAT;
-    gl.enableVertexAttribArray(location);
-    gl.vertexAttribPointer(location, FLOATS_PER_SPRITE, gl.FLOAT, false, stride, offset);
-    gl.vertexAttribDivisor(location, 1);
+  let offset = 0;
+  for (const { name, size } of INSTANCE_ATTRIBUTES) {
+    const location = gl.getAttribLocation(program, name);
+    if (location >= 0) {
+      gl.enableVertexAttribArray(location);
+      gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, offset * BYTES_PER_FLOAT);
+      gl.vertexAttribDivisor(location, 1);
+    }
+    offset += size;
   }
   let data = new Float32Array(0);
 
@@ -85,14 +101,13 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       if (data.length < length) {
         data = new Float32Array(length);
       }
-      data.fill(0, 0, length);
-      instances.forEach(({ box, seed, overgrowth, hue, sprites }, index) => {
-        const start = index * FLOATS_PER_INSTANCE;
-        data.set([box.x, box.y, box.width, box.height, ...seedOffset(seed), overgrowth, hue], start);
-        sprites.slice(0, MAX_SPRITES).forEach(({ x, y, size, kind }, slot) => {
-          data.set([x, y, size, SPRITE_KINDS[kind]], start + FLOATS_BEFORE_SPRITES + slot * FLOATS_PER_SPRITE);
-        });
-      });
+      let offset = 0;
+      for (const instance of instances) {
+        for (const { size, values } of INSTANCE_ATTRIBUTES) {
+          data.set(values(instance), offset);
+          offset += size;
+        }
+      }
       gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, length), gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, instances.length);
     },

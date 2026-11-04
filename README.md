@@ -4,15 +4,25 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 8 of 13 (Spotlight seed and growth per icon). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
+MVP slice 9 of 13 (moss on one icon). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Quit DockMoss alone.
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden), and at 2 Hz otherwise;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 
-The overlay draws a 1 px debug outline around each application icon, alternating magenta and cyan; folders, Trash and separators get none. The outlines follow magnification, auto-hide and Dock restarts. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
+The overlay draws moss on one Dock icon: the app with the highest overgrowth, the first in Dock order on a tie. Overgrowth 0 draws nothing. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower 70% of the icon. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes. Two Dock items for one app get the same overgrowth and their own moss pattern, which is the same on every run. Slice 10 draws every icon. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
 
-Each outlined icon carries a debug label with the app's overgrowth (0.00 to 1.00) and stage, for example `0.66 patchy`. Every second label sits one line higher, so neighbouring labels don't cover each other at the default Dock size. While the Dock is magnified, labels near the pointer can still overlap. The labels sit above macOS's own Dock tooltip (the app name that appears on hover) and can hide part of it; that is expected, because the overlay window is above the Dock. There is no moss yet: slice 9 draws it from the same numbers.
+The overlay is hidden from VoiceOver (`aria-hidden`).
+
+### Debug layer (dev builds)
+
+`pnpm tauri dev` also outlines each application icon, alternating magenta and cyan, and labels it with the app's overgrowth (0.00 to 1.00) over its stage, for example `0.66` over `patchy`. Every second label sits one label higher, so neighbouring labels don't cover each other at the default Dock size. While the Dock is magnified, labels near the pointer can still overlap. The labels sit above macOS's own Dock tooltip and can hide part of it. If the overlay's `watch_dock` or `watch_growth` call is rejected, a 2 pt red bar runs along the bottom of the screen. `pnpm build` leaves all of this out.
+
+To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. The drawn icon (still picked by real growth) then uses that value. Any other value is ignored with a console warning.
+
+```sh
+VITE_DOCKMOSS_OVERGROWTH=0.6 pnpm tauri dev
+```
 
 Growth comes from DockMoss's own launch log, a Spotlight seed taken once at the first run, and a first-seen time for apps with neither (see "Launch log" below; the rules are in SUMMARY.md, "Last-used data" and "Growth curve"). The usage thread recomputes it after every launch, activation, quit and Dock change, and every 5 minutes, and sends it to the overlay over the `watch_growth` channel only when it changes. A running app is always clean.
 
@@ -71,7 +81,7 @@ DockMoss records the last time each app was used in `~/Library/Application Suppo
   ```
 
   `last_launched` is the last launch, activation or quit. `spotlight_seed` holds the Spotlight last-used dates kept at the first run. `first_seen` holds the time DockMoss first listed an app that had no launch and no seed. `baseline_at` is when the first run happened. A file written before slice 8, without the two new maps and with `baseline_at: null`, still loads, and the next Dock read runs the first run.
-- **First run.** The first time DockMoss reads a Dock that lists apps, it runs `mdls -name kMDItemLastUsedDate` once per distinct Dock app, so an app pinned twice is read once. A date later than now is ignored. If 5 or more apps have dates within 5 seconds of each other (an OS update or migration re-stamped them), every Spotlight date is thrown out. Startup then logs `first run: dock apps seeded and baselined` with the number of distinct Dock apps, dates read and seeds kept, and whether a migration batch was thrown out. Apps not running whose Spotlight date is more than about 5 days old start past clean, at fuzz or later (shown in their debug label until slice 9 draws moss); every other app starts clean. If the Dock is hidden (for example in a full-screen Space), the first run waits until it is shown.
+- **First run.** The first time DockMoss reads a Dock that lists apps, it runs `mdls -name kMDItemLastUsedDate` once per distinct Dock app, so an app pinned twice is read once. A date later than now is ignored. If 5 or more apps have dates within 5 seconds of each other (an OS update or migration re-stamped them), every Spotlight date is thrown out. Startup then logs `first run: dock apps seeded and baselined` with the number of distinct Dock apps, dates read and seeds kept, and whether a migration batch was thrown out. Apps not running whose Spotlight date is more than about 5 days old start past clean, at fuzz or later; every other app starts clean. If the Dock is hidden (for example in a full-screen Space), the first run waits until it is shown.
 - **Writes.** A change reaches the disk about half a second after the event: changes within 500 ms of the first one are written together. Quitting DockMoss from the menu bar writes anything still pending first. Each save writes a temp file beside the log (`launch_log.json.tmp`, mode 0600), syncs it and renames it over the log, so a crash leaves either the old file or the new one.
 - **A bad entry.** A value that is not a string, a bundle ID that is empty or longer than 255 bytes, a time that does not parse, or a time more than 5 minutes in the future is left out with a warning, and the rest of the file loads. DockMoss first copies the file as read to `launch_log.json.dropped` (mode 0600, replacing an older copy), so the next save, which writes the log without the bad entry, loses nothing.
 - **A bad file.** If the file cannot be read, is larger than 1 MiB, is not JSON of this shape, or has another `version`, DockMoss renames it to `launch_log.json.corrupt` (replacing an older one), logs a warning naming both paths, and starts from an empty log. The history is still in `launch_log.json.corrupt` for recovery by hand. A read error that would have cleared up on its own is treated the same way.
@@ -130,9 +140,13 @@ src-tauri/capabilities/
 src-tauri/icons/
   source/           # SVG masters for the app icon and the tray glyph
 overlay.html        # Vite entry for the overlay window
-src/                # webview frontend: overlay.ts / overlay.css, ipc.ts (every invoke call,
-                    #   the watchDock and watchGrowth Channels), debug.ts (outlines and
-                    #   growth labels; renderer from slice 9)
+src/                # webview frontend: overlay.ts (one subscription per channel, fanned
+                    #   out to the renderer and, in dev builds, the debug layer), ipc.ts
+                    #   (every invoke call, the watchDock and watchGrowth Channels),
+                    #   debug.ts / debug.css (dev only: outlines, labels, the override)
+  render/           # WebGL2 moss: model.ts (pure: which icon, its key and seed, the art
+                    #   box, the draw rule; tested by model.test.ts), gl.ts, index.ts,
+                    #   moss.vert.glsl, moss.frag.glsl
 ```
 
 ## Icons

@@ -229,7 +229,9 @@ export function glslConstants(): string {
     ...Object.entries(vec2s).map(
       ([name, [x, y]]) => `const vec2 ${name} = vec2(${glslFloat(x)}, ${glslFloat(y)});`,
     ),
-    `const int FBM_OCTAVES = ${FBM_OCTAVES};`,
+    ...Object.entries({ FBM_OCTAVES, NO_SPRITE, MUSHROOM, FLOWER }).map(
+      ([name, value]) => `const int ${name} = ${value};`,
+    ),
   ].join("\n");
 }
 
@@ -242,6 +244,10 @@ export interface Sprite {
 }
 
 export const MAX_SPRITES = 3;
+/** Sprite kind codes, as the shader reads them from each sprite's fourth float. */
+export const NO_SPRITE = 0;
+export const MUSHROOM = 1;
+export const FLOWER = 2;
 const SPRITE_X = [0.2, 0.8] as const;
 const SPRITE_Y = [0.16, 0.3] as const;
 const SPRITE_SIZE = [0.13, 0.19] as const;

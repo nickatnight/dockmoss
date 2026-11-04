@@ -1,13 +1,22 @@
-import { MAX_SPRITES, type MossInstance, type Sprite, glslConstants, seedOffset } from "./model";
+import {
+  FLOWER,
+  MAX_SPRITES,
+  MUSHROOM,
+  type MossInstance,
+  NO_SPRITE,
+  type Sprite,
+  glslConstants,
+  seedOffset,
+} from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const CONSTANTS_LINE = "#pragma moss_constants";
 
-const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: 1, flower: 2 };
+const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: MUSHROOM, flower: FLOWER };
 
 function spriteValues(sprite: Sprite | undefined): number[] {
-  return sprite === undefined ? [0, 0, 0, 0] : [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
+  return sprite === undefined ? [0, 0, 0, NO_SPRITE] : [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
 }
 
 export interface InstanceAttribute {

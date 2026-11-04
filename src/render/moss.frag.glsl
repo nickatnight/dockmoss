@@ -116,8 +116,6 @@ float contactShadow(float front, float cover) {
 
 const float GRAIN_FREQUENCY = 28.0;
 
-const float FLOWER = 2.0;
-
 float ellipseDistance(vec2 p, vec2 radii) {
   return (length(p / radii) - 1.0) * min(radii.x, radii.y);
 }
@@ -154,14 +152,18 @@ vec4 flower(vec2 boxUv, float devicePixelInBox, float tint) {
   return vec4(colour, max(stemCover, petalCover));
 }
 
+int spriteKind(vec4 sprite) {
+  return int(sprite.w + 0.5);
+}
+
 vec4 spriteColour(vec4 sprite, vec2 uv, float devicePixelInIcon, float grain) {
   vec2 boxUv = (uv - sprite.xy) / sprite.z + 0.5;
   boxUv.x -= SPRITE_TIP_LEAN * boxUv.y * boxUv.y * swayWave(SPRITE_SWAY_PERIOD, sprite.x * 41.0);
-  if (sprite.w < 0.5 || any(lessThan(boxUv, vec2(0.0))) || any(greaterThan(boxUv, vec2(1.0)))) {
+  if (spriteKind(sprite) == NO_SPRITE || any(lessThan(boxUv, vec2(0.0))) || any(greaterThan(boxUv, vec2(1.0)))) {
     return vec4(0.0);
   }
   float devicePixelInBox = devicePixelInIcon / sprite.z;
-  vec4 colour = sprite.w < FLOWER - 0.5 ? mushroom(boxUv, devicePixelInBox) : flower(boxUv, devicePixelInBox, step(0.5, fract(sprite.x * 37.0)));
+  vec4 colour = spriteKind(sprite) == MUSHROOM ? mushroom(boxUv, devicePixelInBox) : flower(boxUv, devicePixelInBox, step(0.5, fract(sprite.x * 37.0)));
   return colour * smoothstep(0.02, 0.2, boxUv.y + (grain - 0.5) * 0.2);
 }
 
@@ -186,7 +188,7 @@ void main() {
   float shadow = contactShadow(front, cover);
 
   vec4 moss = vec4(colour * cover + CREVICE * shadow, cover + shadow);
-  if (v_sprites[0].w > 0.5) {
+  if (spriteKind(v_sprites[0]) != NO_SPRITE) {
     float devicePixelInIcon = 1.0 / side;
     for (int index = 0; index < 3; index++) {
       vec4 drawn = spriteColour(v_sprites[index], uv, devicePixelInIcon, grain);

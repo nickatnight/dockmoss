@@ -98,7 +98,7 @@ export function step(drawn: Drawn, next: readonly MossyIcon[], shrivels: Shrivel
   const running = shrivels.size > 0;
   const shownIcons = drawn === "unknown" || (drawn.shrivelFrame && !running) ? null : drawn.icons;
   if (next.length === 0 && !running) {
-    return shownIcons?.length === 0 ? { kind: "none" } : { kind: "clear" };
+    return shownIcons !== null && shownIcons.length === 0 ? { kind: "none" } : { kind: "clear" };
   }
   return shownIcons !== null && sameIcons(shownIcons, next) ? { kind: "none" } : { kind: "draw" };
 }
@@ -372,8 +372,7 @@ export function shrivelsAfter(
   growth: readonly AppGrowth[],
   next: readonly MossyIcon[],
 ): Shrivels {
-  const keys = itemKeys(items);
-  const inDock = new Map(keys.map((key, index) => [key, items[index]]));
+  const inDock = new Map(itemKeys(items).map((key, index) => [key, items[index]]));
   const mossy = new Set(next.map(({ key }) => key));
   const cleanApps = new Set(
     growth.filter(({ overgrowth }) => quantize(overgrowth) === 0).map(({ bundleId }) => bundleId),

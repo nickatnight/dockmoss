@@ -402,6 +402,14 @@ describe("mossHue", () => {
   });
 });
 
+describe("the sway clock", () => {
+  it("wraps at a whole number of every sway period", () => {
+    for (const period of [model.MOSS_SWAY_PERIOD, model.SPRITE_SWAY_PERIOD]) {
+      expect(model.SWAY_CYCLE_SECONDS % period, String(period)).toBe(0);
+    }
+  });
+});
+
 describe("glslConstants", () => {
   it("declares each shader constant with the model's own value", () => {
     const declared = new Map(

@@ -68,8 +68,6 @@ float growthDistance(vec2 uv) {
 }
 
 const float TAU = 6.2831853;
-const float MOSS_SWAY_PERIOD = 3.0;
-const float SPRITE_SWAY_PERIOD = 2.0;
 const float SPRITE_TIP_LEAN = 0.08;
 
 float swayWave(float period, float phase) {

@@ -65,34 +65,38 @@ void main() {
 
   // Growth starts at the bottom edge and at the two bottom corners (where the
   // corner arcs sit), and spreads upward and inward as overgrowth rises.
-  float fromBottom = uv.y * 1.45;
-  float fromCorner = min(length(uv - vec2(0.066)), length(uv - vec2(0.934, 0.066)));
+  float fromBottom = uv.y * 1.7;
+  float fromCorner = 1.25 * min(length(uv - vec2(0.066)), length(uv - vec2(0.934, 0.066)));
   float grown = min(fromBottom, fromCorner);
-  float reach = 0.7 * u_overgrowth;
+  float reach = 0.78 * pow(u_overgrowth, 0.8);
 
+  // A ragged front with small tufts, its noise scaled down at low reach so
+  // the first step of overgrowth shows only a thin fringe.
   float ragged = fbm(p * 5.0) - 0.5;
-  float front = reach - grown + ragged * min(0.24, reach * 1.2);
-  float cover = smoothstep(0.0, 0.05, front);
+  float tufts = noise(p * 26.0) - 0.5;
+  float front = reach - grown + ragged * min(0.24, reach * 1.2) + tufts * min(0.05, reach * 0.3);
+  float cover = smoothstep(0.0, 0.03, front);
 
-  // Clumps with darker gaps between them, and fine fuzz near the front.
-  float clump = fbm(p * 16.0 + 7.3);
-  float fine = noise(p * 70.0);
-  float gap = smoothstep(0.32, 0.5, clump);
-  float nearFront = 1.0 - smoothstep(0.0, 0.05, abs(front));
-  float fuzz = nearFront * (fine - 0.5);
-  cover = clamp(cover * mix(0.7, 1.0, gap) + fuzz * 0.6, 0.0, 1.0);
+  // Cushions: rounded clumps with dark crevices between them.
+  float clump = fbm(p * 13.0 + 7.3);
+  float cushion = smoothstep(0.3, 0.62, clump);
+  // Light from above: the upper side of each cushion catches it.
+  float lift = clamp((fbm(p * 13.0 + 7.3 - vec2(0.0, 0.025)) - clump) * -14.0, -1.0, 1.0);
+  float grain = noise(p * 95.0);
 
-  // Light from above: the upper side of each clump catches it.
-  float lift = fbm(p * 16.0 + 7.3 + vec2(0.0, 0.02)) - clump;
-  vec3 deep = vec3(0.07, 0.14, 0.04);
-  vec3 mid = vec3(0.22, 0.38, 0.09);
-  vec3 light = vec3(0.50, 0.64, 0.18);
-  vec3 colour = mix(deep, mid, gap);
-  colour = mix(colour, light, clamp(clump * 1.2 - 0.35 + lift * 6.0, 0.0, 1.0) * gap);
-  colour *= mix(0.85, 1.1, fine);
+  vec3 crevice = vec3(0.06, 0.09, 0.03);
+  vec3 body = mix(vec3(0.25, 0.42, 0.09), vec3(0.18, 0.38, 0.14), fbm(p * 2.0));
+  vec3 lit = vec3(0.64, 0.76, 0.24);
+  vec3 colour = mix(crevice, body, cushion);
+  colour = mix(colour, lit, clamp(lift * 1.4 + cushion * 0.25 - 0.1, 0.0, 1.0) * cushion);
+  colour *= mix(0.78, 1.12, grain);
+
+  // Fine fuzz along the front, thinning out into single strands.
+  float nearFront = 1.0 - smoothstep(0.0, 0.04, abs(front));
+  cover = clamp(cover + nearFront * (grain - 0.55) * 0.9, 0.0, 1.0);
 
   // A soft contact shadow on the icon just beyond the moss.
-  float shadow = 0.28 * smoothstep(-0.07, 0.0, front) * (1.0 - cover);
+  float shadow = 0.4 * smoothstep(-0.06, 0.0, front) * (1.0 - cover);
 
   float alpha = (cover + shadow) * clip;
   fragColor = vec4(colour * cover * clip, alpha);

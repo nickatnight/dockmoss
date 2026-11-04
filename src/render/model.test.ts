@@ -4,6 +4,7 @@ import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   type ItemKey,
   type Scene,
+  artBox,
   drawnIcon,
   fnv1a32,
   itemKeys,
@@ -255,5 +256,22 @@ describe("toDeviceBox", () => {
     const rect = { x: 10.5, y: 1000, width: 64, height: 64 };
 
     expect(toDeviceBox(rect, 1, 1080)).toEqual({ x: 10.5, y: 16, width: 64, height: 64 });
+  });
+});
+
+describe("artBox", () => {
+  // Measured on this Mac's Dock (tilesize 45, largesize 66); see job 009's
+  // build.md. Magnified readings scatter by about a point, because the AX
+  // rect and the capture are read at two moments and AX rounds to points.
+  it.each([
+    ["a normal 47 x 59 tile", { x: 711, y: 918, width: 47, height: 59 }, { x: 716, y: 929, side: 37 }, 0.5],
+    ["a magnified 57 x 69 tile", { x: 578, y: 907, width: 57, height: 69 }, { x: 584, y: 919, side: 46 }, 1],
+  ])("finds the square icon art in %s", (_, tile, art, tolerance) => {
+    const box = artBox(tile);
+
+    expect(box.width).toBe(box.height);
+    expect(Math.abs(box.width - art.side)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(box.x - art.x)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(box.y - art.y)).toBeLessThanOrEqual(tolerance);
   });
 });

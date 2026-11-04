@@ -1,6 +1,6 @@
 import type { AppGrowth, DockItem } from "../ipc";
 import { type MossGl, createMossGl } from "./gl";
-import { type Scene, drawnIcon, step, toDeviceBox } from "./model";
+import { type Scene, artBox, drawnIcon, step, toDeviceBox } from "./model";
 
 /**
  * Draws moss on one Dock icon. Feed it every Dock and growth frame; it
@@ -31,7 +31,7 @@ export function startMossRenderer(root: HTMLElement, override: number | null) {
       return;
     }
     if (next.changes.geometry) {
-      moss.setBox(toDeviceBox(scene.rect, devicePixelRatio, canvas.height));
+      moss.setBox(toDeviceBox(artBox(scene.rect), devicePixelRatio, canvas.height));
     }
     if (next.changes.moss) {
       moss.setMoss(scene.seed, scene.overgrowth);

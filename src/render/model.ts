@@ -103,6 +103,23 @@ function sameRect(a: LogicalRect, b: LogicalRect): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
+/**
+ * The AX rect is the whole Dock tile, taller than the icon art and with the
+ * running dot below it. The art is a square, centred in the tile, whose side
+ * measured 0.785 to 0.808 of the tile's width, normal and magnified.
+ */
+const ART_SIDE_PER_TILE_WIDTH = 0.79;
+
+export function artBox(tile: LogicalRect): LogicalRect {
+  const side = tile.width * ART_SIDE_PER_TILE_WIDTH;
+  return {
+    x: tile.x + (tile.width - side) / 2,
+    y: tile.y + (tile.height - side) / 2,
+    width: side,
+    height: side,
+  };
+}
+
 /** A rect in canvas device pixels, measured from the bottom-left as GL does. */
 export interface DeviceBox {
   x: number;

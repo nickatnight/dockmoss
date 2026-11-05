@@ -148,18 +148,22 @@ input[type="number"][aria-invalid="true"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* The box in the first column; its title and hint share the second, so the
+   hint lines up with the title whatever the box's width. */
 .check {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
 }
 
-.check input {
+.check > input {
   margin: 0;
 }
 
-.check-hint {
-  margin: 2px 0 0 22px;
+.check > p.hint {
+  grid-column: 2;
+  margin: 2px 0 0;
 }
 
 .speeds {
@@ -259,7 +263,7 @@ input[type="range"]:focus-visible {
 
 fieldset:disabled,
 .group:has(> .slider > input:disabled),
-.group:has(> .check > input:disabled) {
+.check:has(> input:disabled) {
   opacity: 0.6;
 }
 

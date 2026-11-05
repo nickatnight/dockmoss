@@ -10,17 +10,15 @@
     <main>
       <p id="save-error" class="notice" role="alert" hidden></p>
 
-      <div class="group">
-        <label class="check">
-          <input
-            id="launch-at-login"
-            type="checkbox"
-            aria-describedby="launch-at-login-hint"
-            disabled
-          />
-          <span class="group-title">Launch at login</span>
-        </label>
-        <p id="launch-at-login-hint" class="hint check-hint">
+      <div class="group check">
+        <input
+          id="launch-at-login"
+          type="checkbox"
+          aria-describedby="launch-at-login-hint"
+          disabled
+        />
+        <label class="group-title" for="launch-at-login">Launch at login</label>
+        <p id="launch-at-login-hint" class="hint">
           Open DockMoss when you log in to your Mac.
         </p>
       </div>

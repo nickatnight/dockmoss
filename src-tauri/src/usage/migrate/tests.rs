@@ -72,7 +72,7 @@ fn plan_move_moves_a_regular_file_only_into_an_empty_name() {
             "a link or folder in the old folder",
             listing(&[("launch_log.json", Entry::NotARegularFile)]),
             listing(&[]),
-            vec![Step::LeaveNotAFile("launch_log.json")],
+            vec![Step::LeaveNotARegularFile("launch_log.json")],
         ),
         (
             "all four, in the listed order",

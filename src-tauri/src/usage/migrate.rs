@@ -50,7 +50,7 @@ fn entry_at(path: &Path) -> Entry {
 pub enum Step {
     Move(&'static str),
     KeepNew(&'static str),
-    LeaveNotAFile(&'static str),
+    LeaveNotARegularFile(&'static str),
 }
 
 pub fn plan_move(old: &Listing, new: &Listing) -> Vec<Step> {
@@ -58,7 +58,7 @@ pub fn plan_move(old: &Listing, new: &Listing) -> Vec<Step> {
         .into_iter()
         .filter_map(|name| match (old.get(name), new.get(name)) {
             (Entry::Missing, _) => None,
-            (Entry::NotARegularFile, _) => Some(Step::LeaveNotAFile(name)),
+            (Entry::NotARegularFile, _) => Some(Step::LeaveNotARegularFile(name)),
             (Entry::File, Entry::Missing) => Some(Step::Move(name)),
             (Entry::File, Entry::File | Entry::NotARegularFile) => Some(Step::KeepNew(name)),
         })
@@ -149,7 +149,7 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
                     "the new app folder already has this file; the old one is left"
                 );
             }
-            Step::LeaveNotAFile(name) => {
+            Step::LeaveNotARegularFile(name) => {
                 report.skipped += 1;
                 tracing::warn!(
                     file = name,

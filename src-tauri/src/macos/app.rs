@@ -1,11 +1,5 @@
 use objc2::MainThreadMarker;
-use objc2_app_kit::{
-    NSApplication, NSApplicationActivationOptions, NSRunningApplication, NSWorkspace,
-};
-
-pub fn activate(mtm: MainThreadMarker) {
-    NSApplication::sharedApplication(mtm).activate();
-}
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
 
 pub fn active_other_app(_mtm: MainThreadMarker) -> Option<i32> {
     let active = NSWorkspace::sharedWorkspace().frontmostApplication()?;

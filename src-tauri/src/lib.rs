@@ -918,7 +918,6 @@ pub(crate) fn show_settings_window(app: &AppHandle) {
         let return_to = app.state::<ReturnFocusTo>();
         *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
     }
-    macos::app::activate(mtm);
     let shown = window
         .unminimize()
         .and_then(|()| window.show())

@@ -15,7 +15,7 @@ cargo test
 cargo build
 ```
 
-Run the app with `pnpm tauri dev` from the repo root. The package manager is **pnpm** (`pnpm install`, `pnpm add`, `pnpm <script>`), and `pnpm-lock.yaml` is the only lockfile. Frontend checks come from the scripts in `package.json`: `pnpm test` runs vitest over the pure TS (`src/**/*.test.ts`), and `pnpm check:task` also builds the frontend and fails if `dist/` carries the debug layer.
+Run the app with `pnpm tauri dev` from the repo root. Quit any other DockMoss first (an installed bundle, a debug bundle, another `tauri dev`): every copy shares the bundle identifier, so a second copy exits at once and the running one opens Settings instead. The package manager is **pnpm** (`pnpm install`, `pnpm add`, `pnpm <script>`), and `pnpm-lock.yaml` is the only lockfile. Frontend checks come from the scripts in `package.json`: `pnpm test` runs vitest over the pure TS (`src/**/*.test.ts`), and `pnpm check:task` also builds the frontend and fails if `dist/` carries the debug layer.
 
 ## Layout
 
@@ -24,7 +24,8 @@ src-tauri/src/
   main.rs        # one line: dockmoss_lib::run()
   lib.rs         # Builder, plugins, setup(), command registration, the dock-tracker,
                  #   launch-log (usage) and spotlight-seed thread glue, loading settings,
-                 #   and the settings window (create or focus, focus hand-back)
+                 #   the settings window (create or focus, focus hand-back), and what
+                 #   opens it besides the tray (a second launch, Reopen)
   error.rs       # crate Error enum (thiserror + Serialize)
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules (watch_dock,
                  #   watch_growth, get_settings, save_settings)
@@ -39,6 +40,9 @@ src-tauri/src/
                  #   exclusions, fast-forward), one decoder per field, load_file (capped,
                  #   per-field fallback), commit (write first, then adopt), SettingsView
   navigation.rs  # pure: which URLs a window may load (is_app_origin)
+  focus.rs       # pure: which activated app Settings hands focus back to
+                 #   (is_return_target), and what closing Settings does
+                 #   (on_settings_closed, hides)
   growth/        # pure: effective last-used -> 0..1 overgrowth, jitter, stages
   usage/         # launch log model and file format (log.rs), the capped read and atomic
                  #   write both user-data files use (store.rs),
@@ -46,7 +50,8 @@ src-tauri/src/
                  #   Spotlight parsing and migration-batch check (spotlight.rs), and
                  #   UsageState (state.rs): first run, first-seen, growth per Dock app
   macos/         # every objc2 / AppKit / AX call, the `mdls` subprocess, and every
-                 #   `unsafe` block; app.rs: which app is active, and activating one
+                 #   `unsafe` block; app.rs: the front app, the app at a pid, and
+                 #   activating one
 src-tauri/capabilities/   # one capability file per window: overlay.json, settings.json
 overlay.html, settings.html   # one Vite entry per window
 src/                      # webview: overlay.ts (one subscription per channel, fanned out),
@@ -66,7 +71,7 @@ src/                      # webview: overlay.ts (one subscription per channel, f
                           #   which day fields are wrong, the messages (model.test.ts)
 ```
 
-The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `settings.rs`, `navigation.rs`, `tracker.rs`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
+The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `settings.rs`, `navigation.rs`, `focus.rs`, `tracker.rs`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays, and the coverage gate counts them. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
 
 ## Rust conventions
 
@@ -100,6 +105,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
   - Neither window can call the other's commands. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
 - **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels, `VITE_DOCKMOSS_OVERGROWTH` and `VITE_DOCKMOSS_SWAY`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). A build-only Vite plugin fails `pnpm build` if `src/debug.ts` is anywhere in the module graph. The settings entry never imports `debug.ts`, the renderer or `overlay.ts`. Put Dock data into the DOM with `textContent` only.
 - **Renderer constants have one source.** Shape, sway, sprite and shrivel constants live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`, and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call (ADR-0012), shrivelling ones included.
+- **One DockMoss at a time** (ADR-0015). `tauri-plugin-single-instance` is registered first in the Builder. A second launch reaches the running copy's socket and exits 0 inside the plugin's setup, before any other plugin and before `setup()` opens a file, builds the tray or creates a window, so it leaves no log of its own. The running copy opens or focuses Settings on a second launch (the plugin callback, sent to the main thread) and on `RunEvent::Reopen`, which is what a Finder double-click, Spotlight or `open` sends to a running app. The callback never logs its `argv` or `cwd`, which can hold the user's name. DockMoss never records its own bundle ID as used, so a second copy starting up is not a launch (`usage::tracked_bundle_id`).
 - **Navigation guard:** both window builders pass `.on_navigation(is_app_url)`, which allows only the bundled `tauri:` origin, plus localhost in debug builds (`navigation::is_app_origin`, table-tested).
 - **The shrivel is inferred, not sent.** The webview starts one when an icon it drew as mossy comes back clean in the growth stream; Rust sends no event for it (ADR-0013). So any drop of a mossy icon to 0 shrivels. Its 600 ms run is one more condition of `createRenderer`'s time-limited loop, and the loop stops when the last shrivel draws the icon clean.
 
@@ -109,7 +115,10 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **Overlay window:** `decorations: false`, `shadow: false`, `focus: false`, `skipTaskbar: true`, then `set_ignore_cursor_events(true)` and `set_visible_on_all_workspaces(true)`. Set the `NSWindow` level above the Dock (`kCGDockWindowLevel + 1`) and the collection behavior to `canJoinAllSpaces | stationary | fullScreenAuxiliary | ignoresCycle` through objc2. Tauri's `always_on_top` level sits below the Dock.
 - **No Dock icon of our own:** call `app.set_activation_policy(ActivationPolicy::Accessory)` in `setup()`. The menu-bar tray (`TrayIconBuilder`, `tray-icon` feature) holds Settings… and Quit DockMoss, plus Grant Accessibility Access… while untrusted. Only the main thread touches the tray: other threads look it up with `app.tray_by_id(TRAY_ID)` inside `run_on_main_thread`, because its handle is not thread-safe.
 - **Settings window:** a normal titled window (label `settings`), created on Settings… and destroyed on close. It is 440 × 760 pt, or shorter to fit the primary display's work area, and then the form scrolls (`geometry::settings_window_height`). `set_focus()` already activates the Accessory app, so no extra activation call is needed. An Accessory app has no menu bar, so the page handles ⌘W itself.
-- **Focus hand-back on close:** opening Settings records the app that was active (`macos::app::active_other_app`). When the window is destroyed, that app is activated again, but only while DockMoss is still the active app (`macos::app::is_active`). Otherwise closing Settings from behind would pull an old app in front of the one the user is in. When Settings loses focus to another app, that app becomes the return target (ADR-0014).
+- **Focus hand-back on close** (ADR-0014, amended). The return target has one source: `LastOtherApp`, the last activated regular app that is neither this process nor another copy of DockMoss (`focus::is_return_target`, fed by `macos::workspace::on_app_activated` and seeded with the front app at startup). Nothing is captured when Settings opens, so the tray, a second launch and Reopen all get the right target even when DockMoss or an exiting copy is already in front. When the window is destroyed, `focus::on_settings_closed` decides:
+  - DockMoss is not the active app: leave the user where they are, so closing Settings from behind never pulls an old app forward.
+  - The same bundle ID still runs at the remembered pid (`macos::app::app_at`): activate it.
+  - Otherwise (no target, it quit, or macOS gave its pid to another app), or if the activation fails (`focus::hides`): hide DockMoss, so macOS brings the next app forward. A windowless DockMoss is never left in front. The overlay sets `canHide = false` (`macos/overlay.rs`), so hiding the app leaves the moss on screen.
 - **Coordinates:** AX reports global points with a top-left origin on the primary display. Cocoa uses a bottom-left origin. Tauri distinguishes `Logical` from `Physical` sizes. The one conversion function is the pure `geometry::to_overlay_local` in `src-tauri/src/geometry.rs`, outside `macos/` so the coverage gate counts it. `macos/` only supplies the raw AX rects, and `lib.rs` supplies the display values Tauri reports. Its tests use multi-display and Retina fixtures, and the overlay's own frame comes from the same `Display::frame`.
 - **Accessibility grant:** TCC ties the grant to the code signature and to the *responsible process*. Under `tauri dev` started from a terminal, the grant goes to the terminal app. An ad-hoc-signed bundle loses the grant on every rebuild. Check with `AXIsProcessTrustedWithOptions` at startup and show a clear prompt instead of failing silently. Test the real flow with a bundle signed by a stable identity.
 - **Bundle identifier** (`identifier` in `tauri.conf.json`) is permanent once chosen. Changing it resets the Accessibility grant and moves the app data directory.
@@ -120,6 +129,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - The file is versioned JSON (`version: 1`, ADR-0009, amended by ADR-0010). It holds `baseline_at` (set at the first run; it marks the first run as done and is not a last-used time), `last_launched`, `first_seen` and `spotlight_seed`. The last two are optional on read, so older files load.
 - Every map value and `baseline_at` is read as a `serde_json::Value` and checked on its own. A value that is not a string, a bad bundle ID, an RFC 3339 timestamp that does not parse, or one more than `FUTURE_TOLERANCE` (5 minutes) after now is dropped and logged, and the rest of the file loads. jiff's `serde` feature stays off, so nothing panics. A file that does not decode at all is renamed to `launch_log.json.corrupt`, never deleted.
 - When decode drops anything, `load_or_set_aside` copies the bytes it read to `launch_log.json.dropped` before the next save can rewrite the file. It uses the same `write_private` as the temp file (stale file removed, `create_new`, mode 0600).
+- DockMoss never records its own bundle ID: `usage::tracked_bundle_id` drops it, so another copy of DockMoss (a second launch is a regular app until it exits) is never recorded as used. Lookalike IDs (`com.dockmoss.app.helper`) are other apps and are recorded.
 - `BundleId::new` refuses an empty ID or one over 255 bytes, so the Dock, workspace events and decode all share one cap.
 - A `SpotlightSeed` is made only by `usage::spotlight::sane_seeds` (future dates dropped, one date per bundle ID, then every date dropped on a migration batch) or, for a seed already stored, by log decode through `assume_sane`.
 - Only the `launch-log` thread in `lib.rs` touches the `UsageState` (the log, the running set and the Dock list). Everything else sends it `WriterMessage::{Used, DockApps, ListDockApps, WatchGrowth, Flush}` over its channel. `ListDockApps` carries a reply sender; `get_settings` waits for the reply on a `spawn_blocking` thread for up to 500 ms and treats no reply as an unknown Dock list. The first-run Spotlight read runs on a short-lived `spotlight-seed` thread, one `mdls` per distinct bundle ID with a 2 s timeout, and returns its readings through its `JoinHandle`. The writer holds no sender to its own inbox.

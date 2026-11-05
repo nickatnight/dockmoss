@@ -948,7 +948,7 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 }
 
 #[derive(Default)]
-struct ReturnFocusTo(Mutex<Option<i32>>);
+struct ReturnFocusTo(Mutex<Option<macos::app::Pid>>);
 
 fn return_focus(app: &AppHandle) {
     let Some(mtm) = macos::MainThreadMarker::new() else {

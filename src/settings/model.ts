@@ -117,7 +117,7 @@ export function nextFeedback(
     change.field === "thresholds" && result.error.kind === "settings_not_saved";
   return {
     ...feedback,
-    thresholdError: thresholdsPassedRules ? false : feedback.thresholdError,
+    thresholdError: !thresholdsPassedRules && feedback.thresholdError,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
   };
 }

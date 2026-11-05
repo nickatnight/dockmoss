@@ -208,7 +208,6 @@ mod tests {
         }
     }
 
-    /// The kept seeds as (bundle ID, date), or `None` for a migration batch.
     fn kept(sane: &SaneSeeds) -> Option<Vec<(&str, Timestamp)>> {
         let SaneSeeds::Kept(seeds) = sane else {
             return None;

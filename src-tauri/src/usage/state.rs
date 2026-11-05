@@ -261,8 +261,6 @@ mod tests {
         SignedDuration::from_hours(n * 24)
     }
 
-    /// Safari's overgrowth inside Fuzz after `unused` at `speed`: linear from
-    /// 0 at Fuzz to 0.5 at Patchy (SUMMARY.md "Growth curve").
     fn safari_in_fuzz(unused: SignedDuration, speed: f64) -> f64 {
         let curve_days = (unused.as_secs_f64() * speed + SAFARI_JITTER_SECONDS) / SECONDS_PER_DAY;
         OVERGROWTH_AT_PATCHY * (curve_days - DEFAULT_FUZZ_DAYS)
@@ -873,7 +871,6 @@ mod tests {
     /// Finder's jitter, from the golden table in growth/jitter.rs's tests.
     const FINDER_JITTER_SECONDS: f64 = 31_764.0;
 
-    /// Where an app unused for `unused_days` sits on the curve, jitter included.
     fn curve_day(unused_days: f64, jitter_seconds: f64) -> f64 {
         unused_days + jitter_seconds / SECONDS_PER_DAY
     }

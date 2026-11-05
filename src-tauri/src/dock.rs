@@ -352,8 +352,6 @@ mod tests {
         assert_eq!(xs, [(vscode.clone(), 640.0), (vscode, 760.0)]);
     }
 
-    /// One gated tick: returns the result, whether the AX read ran and whether
-    /// trust was re-checked.
     fn gated(
         gate: &mut ReadGate,
         trust: Trust,
@@ -513,8 +511,6 @@ mod tests {
         assert_eq!(rechecks.get(), 10);
     }
 
-    /// Latches the gate at `start`, then re-checks once at `start + 600 ms`, where
-    /// trust is still revoked.
     fn latched_and_rechecked(gate: &mut ReadGate, start: Instant) {
         let latched = gate.read(
             Trust::Trusted,
@@ -537,7 +533,6 @@ mod tests {
         assert!(rechecked.get(), "the first re-check was held back");
     }
 
-    /// One latched tick at `now`: whether trust was re-checked.
     fn rechecks_at(gate: &mut ReadGate, now: Instant) -> bool {
         let rechecked = Cell::new(false);
         let result = gate.read(

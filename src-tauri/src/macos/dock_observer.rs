@@ -35,12 +35,11 @@ fn observe(trusted: &dyn Fn() -> bool, on_hover: &dyn Fn()) {
         tracing::warn!("no default run loop mode; dock hover changes not observed");
         return;
     };
-    let callback: &dyn Fn() = on_hover;
     loop {
         if trusted()
             && let Some(pid) = dock_pid()
         {
-            match Registration::new(pid, &callback, mode) {
+            match Registration::new(pid, &on_hover, mode) {
                 Ok(registration) => {
                     tracing::debug!(pid, "dock hover observer registered");
                     while trusted() && dock_pid() == Some(pid) {

@@ -58,7 +58,7 @@ fn observe(trusted: &dyn Fn() -> bool, on_hover: &dyn Fn()) {
 }
 
 fn dock_pid() -> Option<i32> {
-    autoreleasepool(|_| super::dock::system_dock_pid())
+    autoreleasepool(super::dock::system_dock_pid)
 }
 
 #[expect(unsafe_code, reason = "kCFRunLoopDefaultMode is a C static")]

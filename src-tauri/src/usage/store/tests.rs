@@ -8,6 +8,7 @@ use jiff::Timestamp;
 use super::{MAX_FILE_BYTES, load_or_set_aside, private_dir, save};
 use crate::bundle_id::BundleId;
 use crate::usage::LaunchLog;
+use crate::usage::migrate::{LAUNCH_LOG_FILE, MOVED_FILES};
 
 fn at(text: &str) -> Timestamp {
     text.parse().expect("test timestamps are valid RFC 3339")
@@ -239,6 +240,40 @@ fn a_file_with_a_dropped_entry_is_copied_byte_for_byte_to_dropped() {
         fs::read(&path).expect("the log stays in place"),
         ONE_BAD_ENTRY.as_bytes()
     );
+}
+
+/// The move to the new app folder carries only `MOVED_FILES`, so a copy
+/// set aside under any other name would stay behind in the old folder.
+#[test]
+fn every_copy_set_aside_beside_the_log_is_one_the_move_carries() {
+    for (case, text) in [("corrupt", "not json"), ("dropped entry", ONE_BAD_ENTRY)] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(LAUNCH_LOG_FILE);
+        fs::write(&path, text).expect("write file");
+
+        load_or_set_aside(&path, at(NOW));
+
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .expect("list the folder")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert!(
+            names.iter().any(|name| name != LAUNCH_LOG_FILE),
+            "{case}: a copy was set aside: {names:?}"
+        );
+        for name in &names {
+            assert!(
+                MOVED_FILES.contains(&name.as_str()),
+                "{case}: {name} is not moved"
+            );
+        }
+    }
 }
 
 #[test]

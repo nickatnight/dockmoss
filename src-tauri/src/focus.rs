@@ -5,13 +5,17 @@ pub struct Pid(pub i32);
 pub struct ActiveApp {
     pub pid: Pid,
     pub bundle_id: Option<String>,
+    /// Has a regular activation policy (can have a Dock icon and windows).
+    pub regular: bool,
 }
 
-/// Settings hands focus back to the last app activated that is neither this
-/// process nor another copy of it: a second launch is in front until it
-/// exits, and macOS activates this copy itself on a reopen.
+/// Settings hands focus back to the last regular app activated that is
+/// neither this process nor another copy of it: a second launch is in front
+/// until it exits, macOS activates this copy itself on a reopen, and an agent
+/// (a launcher that activated to open this app) has no window to take the
+/// keyboard.
 pub fn is_return_target(app: &ActiveApp, own_pid: Pid, own_bundle_id: &str) -> bool {
-    app.pid != own_pid && app.bundle_id.as_deref() != Some(own_bundle_id)
+    app.regular && app.pid != own_pid && app.bundle_id.as_deref() != Some(own_bundle_id)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

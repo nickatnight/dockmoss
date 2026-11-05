@@ -4,23 +4,38 @@ const OWN_PID: Pid = Pid(100);
 const OWN_ID: &str = "com.dockmoss.app";
 
 #[test]
-fn only_apps_other_than_dockmoss_are_return_targets() {
+fn only_regular_apps_other_than_dockmoss_are_return_targets() {
     let cases = [
-        ("another app", 200, Some("com.apple.finder"), true),
-        ("another app without a bundle ID", 201, None, true),
-        ("this process", 100, Some(OWN_ID), false),
+        ("another app", 200, Some("com.apple.finder"), true, true),
+        ("another app without a bundle ID", 201, None, true, true),
+        (
+            "an agent such as a launcher",
+            202,
+            Some("com.apple.Spotlight"),
+            false,
+            false,
+        ),
+        ("this process", 100, Some(OWN_ID), false, false),
         (
             "this process without a bundle ID (tauri dev)",
             100,
             None,
+            true,
             false,
         ),
-        ("a second launch about to exit", 300, Some(OWN_ID), false),
+        (
+            "a second launch about to exit",
+            300,
+            Some(OWN_ID),
+            true,
+            false,
+        ),
     ];
-    for (case, pid, bundle_id, expected) in cases {
+    for (case, pid, bundle_id, regular, expected) in cases {
         let app = ActiveApp {
             pid: Pid(pid),
             bundle_id: bundle_id.map(str::to_owned),
+            regular,
         };
 
         assert_eq!(is_return_target(&app, OWN_PID, OWN_ID), expected, "{case}");

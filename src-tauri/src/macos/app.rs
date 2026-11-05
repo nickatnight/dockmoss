@@ -1,5 +1,8 @@
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+use objc2_app_kit::{
+    NSApplicationActivationOptions, NSApplicationActivationPolicy, NSRunningApplication,
+    NSWorkspace,
+};
 
 use crate::focus::{ActiveApp, Pid};
 
@@ -17,6 +20,7 @@ pub(super) fn active_app(app: &NSRunningApplication) -> ActiveApp {
     ActiveApp {
         pid: Pid(app.processIdentifier()),
         bundle_id: app.bundleIdentifier().map(|id| id.to_string()),
+        regular: app.activationPolicy() == NSApplicationActivationPolicy::Regular,
     }
 }
 

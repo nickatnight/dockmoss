@@ -115,8 +115,13 @@ export function nextFeedback(
   if (rejected(result) && change.field === "excluded") {
     return { ...feedback, exclusionLimit: true };
   }
+  // Rust checks an entry before it writes, so a write failure means the
+  // thresholds passed the rules.
+  const checked =
+    change.field === "thresholds" && result.error.kind === "settings_not_saved";
   return {
     ...feedback,
+    thresholdError: checked ? false : feedback.thresholdError,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
   };
 }

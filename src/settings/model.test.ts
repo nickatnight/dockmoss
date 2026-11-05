@@ -390,6 +390,26 @@ describe("nextFeedback", () => {
     });
   });
 
+  it("clears the threshold message when a corrected entry passes the rules but is not written", () => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+    const fuzz3 = {
+      field: "thresholds",
+      thresholds: { fuzz: 3, patchy: 10, overgrown: 30 },
+    } as const;
+
+    expect(nextFeedback(shown, fuzz3, notSaved)).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["thresholds"],
+    });
+  });
+
+  it("keeps the threshold message when a threshold save gets no reply, since the entry was not checked", () => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+    expect(nextFeedback(shown, fuzz1, ipcFailed).thresholdError).toBe(true);
+  });
+
   it("keeps another control's save notice when thresholds are rejected", () => {
     const failed = nextFeedback(NO_FEEDBACK, intensity, notSaved);
 

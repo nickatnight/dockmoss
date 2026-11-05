@@ -6,12 +6,12 @@ import {
 } from "./ipc";
 import {
   NO_FEEDBACK,
+  createLoginToggle,
   createSettingsSaver,
   enteredDays,
   exclusionLimitMessage,
   exclusionRows,
   invalidDays,
-  createLoginToggle,
   launchAtLoginBox,
   nextFeedback,
   reannounced,

@@ -365,7 +365,7 @@ mod launch_log_writer {
             state: UsageState::new(log),
             schedule: SaveSchedule::default(),
             seed_read: None,
-            settings: saved.applied(fast_forward_override),
+            applied: saved.applied(fast_forward_override),
             fast_forward_override,
             watcher: None,
             last_sent: None,
@@ -382,7 +382,7 @@ mod launch_log_writer {
         state: UsageState,
         schedule: SaveSchedule,
         seed_read: Option<JoinHandle<Readings>>,
-        settings: Settings,
+        applied: Settings,
         fast_forward_override: Option<FastForward>,
         watcher: Option<Channel<Vec<AppGrowth>>>,
         last_sent: Option<Vec<AppGrowth>>,
@@ -452,9 +452,9 @@ mod launch_log_writer {
                     self.recompute();
                 }
                 WriterMessage::Settings(saved) => {
-                    self.settings = saved.applied(self.fast_forward_override);
+                    self.applied = saved.applied(self.fast_forward_override);
                     tracing::debug!(
-                        fast_forward = self.settings.fast_forward.factor(),
+                        fast_forward = self.applied.fast_forward.factor(),
                         "settings applied to growth"
                     );
                     self.recompute();
@@ -528,9 +528,9 @@ mod launch_log_writer {
         fn recompute(&mut self) {
             let now = Instant::now();
             self.next_recompute = now
-                .checked_add(usage::recompute_interval(self.settings.fast_forward))
+                .checked_add(usage::recompute_interval(self.applied.fast_forward))
                 .unwrap_or(now);
-            let frame = self.state.growth(Timestamp::now(), &self.settings);
+            let frame = self.state.growth(Timestamp::now(), &self.applied);
             if self.last_sent.as_ref() == Some(&frame) {
                 tracing::debug!(apps = frame.len(), "growth recomputed; unchanged");
                 return;

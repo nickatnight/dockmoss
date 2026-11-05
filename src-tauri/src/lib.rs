@@ -12,12 +12,13 @@ mod usage;
 
 pub use error::Error;
 
-use std::sync::mpsc;
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use jiff::Timestamp;
-use tauri::tray::TrayIcon;
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_log::log::LevelFilter;
 
 use commands::{TrackerInbox, TrackerMessage};
@@ -28,6 +29,7 @@ use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
+const SETTINGS_LABEL: &str = "settings";
 const LAUNCH_LOG_FILE: &str = "launch_log.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -56,11 +58,12 @@ pub fn run() {
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.manage(ReturnFocusTo::default());
             let trust = macos::ax::request_trust();
             tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
-            let tray = tray::build(app.handle(), trust)?;
+            tray::build(app.handle(), trust)?;
             app.manage(TrustState::new(trust));
-            spawn_trust_watcher(tray)?;
+            spawn_trust_watcher(app.handle().clone())?;
             let display = primary_display(app.handle())?;
             let (inbox, messages) = mpsc::channel();
             let screen_changes = inbox.clone();
@@ -489,27 +492,33 @@ mod launch_log_writer {
     }
 }
 
-fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
+fn spawn_trust_watcher(app: AppHandle) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("ax-trust".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(TRUST_POLL_INTERVAL);
-                let state = tray.app_handle().state::<TrustState>();
+                let state = app.state::<TrustState>();
                 if let Some(trust) = state.replace_if_changed(macos::ax::check_trust()) {
                     tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
-                    refresh_tray_on_main_thread(&tray);
+                    refresh_tray_on_main_thread(&app);
                 }
             }
         })?;
     Ok(())
 }
 
-fn refresh_tray_on_main_thread(tray: &TrayIcon) {
-    let main_tray = tray.clone();
-    let scheduled = tray.app_handle().run_on_main_thread(move || {
-        let trust = main_tray.app_handle().state::<TrustState>().current();
-        if let Err(error) = tray::show_trust(&main_tray, trust) {
+/// The tray is looked up on the main thread because its handle is not
+/// thread-safe: cloning it elsewhere would race the clones Tauri makes there.
+fn refresh_tray_on_main_thread(app: &AppHandle) {
+    let main = app.clone();
+    let scheduled = app.run_on_main_thread(move || {
+        let Some(tray) = main.tray_by_id(tray::TRAY_ID) else {
+            tracing::warn!("tray not updated after a trust change: the tray is gone");
+            return;
+        };
+        let trust = main.state::<TrustState>().current();
+        if let Err(error) = tray::show_trust(&tray, trust) {
             tracing::warn!(%error, "tray update after a trust change failed");
         }
     });
@@ -789,6 +798,7 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
             .skip_taskbar(true)
             .visible_on_all_workspaces(true)
             .visible(false)
+            .on_navigation(is_app_url)
             .build()?;
     window.set_ignore_cursor_events(true)?;
 
@@ -801,4 +811,83 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
         "overlay window created"
     );
     Ok(window)
+}
+
+/// Opens the settings window, or brings the open one to the front. Runs on
+/// the main thread (tray menu events arrive there).
+pub(crate) fn show_settings_window(app: &AppHandle) {
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        tracing::warn!("settings requested off the main thread; window not shown");
+        return;
+    };
+    let window = if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
+        window
+    } else {
+        match build_settings_window(app) {
+            Ok(window) => window,
+            Err(error) => {
+                tracing::warn!(%error, "settings window not created");
+                return;
+            }
+        }
+    };
+    if let Some(pid) = macos::app::active_other_app(mtm) {
+        let return_to = app.state::<ReturnFocusTo>();
+        *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
+    }
+    macos::app::activate(mtm);
+    let shown = window
+        .unminimize()
+        .and_then(|()| window.show())
+        .and_then(|()| window.set_focus());
+    match shown {
+        Ok(()) => tracing::debug!("settings window shown"),
+        Err(error) => tracing::warn!(%error, "settings window not brought to the front"),
+    }
+}
+
+fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let window =
+        WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App("settings.html".into()))
+            .title("DockMoss Settings")
+            .inner_size(440.0, 560.0)
+            .resizable(false)
+            .maximizable(false)
+            .center()
+            .on_navigation(is_app_url)
+            .build()?;
+    let app = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            return_focus(&app);
+        }
+    });
+    Ok(window)
+}
+
+/// The app that was active when Settings… was chosen.
+#[derive(Default)]
+struct ReturnFocusTo(Mutex<Option<i32>>);
+
+/// The overlay never takes focus, so once Settings closes the keyboard goes
+/// back to the app the user was in, instead of staying with this app and no window.
+fn return_focus(app: &AppHandle) {
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        tracing::warn!("settings window closed off the main thread; focus not returned");
+        return;
+    };
+    let return_to = app.state::<ReturnFocusTo>();
+    let pid = return_to
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    let returned = pid.is_some_and(|pid| macos::app::activate_app(pid, mtm));
+    tracing::debug!(returned, "settings window closed");
+}
+
+/// Both windows load only the app's own pages: the bundled `tauri:` origin,
+/// and the Vite server on localhost in debug builds.
+fn is_app_url(url: &Url) -> bool {
+    url.scheme() == "tauri" || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
 }

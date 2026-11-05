@@ -56,8 +56,6 @@ pub fn run() {
     let built = tauri::Builder::default()
         // First: a second launch exits inside this plugin's setup, before
         // any other plugin and before our setup() opens a file or a window.
-        // The callback's arguments are the second process's argv and cwd,
-        // which can hold the user's name, so they are not logged.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             on_second_launch(app);
         }))
@@ -140,14 +138,6 @@ pub fn run() {
     });
 }
 
-/// The app has no Dock icon, so launching it again is how a user looks for
-/// it: open Settings as the tray's Settings… does.
-///
-/// A second launch opened from Finder or `open -n` is the active app until it
-/// exits. Settings records the active app as the one to hand focus back to on
-/// close, so wait until macOS has given the front back to that app, for at
-/// most `SECOND_LAUNCH_POLLS` × `SECOND_LAUNCH_POLL`.
-///
 /// The plugin calls this on a tokio task. Main-thread tasks run only once the
 /// event loop runs, which is after `setup()` has managed the state Settings
 /// needs.

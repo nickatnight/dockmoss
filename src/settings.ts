@@ -118,6 +118,11 @@ function exclusionItem(
   }
   const item = document.createElement("li");
   item.append(label);
+  // Focus scrolls the list only as far as the box; this brings in the whole
+  // row, which holds the focus ring.
+  checkbox.addEventListener("focus", () => {
+    item.scrollIntoView({ block: "nearest" });
+  });
   return item;
 }
 

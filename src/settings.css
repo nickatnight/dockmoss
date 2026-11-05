@@ -215,7 +215,6 @@ input[type="number"][aria-invalid="true"] {
 
 .apps input {
   margin: 0;
-  scroll-margin-block: 10px;
 }
 
 .apps .name {

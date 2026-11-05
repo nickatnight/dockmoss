@@ -741,6 +741,23 @@ describe("createLoginToggle", () => {
     expect(await second).toEqual({ result: notChanged, shown: true });
   });
 
+  it("keeps running changes after a change throws", async () => {
+    const wanted: boolean[] = [];
+    const toggle = createLoginToggle((change) => {
+      wanted.push(change);
+      return wanted.length === 1
+        ? Promise.reject(new Error("bridge gone"))
+        : Promise.resolve(ok(change));
+    });
+
+    const first = toggle(true);
+    const second = toggle(false);
+
+    await expect(first).rejects.toThrow("bridge gone");
+    expect(await second).toEqual({ result: ok(false), shown: false });
+    expect(wanted).toEqual([true, false]);
+  });
+
   it("sets the box again for a change made after the last one answered", async () => {
     const { calls, set } = fakeSet();
     const toggle = createLoginToggle(set);

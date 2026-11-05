@@ -1,4 +1,9 @@
-import { getSettings, saveSettings, type SettingsView } from "./ipc";
+import {
+  getSettings,
+  saveSettings,
+  setLaunchAtLogin,
+  type SettingsView,
+} from "./ipc";
 import {
   NO_FEEDBACK,
   createSettingsSaver,
@@ -6,6 +11,7 @@ import {
   exclusionLimitMessage,
   exclusionRows,
   invalidDays,
+  launchAtLoginShown,
   nextFeedback,
   reannounced,
   thresholdMessage,
@@ -13,6 +19,8 @@ import {
   type DayField,
   type ExclusionRow,
   type Feedback,
+  type Outcome,
+  type PageChange,
   type SettingsChange,
 } from "./settings/model";
 
@@ -29,6 +37,7 @@ function byId<T extends HTMLElement>(
 
 const page = {
   saveError: byId("save-error", HTMLParagraphElement),
+  launchAtLogin: byId("launch-at-login", HTMLInputElement),
   groups: [
     byId("stages", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
@@ -68,6 +77,7 @@ document.addEventListener("keydown", (event) => {
 
 function show(view: SettingsView): void {
   const { settings, limits } = view;
+  page.launchAtLogin.checked = view.launchAtLogin;
   for (const input of dayInputs) {
     input.min = String(limits.minFuzzDays);
     input.max = String(limits.maxOvergrownDays);
@@ -190,6 +200,7 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
   page.intensity.disabled = false;
+  page.launchAtLogin.disabled = false;
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const messages = {
@@ -198,6 +209,11 @@ async function start(): Promise<void> {
   };
   let feedback = NO_FEEDBACK;
   let wrongDays: DayField[] = [];
+  const report = (change: PageChange, result: Outcome): void => {
+    const again = reannounced(feedback, change, result);
+    feedback = nextFeedback(feedback, change, result);
+    showFeedback(feedback, messages, again, wrongDays);
+  };
   /** `undo` puts the control back when Rust refuses the value outright, as
    * for an exclusion past the cap, which no retry can store. */
   const commit = (change: SettingsChange, undo?: () => void): void => {
@@ -211,17 +227,30 @@ async function start(): Promise<void> {
         if (!result.ok) {
           console.error("settings not saved", result.error);
         }
-        const again = reannounced(feedback, change, result);
-        feedback = nextFeedback(feedback, change, result);
         if (change.field === "thresholds") {
           wrongDays = invalidDays(change.thresholds, view.limits);
         }
-        showFeedback(feedback, messages, again, wrongDays);
+        report(change, result);
         if (!result.ok && result.error.kind === "invalid_settings") {
           undo?.();
         }
       });
   };
+
+  /** One change at a time, so the box ends on the last answer macOS gave. */
+  let loginChange = Promise.resolve();
+  page.launchAtLogin.addEventListener("change", () => {
+    const wanted = page.launchAtLogin.checked;
+    loginChange = loginChange
+      .then(() => setLaunchAtLogin(wanted))
+      .then((result) => {
+        if (!result.ok) {
+          console.error("launch at login not changed", result.error);
+        }
+        page.launchAtLogin.checked = launchAtLoginShown(wanted, result);
+        report({ field: "launchAtLogin", enabled: wanted }, result);
+      });
+  });
 
   for (const input of dayInputs) {
     input.addEventListener("change", () => commit(enteredThresholds()));

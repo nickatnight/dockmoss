@@ -3,6 +3,7 @@ import type {
   DockAppName,
   EnteredThresholds,
   FastForward,
+  LaunchAtLoginResult,
   SaveSettingsResult,
   Settings,
   SettingsInput,
@@ -14,6 +15,14 @@ export type SettingsChange =
   | { field: "intensityPercent"; percent: number }
   | { field: "fastForward"; speed: FastForward }
   | { field: "excluded"; bundleId: BundleId; excluded: boolean };
+
+/** A change on the page: a setting, or launch at login, which macOS holds. */
+export type PageChange =
+  | SettingsChange
+  | { field: "launchAtLogin"; enabled: boolean };
+
+/** What the feedback rules read from a save or a launch at login change. */
+export type Outcome = { ok: true } | { ok: false; error: { kind: string } };
 
 export function nextSettings(
   saved: Settings,
@@ -75,20 +84,20 @@ export const NO_FEEDBACK: Feedback = {
   unsaved: [],
 };
 
-function changedControl(change: SettingsChange): string {
+function changedControl(change: PageChange): string {
   return change.field === "excluded"
     ? `excluded:${change.bundleId}`
     : change.field;
 }
 
-function rejected(result: SaveSettingsResult): boolean {
+function rejected(result: Outcome): boolean {
   return !result.ok && result.error.kind === "invalid_settings";
 }
 
 export function nextFeedback(
   feedback: Feedback,
-  change: SettingsChange,
-  result: SaveSettingsResult,
+  change: PageChange,
+  result: Outcome,
 ): Feedback {
   const control = changedControl(change);
   if (result.ok) {
@@ -116,8 +125,8 @@ export function nextFeedback(
  * shows is not a change a screen reader announces. */
 export function reannounced(
   before: Feedback,
-  change: SettingsChange,
-  result: SaveSettingsResult,
+  change: PageChange,
+  result: Outcome,
 ): { threshold: boolean; exclusionLimit: boolean; saveNotice: boolean } {
   const rejectedInPlace =
     rejected(result) &&
@@ -129,6 +138,15 @@ export function reannounced(
     exclusionLimit:
       before.exclusionLimit && change.field === "excluded" && rejected(result),
   };
+}
+
+/** The launch at login box after a change: what macOS reports, or, when the
+ * change did not go through, the state before it. */
+export function launchAtLoginShown(
+  wanted: boolean,
+  result: LaunchAtLoginResult,
+): boolean {
+  return result.ok ? result.enabled : !wanted;
 }
 
 export interface ExclusionRow {

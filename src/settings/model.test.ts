@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   BundleId,
   DockAppName,
+  LaunchAtLoginResult,
   SaveSettingsResult,
   Settings,
   SettingsInput,
@@ -13,6 +14,7 @@ import {
   createSettingsSaver,
   exclusionLimitMessage,
   invalidDays,
+  launchAtLoginShown,
   reannounced,
   enteredDays,
   exclusionRows,
@@ -508,5 +510,70 @@ describe("invalidDays", () => {
       "patchy",
       "overgrown",
     ]);
+  });
+});
+
+describe("launch at login feedback", () => {
+  const turnOn = { field: "launchAtLogin", enabled: true } as const;
+  const intensity = { field: "intensityPercent", percent: 40 } as const;
+  const notChanged: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "login_item_not_changed", message: "launch at login was not changed" },
+  };
+  const ipcFailed: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "ipc_failed", cause: "gone" },
+  };
+  const turnedOn: LaunchAtLoginResult = { ok: true, enabled: true };
+  const notSaved: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "settings_not_saved", message: "settings could not be saved" },
+  };
+
+  it.each([
+    ["login_item_not_changed", notChanged],
+    ["ipc_failed", ipcFailed],
+  ])("shows the save notice after %s, and no field message", (_kind, result) => {
+    expect(nextFeedback(NO_FEEDBACK, turnOn, result)).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["launchAtLogin"],
+    });
+  });
+
+  it("clears its own notice once a change goes through, and no other control's", () => {
+    const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
+    const bothFailed = nextFeedback(failed, intensity, notSaved);
+
+    expect(nextFeedback(bothFailed, turnOn, turnedOn).unsaved).toEqual(["intensityPercent"]);
+  });
+
+  it("re-announces the save notice when it fails again while the notice shows", () => {
+    const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
+
+    expect(reannounced(failed, turnOn, notChanged).saveNotice).toBe(true);
+    expect(reannounced(NO_FEEDBACK, turnOn, notChanged).saveNotice).toBe(false);
+  });
+});
+
+describe("launchAtLoginShown", () => {
+  it.each([
+    ["turned on", true, { ok: true, enabled: true }, true],
+    ["turned off", false, { ok: true, enabled: false }, false],
+    [
+      "on refused",
+      true,
+      { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
+      false,
+    ],
+    [
+      "off refused",
+      false,
+      { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
+      true,
+    ],
+    ["on, no reply", true, { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, false],
+  ] as const)("%s: the box shows what macOS ends in", (_case, wanted, result, expected) => {
+    expect(launchAtLoginShown(wanted, result)).toBe(expected);
   });
 });

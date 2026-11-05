@@ -9,6 +9,7 @@ fn main() {
             "watch_growth",
             "get_settings",
             "save_settings",
+            "set_launch_at_login",
         ]),
     ))
     .expect("the app manifest lists only commands that exist");

@@ -31,7 +31,8 @@ export type ErrorKind =
   | "tracker_stopped"
   | "usage_stopped"
   | "invalid_settings"
-  | "settings_not_saved";
+  | "settings_not_saved"
+  | "login_item_not_changed";
 
 export interface Thresholds {
   fuzz: number;
@@ -71,6 +72,8 @@ export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
   dockApps: DockAppName[] | null;
+  /** From macOS, not from the settings file. */
+  launchAtLogin: boolean;
 }
 
 export interface CommandError {
@@ -138,5 +141,29 @@ export async function saveSettings(
     return { ok: true, settings: saved };
   } catch (error) {
     return { ok: false, error: saveSettingsError(error) };
+  }
+}
+
+export type LaunchAtLoginResult =
+  | { ok: true; enabled: boolean }
+  | {
+      ok: false;
+      error:
+        | { kind: "login_item_not_changed"; message: string }
+        | { kind: "ipc_failed"; cause: unknown };
+    };
+
+/** Turns launch at login on or off. `enabled` is what macOS reports after. */
+export async function setLaunchAtLogin(
+  enabled: boolean,
+): Promise<LaunchAtLoginResult> {
+  try {
+    const now = await invoke<boolean>("set_launch_at_login", { enabled });
+    return { ok: true, enabled: now };
+  } catch (error) {
+    if (isCommandError(error) && error.kind === "login_item_not_changed") {
+      return { ok: false, error: { kind: error.kind, message: error.message } };
+    }
+    return { ok: false, error: { kind: "ipc_failed", cause: error } };
   }
 }

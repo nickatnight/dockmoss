@@ -5,6 +5,7 @@ mod error;
 mod focus;
 mod geometry;
 mod growth;
+mod login_item;
 mod macos;
 mod navigation;
 mod settings;
@@ -70,7 +71,8 @@ pub fn run() {
             commands::watch_dock,
             commands::watch_growth,
             commands::get_settings,
-            commands::save_settings
+            commands::save_settings,
+            commands::set_launch_at_login
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);

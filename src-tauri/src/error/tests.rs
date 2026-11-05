@@ -119,6 +119,20 @@ fn unsaved_settings_have_their_own_kind_and_no_path_in_the_message() {
 }
 
 #[test]
+fn an_unchanged_login_item_has_its_own_kind() {
+    let json = serde_json::to_value(Error::from(crate::login_item::NotChanged))
+        .expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "login_item_not_changed",
+            "message": "launch at login was not changed"
+        })
+    );
+}
+
+#[test]
 fn error_kind_in_ipc_ts_lists_every_error_kind() {
     let errors = [
         Error::Tauri(tauri::Error::WindowNotFound),
@@ -129,6 +143,7 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
         Error::UsageStopped,
         Error::InvalidSettings(crate::settings::SettingsError::Intensity),
         Error::SettingsNotSaved(crate::settings::NotSaved::new(std::io::Error::other("x"))),
+        Error::LoginItemNotChanged(crate::login_item::NotChanged),
     ];
     for error in &errors {
         // A new variant must be added here and to `errors`; the `declared`
@@ -141,7 +156,8 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
             | Error::TrackerStopped
             | Error::UsageStopped
             | Error::InvalidSettings(_)
-            | Error::SettingsNotSaved(_) => {}
+            | Error::SettingsNotSaved(_)
+            | Error::LoginItemNotChanged(_) => {}
         }
     }
     let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();

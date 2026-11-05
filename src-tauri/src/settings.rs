@@ -241,10 +241,12 @@ pub struct SettingsView {
     settings: Settings,
     limits: Limits,
     dock_apps: Option<Vec<DockAppName>>,
+    /// From macOS, not from the settings file.
+    launch_at_login: bool,
 }
 
 impl SettingsView {
-    pub fn new(settings: Settings, dock: Option<&DistinctDockApps>) -> Self {
+    pub fn new(settings: Settings, dock: Option<&DistinctDockApps>, launch_at_login: bool) -> Self {
         let dock_apps = dock
             .map(|dock| dock.iter().map(DockAppName::new).collect::<Vec<_>>())
             .filter(|names| !names.is_empty());
@@ -252,6 +254,7 @@ impl SettingsView {
             settings,
             limits: LIMITS,
             dock_apps,
+            launch_at_login,
         }
     }
 }

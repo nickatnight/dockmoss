@@ -149,6 +149,21 @@ input[type="number"][aria-invalid="true"] {
   font-variant-numeric: tabular-nums;
 }
 
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  margin: 0;
+}
+
+/* Lines the hint up with the label text, past the checkbox and the gap. */
+.check-hint {
+  margin: 2px 0 0 22px;
+}
+
 .speeds {
   display: flex;
   gap: 20px;
@@ -244,7 +259,8 @@ input[type="range"]:focus-visible {
 }
 
 fieldset:disabled,
-.group:has(> .slider > input:disabled) {
+.group:has(> .slider > input:disabled),
+.group:has(> .check > input:disabled) {
   opacity: 0.6;
 }
 

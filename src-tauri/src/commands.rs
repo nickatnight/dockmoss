@@ -10,6 +10,8 @@ use tauri::{AppHandle, Manager, State};
 use crate::Error;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
+use crate::login_item;
+use crate::macos;
 use crate::settings::{self, NotSaved, Settings, SettingsView};
 use crate::usage::{self, AppGrowth, DistinctDockApps};
 
@@ -62,11 +64,14 @@ pub async fn get_settings(
     settings: State<'_, Mutex<Settings>>,
 ) -> Result<SettingsView, Error> {
     let dock = dock_apps(&app).await;
+    let launch_at_login =
+        tauri::async_runtime::spawn_blocking(|| macos::login_item::status().opens_at_login())
+            .await?;
     let settings = settings
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    Ok(SettingsView::new(settings, dock.as_ref()))
+    Ok(SettingsView::new(settings, dock.as_ref(), launch_at_login))
 }
 
 async fn dock_apps(app: &AppHandle) -> Option<DistinctDockApps> {
@@ -134,4 +139,24 @@ fn apply_to_growth(app: &AppHandle, saved: &Settings) {
     {
         tracing::warn!("saved settings not applied: the usage thread stopped");
     }
+}
+
+/// Turns launch at login on or off and returns whether the app now opens at
+/// login, as macOS reports it after the change. `login_item_not_changed` when
+/// macOS did not end in the state asked for.
+#[tauri::command]
+pub async fn set_launch_at_login(enabled: bool) -> Result<bool, Error> {
+    tauri::async_runtime::spawn_blocking(move || set_launch_at_login_blocking(enabled)).await?
+}
+
+fn set_launch_at_login_blocking(wanted: bool) -> Result<bool, Error> {
+    if let Err(error) = macos::login_item::set(wanted) {
+        tracing::warn!(%error, wanted, "launch at login change refused");
+    }
+    let after = macos::login_item::status();
+    let now = login_item::outcome(wanted, after).inspect_err(|_| {
+        tracing::warn!(wanted, ?after, "launch at login not changed");
+    })?;
+    tracing::info!(launch_at_login = now, "launch at login changed");
+    Ok(now)
 }

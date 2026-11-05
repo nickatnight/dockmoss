@@ -2,6 +2,7 @@ import type {
   BundleId,
   DockAppName,
   EnteredThresholds,
+  ErrorKind,
   FastForward,
   LaunchAtLoginResult,
   SaveSettingsResult,
@@ -20,7 +21,9 @@ export type PageChange =
   | SettingsChange
   | { field: "launchAtLogin"; enabled: boolean };
 
-export type Outcome = { ok: true } | { ok: false; error: { kind: string } };
+export type Outcome =
+  | { ok: true }
+  | { ok: false; error: { kind: ErrorKind | "ipc_failed" } };
 
 export function nextSettings(
   saved: Settings,

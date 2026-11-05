@@ -248,7 +248,7 @@ fn a_temp_file_or_another_name_is_left_and_keeps_the_old_folder() {
 }
 
 #[test]
-fn a_move_that_fails_leaves_the_file_in_the_old_folder() {
+fn a_read_only_old_folder_still_gives_the_new_folder_the_file() {
     let folders = folders();
     write(&folders.old, "launch_log.json", "log");
     fs::set_permissions(&folders.old, fs::Permissions::from_mode(0o500)).expect("chmod old");
@@ -259,13 +259,118 @@ fn a_move_that_fails_leaves_the_file_in_the_old_folder() {
     assert_eq!(
         report,
         MoveReport {
-            failed: 1,
+            moved: 1,
             old_folder: OldFolder::Left,
             ..MoveReport::default()
         }
     );
+    assert!(!report.left_behind("launch_log.json"));
+    assert_eq!(read(&folders.new, "launch_log.json"), "log");
     assert_eq!(read(&folders.old, "launch_log.json"), "log");
+}
+
+/// `chflags uchg` makes a file immutable: macOS refuses to link or rename
+/// it, which is how a move fails here.
+fn set_immutable(path: &Path, immutable: bool) {
+    let flag = if immutable { "uchg" } else { "nouchg" };
+    let status = std::process::Command::new("chflags")
+        .arg(flag)
+        .arg(path)
+        .status()
+        .expect("chflags runs");
+    assert!(status.success(), "chflags {flag}");
+}
+
+#[test]
+fn a_failed_move_leaves_the_file_behind_and_a_later_start_moves_it() {
+    let folders = folders();
+    write(&folders.old, "launch_log.json", "log");
+    write(&folders.old, "settings.json", "settings");
+    set_immutable(&folders.old.join("launch_log.json"), true);
+
+    let first = move_old_data(&folders.old, &folders.new);
+
+    set_immutable(&folders.old.join("launch_log.json"), false);
+    assert_eq!(
+        first,
+        MoveReport {
+            moved: 1,
+            failed: vec!["launch_log.json"],
+            old_folder: OldFolder::Left,
+            ..MoveReport::default()
+        }
+    );
+    assert!(first.left_behind("launch_log.json"));
+    assert!(!first.left_behind("settings.json"));
     assert!(!folders.new.join("launch_log.json").exists());
+
+    let retry = move_old_data(&folders.old, &folders.new);
+
+    assert_eq!(
+        retry,
+        MoveReport {
+            moved: 1,
+            old_folder: OldFolder::Removed,
+            ..MoveReport::default()
+        }
+    );
+    assert!(!retry.left_behind("launch_log.json"));
+    assert_eq!(read(&folders.new, "launch_log.json"), "log");
+}
+
+#[test]
+fn only_a_failed_move_leaves_a_file_behind() {
+    let cases = [
+        ("nothing happened", MoveReport::default(), false),
+        (
+            "moved",
+            MoveReport {
+                moved: 1,
+                old_folder: OldFolder::Removed,
+                ..MoveReport::default()
+            },
+            false,
+        ),
+        (
+            "kept: the new folder's file is the live one",
+            MoveReport {
+                kept: 1,
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            false,
+        ),
+        (
+            "skipped: a link never moves, so a retry cannot help",
+            MoveReport {
+                skipped: 1,
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            false,
+        ),
+        (
+            "another file failed",
+            MoveReport {
+                failed: vec!["settings.json"],
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            false,
+        ),
+        (
+            "the launch log failed",
+            MoveReport {
+                failed: vec!["launch_log.json"],
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+    ];
+    for (case, report, expected) in cases {
+        assert_eq!(report.left_behind("launch_log.json"), expected, "{case}");
+    }
 }
 
 #[test]

@@ -16,6 +16,7 @@ use crate::settings::{self, NotSaved, Settings, SettingsView};
 use crate::usage::{self, AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
+const LOGIN_STATUS_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
@@ -63,15 +64,46 @@ pub async fn get_settings(
     app: AppHandle,
     settings: State<'_, Mutex<Settings>>,
 ) -> Result<SettingsView, Error> {
+    let login = tauri::async_runtime::spawn(launch_at_login());
     let dock = dock_apps(&app).await;
-    let launch_at_login =
-        tauri::async_runtime::spawn_blocking(|| macos::login_item::status().opens_at_login())
-            .await?;
+    let launch_at_login = login.await.unwrap_or_else(|error| {
+        tracing::warn!(%error, "launch at login status not read");
+        None
+    });
     let settings = settings
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
     Ok(SettingsView::new(settings, dock.as_ref(), launch_at_login))
+}
+
+/// `None` when `ServiceManagement` does not answer in time, so Settings opens
+/// anyway, with only the launch at login box left disabled.
+async fn launch_at_login() -> Option<bool> {
+    let (reply, replied) = mpsc::channel();
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        if reply
+            .send(macos::login_item::status().opens_at_login())
+            .is_err()
+        {
+            tracing::debug!("launch at login status read after settings stopped waiting");
+        }
+    });
+    drop(read);
+    let waited =
+        tauri::async_runtime::spawn_blocking(move || replied.recv_timeout(LOGIN_STATUS_TIMEOUT))
+            .await;
+    match waited {
+        Ok(Ok(opens_at_login)) => Some(opens_at_login),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "launch at login status not read in time");
+            None
+        }
+        Err(error) => {
+            tracing::warn!(%error, "launch at login status not read");
+            None
+        }
+    }
 }
 
 async fn dock_apps(app: &AppHandle) -> Option<DistinctDockApps> {
@@ -158,6 +190,6 @@ fn set_launch_at_login_blocking(wanted: bool) -> Result<bool, Error> {
     let now = login_item::outcome(wanted, after).inspect_err(|_| {
         tracing::warn!(wanted, ?after, "launch at login not changed");
     })?;
-    tracing::info!(launch_at_login = now, "launch at login changed");
+    tracing::info!(launch_at_login = now, "launch at login set");
     Ok(now)
 }

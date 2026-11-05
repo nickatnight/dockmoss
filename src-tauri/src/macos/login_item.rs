@@ -35,8 +35,11 @@ impl RedactedNsError {
 )]
 pub fn status() -> LoginItemStatus {
     // SAFETY: `mainAppService` takes no arguments and returns a retained
-    // object for this app's own bundle; `status` only reads it.
-    let status = unsafe { SMAppService::mainAppService().status() };
+    // object for this app's own bundle.
+    let service = unsafe { SMAppService::mainAppService() };
+    // SAFETY: `service` is a valid, retained `SMAppService` that lives for
+    // the call; `status` takes no arguments and only reads it.
+    let status = unsafe { service.status() };
     match status {
         SMAppServiceStatus::Enabled => LoginItemStatus::Enabled,
         SMAppServiceStatus::RequiresApproval => LoginItemStatus::RequiresApproval,

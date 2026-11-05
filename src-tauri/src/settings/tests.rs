@@ -436,7 +436,7 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
     let view = SettingsView::new(
         Settings::default(),
         Some(&DistinctDockApps::new(&dock)),
-        true,
+        Some(true),
     );
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
@@ -457,11 +457,15 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
 
 #[test]
 fn an_unknown_dock_list_is_sent_as_null() {
-    let view = SettingsView::new(Settings::default(), None, false);
+    let view = SettingsView::new(Settings::default(), None, None);
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(json["dockApps"], Value::Null);
-    assert_eq!(json["launchAtLogin"], Value::Bool(false));
+    assert_eq!(
+        json["launchAtLogin"],
+        Value::Null,
+        "an unknown login status is sent as null"
+    );
 }
 
 #[test]
@@ -469,7 +473,7 @@ fn an_empty_dock_list_is_unknown_because_a_readable_dock_always_holds_finder() {
     let view = SettingsView::new(
         Settings::default(),
         Some(&DistinctDockApps::new(&[])),
-        false,
+        Some(false),
     );
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");

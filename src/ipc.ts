@@ -72,7 +72,8 @@ export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
   dockApps: DockAppName[] | null;
-  launchAtLogin: boolean;
+  /** From macOS; null when it did not answer in time. */
+  launchAtLogin: boolean | null;
 }
 
 export interface CommandError {

@@ -16,7 +16,7 @@ mod usage;
 
 pub use error::Error;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
@@ -82,7 +82,7 @@ pub fn run() {
             app.manage(LastOtherApp::default());
             let data_dir = moved_app_data_dir(app.handle());
             let (settings, settings_path) = load_settings(data_dir.as_ref());
-            app.manage(Mutex::new(settings));
+            app.manage(Mutex::new(settings.clone()));
             if let Some(path) = settings_path {
                 app.manage(SettingsPath(path));
             }
@@ -103,12 +103,17 @@ pub fn run() {
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
             track_last_other_app(app.handle(), mtm);
-            if let Some(data_dir) = &data_dir {
-                if let Err(error) = start_launch_log(app.handle(), mtm, data_dir) {
+            let launch_log = data_dir
+                .as_ref()
+                .and_then(|data_dir| data_dir.file(LAUNCH_LOG_FILE));
+            if let Some(path) = launch_log {
+                if let Err(error) = start_launch_log(app.handle(), mtm, &path, &settings) {
                     tracing::warn!(%error, "usage tracking not started; running without growth");
                 }
             } else {
-                tracing::warn!("usage tracking not started: the app data folder is unknown");
+                tracing::warn!(
+                    "usage tracking not started: the launch log is unknown or still in the old app folder"
+                );
             }
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
@@ -189,20 +194,15 @@ fn on_second_launch(app: &AppHandle) {
 fn start_launch_log(
     app: &AppHandle,
     mtm: macos::MainThreadMarker,
-    data_dir: &DataDir,
+    path: &Path,
+    saved: &Settings,
 ) -> tauri::Result<()> {
-    let path = data_dir.0.join(LAUNCH_LOG_FILE);
-    let log = usage::load_or_set_aside(&path, Timestamp::now());
+    let log = usage::load_or_set_aside(path, Timestamp::now());
     let entries = log.len();
     let first_run = log.baseline_at().is_none();
-    let saved = app
-        .state::<Mutex<Settings>>()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
     let fast_forward_override = fast_forward_override();
     let fast_forward = saved.applied(fast_forward_override).fast_forward;
-    let inbox = launch_log_writer::spawn(path.clone(), log, &saved, fast_forward_override)?;
+    let inbox = launch_log_writer::spawn(path.to_path_buf(), log, saved, fast_forward_override)?;
     let own_bundle_id = app.config().identifier.clone();
     let now = Timestamp::now();
     let mut running = 0_usize;
@@ -242,7 +242,19 @@ fn start_launch_log(
 /// The app data folder once the old folder's files are in it. Only
 /// `moved_app_data_dir` makes one, so nothing that reads app data can run
 /// before the move.
-struct DataDir(PathBuf);
+struct DataDir {
+    dir: PathBuf,
+    moved: usage::MoveReport,
+}
+
+impl DataDir {
+    /// `None` when the move left this file in the old folder: writing a new
+    /// one here would strand the old one for good, so this session goes
+    /// without it and the next start moves it.
+    fn file(&self, name: &str) -> Option<PathBuf> {
+        (!self.moved.left_behind(name)).then(|| self.dir.join(name))
+    }
+}
 
 fn moved_app_data_dir(app: &AppHandle) -> Option<DataDir> {
     let new_dir = match app.path().app_data_dir() {
@@ -252,18 +264,23 @@ fn moved_app_data_dir(app: &AppHandle) -> Option<DataDir> {
             return None;
         }
     };
-    if let Some(old_dir) = usage::old_data_dir(&new_dir) {
-        usage::move_old_data(&old_dir, &new_dir).log();
-    }
-    Some(DataDir(new_dir))
+    let moved = usage::old_data_dir(&new_dir)
+        .map(|old_dir| usage::move_old_data(&old_dir, &new_dir))
+        .unwrap_or_default();
+    moved.log();
+    Some(DataDir {
+        dir: new_dir,
+        moved,
+    })
 }
 
 fn load_settings(data_dir: Option<&DataDir>) -> (Settings, Option<PathBuf>) {
-    let Some(DataDir(dir)) = data_dir else {
-        tracing::warn!("settings path unknown; using defaults, saving off");
+    let Some(path) = data_dir.and_then(|data_dir| data_dir.file(SETTINGS_FILE)) else {
+        tracing::warn!(
+            "settings file unknown or still in the old app folder; using defaults, saving off"
+        );
         return (Settings::default(), None);
     };
-    let path = dir.join(SETTINGS_FILE);
     let loaded = settings::load_file(&path);
     for problem in &loaded.problems {
         tracing::warn!(%problem, "stored setting not loaded");

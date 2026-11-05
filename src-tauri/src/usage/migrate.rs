@@ -73,23 +73,32 @@ pub enum OldFolder {
     Left,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MoveReport {
     pub moved: usize,
     pub kept: usize,
     pub skipped: usize,
-    pub failed: usize,
+    /// Regular files that stayed in the old folder because their move failed.
+    pub failed: Vec<&'static str>,
     pub old_folder: OldFolder,
 }
 
 impl MoveReport {
+    /// The file is still in the old folder and a later start may move it, so
+    /// nothing may write a new one in its place this session: the new one
+    /// would be kept, and the old one never read again.
+    pub fn left_behind(&self, name: &str) -> bool {
+        self.failed.contains(&name)
+    }
+
     pub fn log(&self) {
+        let failed = self.failed.len();
         let Self {
             moved,
             kept,
             skipped,
-            failed,
             old_folder,
+            ..
         } = *self;
         if moved + kept + skipped + failed > 0 || old_folder == OldFolder::Removed {
             tracing::info!(
@@ -113,14 +122,15 @@ pub fn old_data_dir(new_dir: &Path) -> Option<PathBuf> {
 }
 
 /// Creates `new_dir` (0700) and moves each of `MOVED_FILES` that is a
-/// regular file in `old_dir` and absent from `new_dir`, with `rename`. Then
-/// removes `old_dir` if it is empty. Logs a `warn` naming each file left
-/// behind, never a path. Running it again finds nothing left to do.
+/// regular file in `old_dir` and absent from `new_dir`. Then removes
+/// `old_dir` if it is empty. Logs a `warn` naming each file left behind,
+/// never a path. Running it again finds nothing left to do.
 pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
-    if let Err(error) = private_dir(new_dir) {
-        tracing::warn!(kind = %error.kind(), "app data folder not created; old data not moved");
-        return MoveReport::default();
-    }
+    let new_dir_ready = private_dir(new_dir)
+        .inspect_err(|error| {
+            tracing::warn!(kind = %error.kind(), "app data folder not made private");
+        })
+        .is_ok();
     match fs::symlink_metadata(old_dir) {
         Ok(metadata) if metadata.file_type().is_dir() => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => return MoveReport::default(),
@@ -135,18 +145,36 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
     let mut report = MoveReport::default();
     for step in plan_move(&Listing::read(old_dir), &Listing::read(new_dir)) {
         match step {
-            Step::Move(name) => match fs::rename(old_dir.join(name), new_dir.join(name)) {
-                Ok(()) => report.moved += 1,
-                Err(error) => {
-                    report.failed += 1;
-                    tracing::warn!(file = name, kind = %error.kind(), "old data file not moved; left in the old folder");
+            Step::Move(name) if !new_dir_ready => {
+                report.failed.push(name);
+                tracing::warn!(
+                    file = name,
+                    "old data file not moved: the app data folder is not usable"
+                );
+            }
+            Step::Move(name) => match move_file(&old_dir.join(name), &new_dir.join(name)) {
+                Moved::Yes => report.moved += 1,
+                Moved::OldCopyLeft(kind) => {
+                    report.moved += 1;
+                    tracing::warn!(file = name, %kind, "old data file moved; its old copy was not removed");
+                }
+                Moved::NameTaken => {
+                    report.kept += 1;
+                    tracing::info!(
+                        file = name,
+                        "the new app folder took this name first; the old file is left"
+                    );
+                }
+                Moved::No(kind) => {
+                    report.failed.push(name);
+                    tracing::warn!(file = name, %kind, "old data file not moved; left in the old folder");
                 }
             },
             Step::KeepNew(name) => {
                 report.kept += 1;
-                tracing::warn!(
+                tracing::info!(
                     file = name,
-                    "the new app folder already has this file; the old one is left"
+                    "the new app folder already has an entry with this name; the old file is left"
                 );
             }
             Step::LeaveNotARegularFile(name) => {
@@ -168,6 +196,29 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
         }
     };
     report
+}
+
+enum Moved {
+    Yes,
+    /// The new name holds the data; the old name could not be removed, so the
+    /// next start keeps the new file and leaves the old one.
+    OldCopyLeft(io::ErrorKind),
+    /// Something took the new name after the plan was made.
+    NameTaken,
+    No(io::ErrorKind),
+}
+
+/// `hard_link` fails when the new name exists, so nothing is ever
+/// overwritten, as `rename` would.
+fn move_file(old: &Path, new: &Path) -> Moved {
+    match fs::hard_link(old, new) {
+        Ok(()) => match fs::remove_file(old) {
+            Ok(()) => Moved::Yes,
+            Err(error) => Moved::OldCopyLeft(error.kind()),
+        },
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Moved::NameTaken,
+        Err(error) => Moved::No(error.kind()),
+    }
 }
 
 #[cfg(test)]

@@ -40,30 +40,35 @@ export interface ExclusionRow {
   bundleId: BundleId;
   label: string;
   excluded: boolean;
-  inDock: boolean;
+  place: "dock" | "notInDock" | "unknown";
 }
 
 export function exclusionRows(
-  dockApps: readonly DockAppName[],
+  dockApps: readonly DockAppName[] | null,
   excluded: readonly BundleId[],
 ): ExclusionRow[] {
   const excludedSet = new Set(excluded);
-  const inDock = new Set(dockApps.map((app) => app.bundleId));
-  const docked = dockApps.map((app) => ({
-    bundleId: app.bundleId,
-    label: app.name,
-    excluded: excludedSet.has(app.bundleId),
-    inDock: true,
-  }));
+  const docked = (dockApps ?? []).map(
+    (app): ExclusionRow => ({
+      bundleId: app.bundleId,
+      label: app.name,
+      excluded: excludedSet.has(app.bundleId),
+      place: "dock",
+    }),
+  );
+  const inDock = new Set(docked.map((row) => row.bundleId));
+  const strayPlace = dockApps === null ? "unknown" : "notInDock";
   const strays = [...excludedSet]
     .filter((bundleId) => !inDock.has(bundleId))
     .sort()
-    .map((bundleId) => ({
-      bundleId,
-      label: bundleId,
-      excluded: true,
-      inDock: false,
-    }));
+    .map(
+      (bundleId): ExclusionRow => ({
+        bundleId,
+        label: bundleId,
+        excluded: true,
+        place: strayPlace,
+      }),
+    );
   return [...docked, ...strays];
 }
 

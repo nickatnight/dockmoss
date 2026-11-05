@@ -44,7 +44,7 @@ impl Change {
 }
 
 /// The Dock's apps, one per bundle ID (its first entry), in Dock order.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DistinctDockApps(Vec<DockApp>);
 
 impl DistinctDockApps {

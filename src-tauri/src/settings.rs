@@ -195,15 +195,18 @@ pub struct Limits {
 pub struct SettingsView {
     settings: Settings,
     limits: Limits,
-    dock_apps: Vec<DockAppName>,
+    dock_apps: Option<Vec<DockAppName>>,
 }
 
 impl SettingsView {
-    pub fn new(settings: Settings, dock: &DistinctDockApps) -> Self {
+    pub fn new(settings: Settings, dock: Option<&DistinctDockApps>) -> Self {
+        let dock_apps = dock
+            .map(|dock| dock.iter().map(DockAppName::new).collect::<Vec<_>>())
+            .filter(|names| !names.is_empty());
         Self {
             settings,
             limits: LIMITS,
-            dock_apps: dock.iter().map(DockAppName::new).collect(),
+            dock_apps,
         }
     }
 }

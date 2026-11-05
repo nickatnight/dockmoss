@@ -154,9 +154,9 @@ describe("exclusionRows", () => {
     const rows = exclusionRows(dockApps, [id("com.apple.Chess")]);
 
     expect(rows).toEqual([
-      { bundleId: "com.apple.finder", label: "Finder", excluded: false, inDock: true },
-      { bundleId: "com.apple.Chess", label: "Chess", excluded: true, inDock: true },
-      { bundleId: "com.tinyspeck.slackmacgap", label: "Slack", excluded: false, inDock: true },
+      { bundleId: "com.apple.finder", label: "Finder", excluded: false, place: "dock" },
+      { bundleId: "com.apple.Chess", label: "Chess", excluded: true, place: "dock" },
+      { bundleId: "com.tinyspeck.slackmacgap", label: "Slack", excluded: false, place: "dock" },
     ]);
   });
 
@@ -168,16 +168,16 @@ describe("exclusionRows", () => {
     ]);
 
     expect(rows.slice(3)).toEqual([
-      { bundleId: "com.another.Removed", label: "com.another.Removed", excluded: true, inDock: false },
-      { bundleId: "com.example.Gone", label: "com.example.Gone", excluded: true, inDock: false },
+      { bundleId: "com.another.Removed", label: "com.another.Removed", excluded: true, place: "notInDock" },
+      { bundleId: "com.example.Gone", label: "com.example.Gone", excluded: true, place: "notInDock" },
     ]);
     expect(rows.filter((row) => row.bundleId === "com.apple.Chess")).toHaveLength(1);
   });
 
-  it("lists only stray exclusions while the Dock is unknown", () => {
-    expect(exclusionRows([], [])).toEqual([]);
-    expect(exclusionRows([], [id("com.apple.Chess")])).toEqual([
-      { bundleId: "com.apple.Chess", label: "com.apple.Chess", excluded: true, inDock: false },
+  it("lists exclusions by bundle ID, without claiming they left the Dock, while the Dock is unknown", () => {
+    expect(exclusionRows(null, [])).toEqual([]);
+    expect(exclusionRows(null, [id("com.apple.Chess")])).toEqual([
+      { bundleId: "com.apple.Chess", label: "com.apple.Chess", excluded: true, place: "unknown" },
     ]);
   });
 });

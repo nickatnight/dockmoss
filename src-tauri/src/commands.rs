@@ -63,30 +63,30 @@ pub async fn get_settings(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    Ok(SettingsView::new(settings, &dock))
+    Ok(SettingsView::new(settings, dock.as_ref()))
 }
 
-async fn dock_apps(app: &AppHandle) -> DistinctDockApps {
+async fn dock_apps(app: &AppHandle) -> Option<DistinctDockApps> {
     let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
         tracing::debug!("settings opened with usage tracking off; no dock apps listed");
-        return DistinctDockApps::default();
+        return None;
     };
     let (reply, replied) = mpsc::channel();
     if inbox.0.send(WriterMessage::ListDockApps(reply)).is_err() {
         tracing::warn!("dock apps not listed: the usage thread stopped");
-        return DistinctDockApps::default();
+        return None;
     }
     let waited =
         tauri::async_runtime::spawn_blocking(move || replied.recv_timeout(DOCK_APPS_TIMEOUT)).await;
     match waited {
-        Ok(Ok(apps)) => apps,
+        Ok(Ok(apps)) => Some(apps),
         Ok(Err(error)) => {
             tracing::warn!(%error, "dock apps not listed in time");
-            DistinctDockApps::default()
+            None
         }
         Err(error) => {
             tracing::warn!(%error, "dock apps not listed");
-            DistinctDockApps::default()
+            None
         }
     }
 }

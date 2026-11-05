@@ -431,7 +431,7 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
         dock_app("com.apple.Chess", "/System/Applications/Chess.app"),
     ];
 
-    let view = SettingsView::new(Settings::default(), &DistinctDockApps::new(&dock));
+    let view = SettingsView::new(Settings::default(), Some(&DistinctDockApps::new(&dock)));
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(
@@ -446,4 +446,20 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
         })
     );
     assert!(!json.to_string().contains("someone"), "{json}");
+}
+
+#[test]
+fn an_unknown_dock_list_is_sent_as_null() {
+    let view = SettingsView::new(Settings::default(), None);
+
+    let json = serde_json::to_value(&view).expect("SettingsView serializes");
+    assert_eq!(json["dockApps"], Value::Null);
+}
+
+#[test]
+fn an_empty_dock_list_is_unknown_because_a_readable_dock_always_holds_finder() {
+    let view = SettingsView::new(Settings::default(), Some(&DistinctDockApps::new(&[])));
+
+    let json = serde_json::to_value(&view).expect("SettingsView serializes");
+    assert_eq!(json["dockApps"], Value::Null);
 }

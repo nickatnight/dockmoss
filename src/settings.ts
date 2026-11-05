@@ -84,7 +84,6 @@ function show(view: SettingsView): void {
 
 function exclusionItem(
   row: ExclusionRow,
-  dockKnown: boolean,
   onChange: (excluded: boolean) => void,
 ): HTMLLIElement {
   const checkbox = document.createElement("input");
@@ -96,7 +95,7 @@ function exclusionItem(
   name.textContent = row.label;
   const label = document.createElement("label");
   label.append(checkbox, name);
-  if (!row.inDock && dockKnown) {
+  if (row.place === "notInDock") {
     const note = document.createElement("span");
     note.className = "note";
     note.textContent = "Not in the Dock";
@@ -185,11 +184,10 @@ async function start(): Promise<void> {
       percent: page.intensity.valueAsNumber,
     }),
   );
-  const dockKnown = view.dockApps.length > 0;
-  page.dockUnknown.hidden = dockKnown;
+  page.dockUnknown.hidden = view.dockApps !== null;
   page.excludedApps.replaceChildren(
     ...exclusionRows(view.dockApps, view.settings.excluded).map((row) =>
-      exclusionItem(row, dockKnown, (excluded) =>
+      exclusionItem(row, (excluded) =>
         commit({ field: "excluded", bundleId: row.bundleId, excluded }),
       ),
     ),

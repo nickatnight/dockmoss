@@ -62,7 +62,7 @@ export interface DockAppName {
 export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
-  dockApps: DockAppName[];
+  dockApps: DockAppName[] | null;
 }
 
 export interface CommandError {

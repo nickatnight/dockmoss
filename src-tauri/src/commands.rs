@@ -10,7 +10,7 @@ use crate::Error;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
 use crate::settings::{Settings, SettingsView};
-use crate::usage::{AppGrowth, DockApp};
+use crate::usage::{AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -66,15 +66,15 @@ pub async fn get_settings(
     Ok(SettingsView::new(settings, &dock))
 }
 
-async fn dock_apps(app: &AppHandle) -> Vec<DockApp> {
+async fn dock_apps(app: &AppHandle) -> DistinctDockApps {
     let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
         tracing::debug!("settings opened with usage tracking off; no dock apps listed");
-        return Vec::new();
+        return DistinctDockApps::default();
     };
     let (reply, replied) = mpsc::channel();
     if inbox.0.send(WriterMessage::ListDockApps(reply)).is_err() {
         tracing::warn!("dock apps not listed: the usage thread stopped");
-        return Vec::new();
+        return DistinctDockApps::default();
     }
     let waited =
         tauri::async_runtime::spawn_blocking(move || replied.recv_timeout(DOCK_APPS_TIMEOUT)).await;
@@ -82,11 +82,11 @@ async fn dock_apps(app: &AppHandle) -> Vec<DockApp> {
         Ok(Ok(apps)) => apps,
         Ok(Err(error)) => {
             tracing::warn!(%error, "dock apps not listed in time");
-            Vec::new()
+            DistinctDockApps::default()
         }
         Err(error) => {
             tracing::warn!(%error, "dock apps not listed");
-            Vec::new()
+            DistinctDockApps::default()
         }
     }
 }

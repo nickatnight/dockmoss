@@ -302,8 +302,8 @@ mod launch_log_writer {
     use crate::growth::{FastForward, Thresholds};
     use crate::macos;
     use crate::usage::{
-        self, AppEventKind, AppGrowth, Change, DockApp, DockUpdate, LaunchLog, SaveSchedule,
-        UsageState,
+        self, AppEventKind, AppGrowth, Change, DistinctDockApps, DockApp, DockUpdate, LaunchLog,
+        SaveSchedule, UsageState,
     };
 
     pub enum WriterMessage {
@@ -313,7 +313,7 @@ mod launch_log_writer {
             kind: AppEventKind,
         },
         DockApps(Vec<DockApp>),
-        ListDockApps(Sender<Vec<DockApp>>),
+        ListDockApps(Sender<DistinctDockApps>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
         Flush(Sender<()>),
     }

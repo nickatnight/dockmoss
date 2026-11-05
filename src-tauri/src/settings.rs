@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 
 use crate::bundle_id::BundleId;
 use crate::growth::{self, FastForward, GrowthError, Thresholds};
-use crate::usage::DockApp;
+use crate::usage::{DistinctDockApps, DockApp};
 
 pub const MAX_EXCLUSIONS: usize = 256;
 
@@ -199,7 +199,7 @@ pub struct SettingsView {
 }
 
 impl SettingsView {
-    pub fn new(settings: Settings, dock: &[DockApp]) -> Self {
+    pub fn new(settings: Settings, dock: &DistinctDockApps) -> Self {
         Self {
             settings,
             limits: LIMITS,

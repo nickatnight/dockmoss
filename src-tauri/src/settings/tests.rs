@@ -8,7 +8,7 @@ use super::{
 };
 use crate::bundle_id::BundleId;
 use crate::growth::{FastForward, GrowthError, Thresholds};
-use crate::usage::DockApp;
+use crate::usage::{DistinctDockApps, DockApp};
 
 fn object(value: Value) -> Map<String, Value> {
     match value {
@@ -431,7 +431,7 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
         dock_app("com.apple.Chess", "/System/Applications/Chess.app"),
     ];
 
-    let view = SettingsView::new(Settings::default(), &dock);
+    let view = SettingsView::new(Settings::default(), &DistinctDockApps::new(&dock));
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(

@@ -7,7 +7,7 @@ A novelty macOS app that grows moss on Dock icons for apps you haven't opened in
 - A transparent, click-through overlay sits above the Dock.
 - Each Dock app icon gets a moss layer whose coverage scales with days since the app was last used.
 - Stages (tunable): clean, light fuzz (5 days), patchy moss (10 days), fully overgrown with tiny mushrooms or flowers (30+ days).
-- Opening the app clears its moss, with a small "shrivel" animation.
+- Opening the app clears its moss, with a small "shrivel" animation. A settings change that clears a mossy icon (an exclusion, intensity 0, higher thresholds) plays the same shrivel.
 
 ## How it works
 
@@ -34,7 +34,10 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 
 - **Clean hold.** An app used within the Fuzz threshold (5 days by default, shifted by its jitter) has no moss.
 - **Linear growth.** From Fuzz, overgrowth rises linearly to 0.5 at Patchy (10 days) and to 1.0 at Overgrown (30 days), then stays at 1.0. It never jumps at a stage boundary.
-- **Fast-forward** (1x, 10x, 100x, 1000x) multiplies the time since last use. The jitter is added afterwards and never scaled. Scaled, it would be worth ±1,000 days at 1000x.
+- **Settings apply at once.** The Fuzz, Patchy and Overgrown thresholds and the fast-forward speed come from Settings, and a saved change reaches the overlay without a restart.
+- **Excluded apps** get no moss: overgrowth 0 and stage clean, whatever their last use. They keep their place in the growth list.
+- **Intensity** (0 to 100%) scales the overgrowth that is drawn. It does not change the stage, so an Overgrown app keeps its mushrooms or flowers at any intensity above 0. At 0 no icon has moss.
+- **Fast-forward** (1x, 10x, 100x, 1000x) multiplies the time since last use. In debug builds the `DOCKMOSS_FAST_FORWARD` variable, when set to one of those values, replaces the saved speed; it never changes the setting. The jitter is added afterwards and never scaled. Scaled, it would be worth ±1,000 days at 1000x.
 - **Threshold limits.** Thresholds are whole days with 2 ≤ Fuzz < Patchy < Overgrown ≤ 3650. Fuzz is at least one day more than the largest jitter, so jitter alone never puts moss on an app that was just used.
 - **Running or just launched** means clean, whatever the jitter. An app with no last-used time at all shows no moss. After the first run every Dock app has a time (rules 3 and 5), so that happens only before the first run, for example while the Dock has never been visible.
 - **Recompute.** Growth is recomputed after every launch, activation, quit and Dock change, and on a timer: every 5 minutes at 1x, and 5 minutes divided by the fast-forward factor otherwise, never more often than once a second.
@@ -56,9 +59,10 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 
 - **Dock magnification lag:** polling icon positions can trail the animation by a frame. The launch lift of a Dock icon shows the same one-frame lag (job 011). Mask or accept it; consider an `AXObserver` later.
 - **Auto-hidden Dock:** icons sit offscreen, so draw nothing.
-- **Slow start:** with the launch log starting empty, real moss only appears after weeks of use. Consider a "demo/fast-forward" setting for testing and screenshots.
+- **Slow start:** with the launch log starting empty, real moss only appears after weeks of use. The Spotlight seed covers part of it at the first run, and the fast-forward setting previews growth for testing and screenshots.
 - **Apps launched outside our watch:** apps already running at first start, or launched while DockMoss was quit, won't be logged. Treat "app is running" as in use, and accept the gap while the app is closed.
-- **Single-instance lock in shared `/tmp`:** `tauri-plugin-single-instance` keys "one DockMoss at a time" on a fixed socket, `/tmp/com_dockmoss_app_si.sock`. Another local account can take that path first, so DockMoss exits at every launch or runs without the lock, and two launches within milliseconds can both run. Fixing it needs an upstream plugin change (job 013).
+- **Single-instance lock in shared `/tmp`:** `tauri-plugin-single-instance` keys "one DockMoss at a time" on a fixed socket, `/tmp/app_dockmoss_DockMoss_si.sock` (it follows the bundle identifier; it was `/tmp/com_dockmoss_app_si.sock` before job 014). Another local account can take that path first, so DockMoss exits at every launch or runs without the lock, and two launches within milliseconds can both run. Fixing it needs an upstream plugin change (job 013).
+- **Data left in the old app folder:** job 014 changed the identifier from `com.dockmoss.app` to `app.dockmoss.DockMoss` and moves the launch log and settings once, at startup. A file whose move fails stays in the old folder, and that session runs without it (no usage tracking for the launch log; default settings, not saved, for the settings) until a later start moves it. On a volume without hard links (some network home folders) the move never succeeds, so DockMoss never tracks usage there, and only a log warning says so. Nothing is lost or overwritten.
 - **Moss that fits the icon shape:** icons are irregular, so grow moss from the bottom edge and corners, clipped to the icon's rounded rect, rather than reading the artwork.
 - **Battery:** keep the render loop idle when nothing is animating. Static moss only needs a redraw when the Dock moves. While the Dock is hidden (auto-hide, a full-screen Space) or cannot be read, the overlay window is ordered out, so WindowServer has nothing of ours to composite; it is ordered back in when the Dock shows. Every Dock read also costs the Dock process CPU, so the tracker reads fast only while something moves near the Dock. A continuous animation is the expensive case: a 30 fps `requestAnimationFrame` sway cost about 19% CPU (job 010), so sway stays off until a cheaper one is found. The launch shrivel is bounded instead: it runs the same 30 fps loop for 600 ms per mossy app opened, then the loop stops and no frame callback runs until something changes again (job 011).
 - **Many icons:** use one shared shader or instanced draw rather than a layer per icon. Since slice 10, every mossy icon is one instance of a single draw call.

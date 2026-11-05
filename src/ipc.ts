@@ -103,6 +103,32 @@ export function getSettings(): Promise<SettingsView> {
   return invoke<SettingsView>("get_settings");
 }
 
-export function saveSettings(settings: Settings): Promise<Settings> {
-  return invoke<Settings>("save_settings", { settings });
+export type SaveSettingsError =
+  | { kind: "invalid_settings"; message: string }
+  | { kind: "settings_not_saved"; message: string }
+  | { kind: "ipc_failed"; cause: unknown };
+
+export type SaveSettingsResult =
+  | { ok: true; settings: Settings }
+  | { ok: false; error: SaveSettingsError };
+
+export function saveSettingsError(error: unknown): SaveSettingsError {
+  if (
+    isCommandError(error) &&
+    (error.kind === "invalid_settings" || error.kind === "settings_not_saved")
+  ) {
+    return { kind: error.kind, message: error.message };
+  }
+  return { kind: "ipc_failed", cause: error };
+}
+
+export async function saveSettings(
+  settings: Settings,
+): Promise<SaveSettingsResult> {
+  try {
+    const saved = await invoke<Settings>("save_settings", { settings });
+    return { ok: true, settings: saved };
+  } catch (error) {
+    return { ok: false, error: saveSettingsError(error) };
+  }
 }

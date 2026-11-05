@@ -2,8 +2,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   getSettings,
-  isCommandError,
   saveSettings,
+  type SaveSettingsError,
   type SettingsLimits,
   type SettingsView,
 } from "./ipc";
@@ -139,11 +139,10 @@ function enteredThresholds(): SettingsChange {
 
 function reportUnsaved(
   change: SettingsChange,
-  error: unknown,
+  error: SaveSettingsError,
   limits: SettingsLimits,
 ): void {
-  const invalid = isCommandError(error) && error.kind === "invalid_settings";
-  if (invalid && change.field === "thresholds") {
+  if (error.kind === "invalid_settings" && change.field === "thresholds") {
     showThresholdError(thresholdMessage(limits));
     return;
   }
@@ -162,14 +161,15 @@ async function start(): Promise<void> {
   let saving = Promise.resolve();
   const commit = (change: SettingsChange): void => {
     saving = saving.then(async () => {
-      try {
-        saved = await saveSettings(nextSettings(saved, change));
-        showSaveError(null);
-        if (change.field === "thresholds") {
-          showThresholdError(null);
-        }
-      } catch (error) {
-        reportUnsaved(change, error, view.limits);
+      const result = await saveSettings(nextSettings(saved, change));
+      if (!result.ok) {
+        reportUnsaved(change, result.error, view.limits);
+        return;
+      }
+      saved = result.settings;
+      showSaveError(null);
+      if (change.field === "thresholds") {
+        showThresholdError(null);
       }
     });
   };

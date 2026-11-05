@@ -29,7 +29,6 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 objc2-application-services = { version = "0.3", default-features = false, features = ["std", "libc", "HIServices", "AXError", "AXUIElement", "AXValue"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFCGTypes", "CFDictionary", "CFNumber", "CFString", "CFURL"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSBundle", "NSDictionary", "NSEnumerator", "NSNotification", "NSOperation", "NSString", "NSURL", "block2"] }
-tauri-plugin-store = "2.5"
 
 [dev-dependencies]
 tempfile = "3"

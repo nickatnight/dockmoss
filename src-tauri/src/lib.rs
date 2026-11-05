@@ -13,19 +13,19 @@ mod usage;
 
 pub use error::Error;
 
+use std::fs;
 use std::io::ErrorKind;
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use jiff::Timestamp;
 use tauri::{
-    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
-    WindowEvent, Wry,
+    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_log::log::LevelFilter;
-use tauri_plugin_store::{Store, StoreExt};
 
-use commands::{TrackerInbox, TrackerMessage};
+use commands::{SettingsPath, TrackerInbox, TrackerMessage};
 use geometry::Display;
 use growth::FastForward;
 use launch_log_writer::{LaunchLogInbox, WriterMessage};
@@ -58,7 +58,6 @@ pub fn run() {
                 .level_for("dockmoss_lib", APP_LOG_LEVEL)
                 .build(),
         )
-        .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::watch_dock,
             commands::watch_growth,
@@ -68,7 +67,11 @@ pub fn run() {
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             app.manage(ReturnFocusTo::default());
-            app.manage(Mutex::new(load_settings(app.handle())));
+            let (settings, settings_path) = load_settings(app.handle());
+            app.manage(Mutex::new(settings));
+            if let Some(path) = settings_path {
+                app.manage(SettingsPath(path));
+            }
             let trust = macos::ax::request_trust();
             tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
             tray::build(app.handle(), trust)?;
@@ -167,58 +170,30 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-fn settings_store(app: &AppHandle) -> Result<Arc<Store<Wry>>, tauri_plugin_store::Error> {
-    app.store_builder(SETTINGS_FILE).disable_auto_save().build()
-}
-
-fn load_settings(app: &AppHandle) -> Settings {
-    let store = match settings_store(app) {
-        Ok(store) => store,
+/// Never fails, and never writes: a missing file, one that cannot be read or
+/// decoded, and every bad field fall back to defaults until the next save.
+fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
+    let path = match app.path().app_data_dir() {
+        Ok(dir) => dir.join(SETTINGS_FILE),
         Err(error) => {
-            tracing::warn!(%error, "settings store not opened; using defaults");
-            return Settings::default();
+            tracing::warn!(%error, "settings path unknown; using defaults, saving off");
+            return (Settings::default(), None);
         }
     };
-    // The store opens empty both when the file is missing and when it does
-    // not decode; reading it again tells the two apart.
-    let stored: serde_json::Map<String, serde_json::Value> = match store.reload() {
-        Ok(()) => store.entries().into_iter().collect(),
-        Err(tauri_plugin_store::Error::Io(error)) if error.kind() == ErrorKind::NotFound => {
-            serde_json::Map::new()
-        }
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
         Err(error) => {
-            tracing::warn!(%error, "settings file did not decode; using defaults until the next save");
-            serde_json::Map::new()
+            tracing::warn!(%error, "settings file not read; using defaults until the next save");
+            Some(Vec::new())
         }
     };
-    let loaded = settings::load(&stored);
+    let loaded = settings::decode_file(bytes.as_deref());
     for problem in &loaded.problems {
         tracing::warn!(%problem, "stored setting not loaded");
     }
     log_settings(&loaded.settings, "settings loaded");
-    loaded.settings
-}
-
-/// On failure the store's cache goes back to `saved`, because the plugin
-/// saves open stores at exit.
-pub(crate) fn store_settings(
-    app: &AppHandle,
-    settings: &Settings,
-    saved: &Settings,
-) -> Result<(), tauri_plugin_store::Error> {
-    let store = settings_store(app)?;
-    let replace_entries = |settings: &Settings| {
-        store.clear();
-        for (key, value) in settings.to_stored() {
-            store.set(key, value);
-        }
-    };
-    replace_entries(settings);
-    let written = store.save();
-    if written.is_err() {
-        replace_entries(saved);
-    }
-    written
+    (loaded.settings, Some(path))
 }
 
 pub(crate) fn log_settings(settings: &Settings, message: &'static str) {

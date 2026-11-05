@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "The settings window reads and saves the settings through Rust, which validates them, and may close itself. It gets no store permissions.",
+  "description": "The settings window reads and saves the settings through Rust, which validates them, and may close itself.",
   "windows": ["settings"],
   "permissions": ["allow-get-settings", "allow-save-settings", "core:window:allow-close"]
 }

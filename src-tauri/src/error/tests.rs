@@ -105,7 +105,9 @@ fn invalid_settings_carry_the_field_check_as_their_message() {
 
 #[test]
 fn unsaved_settings_have_their_own_kind_and_no_path_in_the_message() {
-    let json = serde_json::to_value(Error::SettingsNotSaved).expect("Error serializes to JSON");
+    let cause = std::io::Error::other("could not create /Users/someone/settings.json.tmp");
+    let json = serde_json::to_value(Error::from(crate::settings::NotSaved::new(cause)))
+        .expect("Error serializes to JSON");
 
     assert_eq!(
         json,
@@ -126,7 +128,7 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
         Error::TrackerStopped,
         Error::UsageStopped,
         Error::InvalidSettings(crate::settings::SettingsError::Intensity),
-        Error::SettingsNotSaved,
+        Error::SettingsNotSaved(crate::settings::NotSaved::new(std::io::Error::other("x"))),
     ];
     for error in &errors {
         // A new variant must be added here and to `errors`; the `declared`
@@ -139,7 +141,7 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
             | Error::TrackerStopped
             | Error::UsageStopped
             | Error::InvalidSettings(_)
-            | Error::SettingsNotSaved => {}
+            | Error::SettingsNotSaved(_) => {}
         }
     }
     let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();

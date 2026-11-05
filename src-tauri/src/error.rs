@@ -18,7 +18,7 @@ pub enum Error {
     #[error(transparent)]
     InvalidSettings(#[from] crate::settings::SettingsError),
     #[error("settings could not be saved")]
-    SettingsNotSaved,
+    SettingsNotSaved(#[from] crate::settings::NotSaved),
 }
 
 impl Error {
@@ -31,7 +31,7 @@ impl Error {
             Self::TrackerStopped => "tracker_stopped",
             Self::UsageStopped => "usage_stopped",
             Self::InvalidSettings(_) => "invalid_settings",
-            Self::SettingsNotSaved => "settings_not_saved",
+            Self::SettingsNotSaved(_) => "settings_not_saved",
         }
     }
 }

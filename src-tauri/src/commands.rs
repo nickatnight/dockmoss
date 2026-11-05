@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -9,8 +10,8 @@ use tauri::{AppHandle, Manager, State};
 use crate::Error;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
-use crate::settings::{Settings, SettingsView};
-use crate::usage::{AppGrowth, DistinctDockApps};
+use crate::settings::{self, NotSaved, Settings, SettingsView};
+use crate::usage::{self, AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -21,6 +22,8 @@ pub enum TrackerMessage {
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);
+
+pub struct SettingsPath(pub PathBuf);
 
 /// Streams the Dock items to `on_items`, starting with the current frame.
 /// A later call replaces the channel, so a reloaded webview resubscribes.
@@ -100,12 +103,14 @@ pub async fn save_settings(
     let settings = Settings::parse(&settings).inspect_err(|error| {
         tracing::info!(field = error.field().key(), %error, "settings not saved: invalid");
     })?;
+    let path = app
+        .try_state::<SettingsPath>()
+        .ok_or_else(|| NotSaved::new(std::io::Error::other("the app data directory is unknown")))?;
     let mut saved = state.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Err(error) = crate::store_settings(&app, &settings, &saved) {
-        tracing::warn!(%error, "settings not saved: the store write failed");
-        return Err(Error::SettingsNotSaved);
-    }
-    saved.clone_from(&settings);
-    crate::log_settings(&settings, "settings saved");
-    Ok(settings)
+    settings::commit(&mut saved, settings, |bytes| {
+        usage::write_atomically(&path.0, bytes)
+    })
+    .inspect_err(|error| tracing::warn!(%error, "settings not saved"))?;
+    crate::log_settings(&saved, "settings saved");
+    Ok(saved.clone())
 }

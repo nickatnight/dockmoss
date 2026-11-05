@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use super::{
     DockAppName, Exclusions, Field, Intensity, LIMITS, LoadProblem, MAX_EXCLUSIONS, Settings,
-    SettingsError, SettingsView,
+    SettingsError, SettingsView, commit, decode_file,
 };
 use crate::bundle_id::BundleId;
 use crate::growth::{FastForward, GrowthError, Thresholds};
@@ -282,7 +282,7 @@ fn what_the_webview_sends_back_parses_to_the_same_settings() {
 }
 
 #[test]
-fn an_empty_store_loads_defaults_silently() {
+fn an_empty_object_loads_defaults_silently() {
     let loaded = super::load(&Map::new());
 
     assert_eq!(loaded.settings, Settings::default());
@@ -462,4 +462,106 @@ fn an_empty_dock_list_is_unknown_because_a_readable_dock_always_holds_finder() {
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(json["dockApps"], Value::Null);
+}
+
+#[test]
+fn a_missing_file_loads_defaults_silently() {
+    let loaded = decode_file(None);
+
+    assert_eq!(loaded.settings, Settings::default());
+    assert_eq!(loaded.problems, []);
+}
+
+#[test]
+fn a_file_that_is_not_a_json_object_loads_defaults_with_one_problem() {
+    let cases: [&[u8]; 4] = [
+        b"{\"version\":1,\"thresholds\":",
+        b"[1, 2]",
+        b"",
+        b"\xff\xfe",
+    ];
+
+    for bytes in cases {
+        let loaded = decode_file(Some(bytes));
+
+        assert_eq!(loaded.settings, Settings::default(), "{bytes:?}");
+        assert_eq!(loaded.problems, [LoadProblem::Undecodable], "{bytes:?}");
+    }
+}
+
+#[test]
+fn an_encoded_file_decodes_to_the_same_settings() {
+    let bytes = customised().encode_file();
+
+    let loaded = decode_file(Some(bytes.as_bytes()));
+
+    assert_eq!(loaded.settings, customised());
+    assert_eq!(loaded.problems, []);
+}
+
+#[test]
+fn a_commit_writes_the_new_settings_and_then_adopts_them() {
+    let mut current = Settings::default();
+    let mut written = Vec::new();
+
+    let result = commit(&mut current, customised(), |bytes| {
+        written = bytes.to_vec();
+        Ok::<(), std::io::Error>(())
+    });
+
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(current, customised());
+    assert_eq!(written, customised().encode_file().into_bytes());
+}
+
+#[test]
+fn a_failed_write_keeps_the_old_settings_in_memory_and_reports_not_saved() {
+    let mut current = customised();
+
+    let result = commit(&mut current, Settings::default(), |_| {
+        Err(std::io::Error::other("disk full"))
+    });
+
+    let error = result.expect_err("a failed write is an error");
+    assert_eq!(current, customised());
+    assert_eq!(
+        serde_json::to_value(crate::Error::from(error)).expect("Error serializes"),
+        json!({ "kind": "settings_not_saved", "message": "settings could not be saved" })
+    );
+}
+
+#[test]
+fn a_failed_write_to_disk_leaves_the_file_and_memory_unchanged() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.json");
+    let write = |bytes: &[u8]| crate::usage::write_atomically(&path, bytes);
+    let mut current = Settings::default();
+    commit(&mut current, customised(), write).expect("first save succeeds");
+    let before = std::fs::read(&path).expect("saved file");
+    std::fs::create_dir(dir.path().join("settings.json.tmp")).expect("block the temp path");
+
+    let result = commit(&mut current, Settings::default(), write);
+
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(current, customised());
+    assert_eq!(std::fs::read(&path).expect("file still there"), before);
+}
+
+#[test]
+fn a_saved_file_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.json");
+    let mut current = Settings::default();
+
+    commit(&mut current, customised(), |bytes| {
+        crate::usage::write_atomically(&path, bytes)
+    })
+    .expect("save succeeds");
+
+    let mode = std::fs::metadata(&path)
+        .expect("saved file")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
 }

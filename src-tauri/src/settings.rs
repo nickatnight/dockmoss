@@ -121,6 +121,8 @@ impl SettingsError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoadProblem {
+    #[error("the settings file is not a JSON object; every setting uses its default")]
+    Undecodable,
     #[error("the settings file is not version {VERSION}; every setting uses its default")]
     UnknownVersion,
     #[error("{0}; {key} uses its default", key = .0.field().key())]
@@ -143,6 +145,10 @@ impl Settings {
             excluded: excluded(field(value, Field::Excluded)?)?,
             fast_forward: fast_forward(field(value, Field::FastForward)?)?,
         })
+    }
+
+    pub fn encode_file(&self) -> String {
+        format!("{:#}\n", Value::Object(self.to_stored()))
     }
 
     pub fn to_stored(&self) -> Map<String, Value> {
@@ -229,6 +235,46 @@ fn bundle_name(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_str()?;
     let name = file_name.strip_suffix(".app").unwrap_or(file_name);
     (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// The settings file was not written, so nothing changed.
+#[derive(Debug, thiserror::Error)]
+#[error("settings file not written: {0}")]
+pub struct NotSaved(#[source] Box<dyn std::error::Error + Send + Sync>);
+
+impl NotSaved {
+    pub fn new(cause: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Box::new(cause))
+    }
+}
+
+/// Writes `next` with `write`, and only once that succeeds makes it the
+/// current settings.
+pub fn commit<E>(
+    current: &mut Settings,
+    next: Settings,
+    write: impl FnOnce(&[u8]) -> Result<(), E>,
+) -> Result<(), NotSaved>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    write(next.encode_file().as_bytes()).map_err(NotSaved::new)?;
+    *current = next;
+    Ok(())
+}
+
+/// `None` when there is no file yet.
+pub fn decode_file(bytes: Option<&[u8]>) -> Loaded {
+    let Some(bytes) = bytes else {
+        return Loaded::default();
+    };
+    match serde_json::from_slice(bytes) {
+        Ok(Value::Object(stored)) => load(&stored),
+        _ => Loaded {
+            settings: Settings::default(),
+            problems: vec![LoadProblem::Undecodable],
+        },
+    }
 }
 
 pub fn load(stored: &Map<String, Value>) -> Loaded {

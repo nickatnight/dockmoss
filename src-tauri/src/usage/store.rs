@@ -99,11 +99,17 @@ fn set_aside(path: &Path, error: &Unreadable) {
 }
 
 pub fn save(path: &Path, log: &LaunchLog) -> Result<(), UsageError> {
+    write_atomically(path, encode(log).as_bytes())
+}
+
+/// Replaces the file at `path` with `bytes`, mode 0600: a private temp file
+/// beside it, then `rename`. A crash leaves the old file or the new one.
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), UsageError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(io_error("create the directory", parent))?;
     }
     let tmp = sibling(path, ".tmp");
-    write_private(&tmp, encode(log).as_bytes())?;
+    write_private(&tmp, bytes)?;
     fs::rename(&tmp, path).map_err(io_error("rename the temp file over", path))
 }
 

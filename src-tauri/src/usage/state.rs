@@ -43,6 +43,26 @@ impl Change {
     }
 }
 
+/// The Dock's apps, one per bundle ID (its first entry), in Dock order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DistinctDockApps(Vec<DockApp>);
+
+impl DistinctDockApps {
+    pub fn new(dock: &[DockApp]) -> Self {
+        let mut seen = BTreeSet::new();
+        Self(
+            dock.iter()
+                .filter(|app| seen.insert(&app.bundle_id))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &DockApp> {
+        self.0.iter()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DockUpdate {
     /// First run: read these apps' Spotlight dates, one entry per bundle ID,
@@ -103,7 +123,7 @@ impl UsageState {
         let first_run_done = self.log.baseline_at().is_some();
         if !first_run_done && !self.seeding && !self.dock.is_empty() {
             self.seeding = true;
-            return DockUpdate::Seed(self.distinct_dock_apps());
+            return DockUpdate::Seed(self.distinct_dock_apps().0);
         }
         if first_run_done && self.first_see_new_apps(now) {
             return DockUpdate::Applied(Change::Log);
@@ -175,13 +195,8 @@ impl UsageState {
             .collect()
     }
 
-    fn distinct_dock_apps(&self) -> Vec<DockApp> {
-        let mut seen = BTreeSet::new();
-        self.dock
-            .iter()
-            .filter(|app| seen.insert(&app.bundle_id))
-            .cloned()
-            .collect()
+    pub fn distinct_dock_apps(&self) -> DistinctDockApps {
+        DistinctDockApps::new(&self.dock)
     }
 
     fn first_see_new_apps(&mut self, now: Timestamp) -> bool {

@@ -5,11 +5,22 @@ use tauri::{AppHandle, Wry};
 use crate::macos;
 use crate::trust::Trust;
 
+pub const TRAY_ID: &str = "main";
+
 const QUIT_ID: &str = "quit";
 const GRANT_ID: &str = "grant-accessibility";
+const SETTINGS_ID: &str = "settings";
 
-pub fn build(app: &AppHandle, trust: Trust) -> Result<TrayIcon, crate::Error> {
-    let tray = TrayIconBuilder::with_id("main")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuEntry {
+    GrantAccessibility,
+    Settings,
+    Separator,
+    Quit,
+}
+
+pub fn build(app: &AppHandle, trust: Trust) -> Result<(), crate::Error> {
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(tauri::include_image!("icons/tray.png"))
         .icon_as_template(true)
         .tooltip(tooltip(trust))
@@ -19,11 +30,12 @@ pub fn build(app: &AppHandle, trust: Trust) -> Result<TrayIcon, crate::Error> {
                 tracing::info!("quit requested from tray");
                 app.exit(0);
             }
-            GRANT_ID => open_accessibility_settings(),
+            GRANT_ID => show_accessibility_pane(),
+            SETTINGS_ID => crate::show_settings_window(app),
             _ => {}
         })
         .build(app)?;
-    Ok(tray)
+    Ok(())
 }
 
 pub fn show_trust(tray: &TrayIcon, trust: Trust) -> Result<(), crate::Error> {
@@ -39,23 +51,50 @@ fn tooltip(trust: Trust) -> &'static str {
     }
 }
 
-fn menu(app: &AppHandle, trust: Trust) -> tauri::Result<Menu<Wry>> {
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit DockMoss", true, Some("CmdOrCtrl+Q"))?;
-    if trust == Trust::Trusted {
-        return Menu::with_items(app, &[&quit]);
+fn menu_entries(trust: Trust) -> &'static [MenuEntry] {
+    match trust {
+        Trust::Trusted => &[MenuEntry::Settings, MenuEntry::Separator, MenuEntry::Quit],
+        Trust::Untrusted => &[
+            MenuEntry::GrantAccessibility,
+            MenuEntry::Settings,
+            MenuEntry::Separator,
+            MenuEntry::Quit,
+        ],
     }
-    let grant = MenuItem::with_id(
-        app,
-        GRANT_ID,
-        "Grant Accessibility Access\u{2026}",
-        true,
-        None::<&str>,
-    )?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    Menu::with_items(app, &[&grant, &separator, &quit])
 }
 
-fn open_accessibility_settings() {
+fn menu(app: &AppHandle, trust: Trust) -> tauri::Result<Menu<Wry>> {
+    let menu = Menu::new(app)?;
+    for entry in menu_entries(trust) {
+        match entry {
+            MenuEntry::GrantAccessibility => menu.append(&MenuItem::with_id(
+                app,
+                GRANT_ID,
+                "Grant Accessibility Access\u{2026}",
+                true,
+                None::<&str>,
+            )?)?,
+            MenuEntry::Settings => menu.append(&MenuItem::with_id(
+                app,
+                SETTINGS_ID,
+                "Settings\u{2026}",
+                true,
+                Some("CmdOrCtrl+,"),
+            )?)?,
+            MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
+            MenuEntry::Quit => menu.append(&MenuItem::with_id(
+                app,
+                QUIT_ID,
+                "Quit DockMoss",
+                true,
+                Some("CmdOrCtrl+Q"),
+            )?)?,
+        }
+    }
+    Ok(menu)
+}
+
+fn show_accessibility_pane() {
     let Some(mtm) = macos::MainThreadMarker::new() else {
         tracing::warn!("tray menu event arrived off the main thread; settings not opened");
         return;
@@ -65,3 +104,6 @@ fn open_accessibility_settings() {
         Err(error) => tracing::warn!(%error, "accessibility settings did not open"),
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -5,6 +5,8 @@ mod error;
 mod geometry;
 mod growth;
 mod macos;
+mod navigation;
+mod settings;
 mod tracker;
 mod tray;
 mod trust;
@@ -12,23 +14,29 @@ mod usage;
 
 pub use error::Error;
 
-use std::sync::mpsc;
+use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use jiff::Timestamp;
-use tauri::tray::TrayIcon;
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_log::log::LevelFilter;
 
-use commands::{TrackerInbox, TrackerMessage};
+use commands::{SettingsPath, TrackerInbox, TrackerMessage};
 use geometry::Display;
 use growth::FastForward;
 use launch_log_writer::{LaunchLogInbox, WriterMessage};
+use settings::Settings;
 use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
+const SETTINGS_LABEL: &str = "settings";
+const SETTINGS_HEIGHT: f64 = 760.0;
 const LAUNCH_LOG_FILE: &str = "launch_log.json";
+const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
@@ -52,15 +60,23 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             commands::watch_dock,
-            commands::watch_growth
+            commands::watch_growth,
+            commands::get_settings,
+            commands::save_settings
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.manage(ReturnFocusTo::default());
+            let (settings, settings_path) = load_settings(app.handle());
+            app.manage(Mutex::new(settings));
+            if let Some(path) = settings_path {
+                app.manage(SettingsPath(path));
+            }
             let trust = macos::ax::request_trust();
             tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
-            let tray = tray::build(app.handle(), trust)?;
+            tray::build(app.handle(), trust)?;
             app.manage(TrustState::new(trust));
-            spawn_trust_watcher(tray)?;
+            spawn_trust_watcher(app.handle().clone())?;
             let display = primary_display(app.handle())?;
             let (inbox, messages) = mpsc::channel();
             let screen_changes = inbox.clone();
@@ -154,6 +170,22 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
+fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
+    let path = match app.path().app_data_dir() {
+        Ok(dir) => dir.join(SETTINGS_FILE),
+        Err(error) => {
+            tracing::warn!(%error, "settings path unknown; using defaults, saving off");
+            return (Settings::default(), None);
+        }
+    };
+    let loaded = settings::load_file(&path);
+    for problem in &loaded.problems {
+        tracing::warn!(%problem, "stored setting not loaded");
+    }
+    loaded.settings.log("settings loaded");
+    (loaded.settings, Some(path))
+}
+
 #[cfg(debug_assertions)]
 fn fast_forward() -> FastForward {
     const VARIABLE: &str = "DOCKMOSS_FAST_FORWARD";
@@ -222,8 +254,8 @@ mod launch_log_writer {
     use crate::growth::{FastForward, Thresholds};
     use crate::macos;
     use crate::usage::{
-        self, AppEventKind, AppGrowth, Change, DockApp, DockUpdate, LaunchLog, SaveSchedule,
-        UsageState,
+        self, AppEventKind, AppGrowth, Change, DistinctDockApps, DockApp, DockUpdate, LaunchLog,
+        SaveSchedule, UsageState,
     };
 
     pub enum WriterMessage {
@@ -233,6 +265,7 @@ mod launch_log_writer {
             kind: AppEventKind,
         },
         DockApps(Vec<DockApp>),
+        ListDockApps(Sender<DistinctDockApps>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
         Flush(Sender<()>),
     }
@@ -327,6 +360,13 @@ mod launch_log_writer {
                     match self.state.dock_apps(apps, Timestamp::now()) {
                         DockUpdate::Seed(apps) => self.start_seed_read(apps),
                         DockUpdate::Applied(change) => self.apply(change),
+                    }
+                }
+                WriterMessage::ListDockApps(reply) => {
+                    if reply.send(self.state.distinct_dock_apps()).is_err() {
+                        tracing::debug!(
+                            "dock apps listed after the settings window stopped waiting"
+                        );
                     }
                 }
                 WriterMessage::WatchGrowth(channel) => {
@@ -489,27 +529,33 @@ mod launch_log_writer {
     }
 }
 
-fn spawn_trust_watcher(tray: TrayIcon) -> std::io::Result<()> {
+fn spawn_trust_watcher(app: AppHandle) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("ax-trust".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(TRUST_POLL_INTERVAL);
-                let state = tray.app_handle().state::<TrustState>();
+                let state = app.state::<TrustState>();
                 if let Some(trust) = state.replace_if_changed(macos::ax::check_trust()) {
                     tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
-                    refresh_tray_on_main_thread(&tray);
+                    refresh_tray_on_main_thread(&app);
                 }
             }
         })?;
     Ok(())
 }
 
-fn refresh_tray_on_main_thread(tray: &TrayIcon) {
-    let main_tray = tray.clone();
-    let scheduled = tray.app_handle().run_on_main_thread(move || {
-        let trust = main_tray.app_handle().state::<TrustState>().current();
-        if let Err(error) = tray::show_trust(&main_tray, trust) {
+/// The tray is looked up on the main thread because its handle is not
+/// thread-safe: cloning it elsewhere would race the clones Tauri makes there.
+fn refresh_tray_on_main_thread(app: &AppHandle) {
+    let main = app.clone();
+    let scheduled = app.run_on_main_thread(move || {
+        let Some(tray) = main.tray_by_id(tray::TRAY_ID) else {
+            tracing::warn!("tray not updated after a trust change: the tray is gone");
+            return;
+        };
+        let trust = main.state::<TrustState>().current();
+        if let Err(error) = tray::show_trust(&tray, trust) {
             tracing::warn!(%error, "tray update after a trust change failed");
         }
     });
@@ -789,8 +835,17 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
             .skip_taskbar(true)
             .visible_on_all_workspaces(true)
             .visible(false)
+            .on_navigation(is_app_url)
             .build()?;
     window.set_ignore_cursor_events(true)?;
+    // Any webview granted core:window:allow-close (Settings) may name another
+    // window's label; quitting goes through app.exit, not CloseRequested.
+    window.on_window_event(|event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            tracing::warn!("overlay close request refused");
+        }
+    });
 
     tracing::info!(
         x = frame.x,
@@ -801,4 +856,104 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
         "overlay window created"
     );
     Ok(window)
+}
+
+pub(crate) fn show_settings_window(app: &AppHandle) {
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        tracing::warn!("settings requested off the main thread; window not shown");
+        return;
+    };
+    if let Some(pid) = macos::app::active_other_app(mtm) {
+        let return_to = app.state::<ReturnFocusTo>();
+        *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
+    }
+    let window = if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
+        window
+    } else {
+        match build_settings_window(app) {
+            Ok(window) => window,
+            Err(error) => {
+                tracing::warn!(%error, "settings window not created");
+                return;
+            }
+        }
+    };
+    let shown = window
+        .unminimize()
+        .and_then(|()| window.show())
+        .and_then(|()| window.set_focus());
+    match shown {
+        Ok(()) => tracing::debug!("settings window shown"),
+        Err(error) => tracing::warn!(%error, "settings window not brought to the front"),
+    }
+}
+
+fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let window =
+        WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App("settings.html".into()))
+            .title("DockMoss Settings")
+            .inner_size(440.0, settings_window_height(app))
+            .resizable(false)
+            .maximizable(false)
+            .center()
+            .on_navigation(is_app_url)
+            .build()?;
+    let app = app.clone();
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(false) => follow_focus_away(&app),
+        WindowEvent::Destroyed => return_focus(&app),
+        _ => {}
+    });
+    Ok(window)
+}
+
+/// The primary display's work area is the one Settings opens centred on.
+fn settings_window_height(app: &AppHandle) -> f64 {
+    let work_area_height = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| f64::from(monitor.work_area().size.height) / monitor.scale_factor());
+    geometry::settings_window_height(SETTINGS_HEIGHT, work_area_height)
+}
+
+/// Once the user moves to another app, that app (not the one active when
+/// Settings opened) is where the keyboard goes back if they return and close.
+fn follow_focus_away(app: &AppHandle) {
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        return;
+    };
+    if macos::app::is_active(mtm) {
+        return;
+    }
+    let now_active = macos::app::active_other_app(mtm);
+    let return_to = app.state::<ReturnFocusTo>();
+    *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = now_active;
+    tracing::debug!(
+        recorded = now_active.is_some(),
+        "settings window left for another app"
+    );
+}
+
+#[derive(Default)]
+struct ReturnFocusTo(Mutex<Option<macos::app::Pid>>);
+
+fn return_focus(app: &AppHandle) {
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        tracing::warn!("settings window closed off the main thread; focus not returned");
+        return;
+    };
+    let return_to = app.state::<ReturnFocusTo>();
+    let pid = return_to
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    let active = macos::app::is_active(mtm);
+    let returned = active && pid.is_some_and(|pid| macos::app::activate_app(pid, mtm));
+    tracing::debug!(active, returned, "settings window closed");
+}
+
+fn is_app_url(url: &Url) -> bool {
+    navigation::is_app_origin(url.scheme(), url.host_str(), cfg!(debug_assertions))
 }

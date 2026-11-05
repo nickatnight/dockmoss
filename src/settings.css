@@ -1,0 +1,257 @@
+:root {
+  color-scheme: light dark;
+  --ground: light-dark(#f0f0f0, #1e1e1e);
+  --surface: light-dark(#ffffff, #2a2a2a);
+  --border: light-dark(#dedede, #3a3a3a);
+  --control-border: light-dark(#8a8a8a, #757575);
+  --control-ground: light-dark(#ffffff, #1f1f1f);
+  --text: light-dark(#1d1d1f, #f2f2f2);
+  --muted: light-dark(#5f6368, #ababab);
+  --negative: light-dark(#b3261e, #ff8f85);
+  --notice-ground: light-dark(#fdecea, #3b2422);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--ground);
+  color: var(--text);
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* The window is the scroll boundary: only the app list scrolls. */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+/* main scrolls only when the window is clamped shorter than the form. */
+main {
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.group {
+  margin: 0;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.group > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-weight: 600;
+}
+
+.group-title {
+  display: block;
+  font-weight: 600;
+}
+
+/* A flex fieldset ignores the legend's float and draws it on the border, so
+   this group positions its legend instead. */
+/* The group shrinks with the window down to its hint and an 88 px list;
+   below that, main scrolls. */
+.group-fill {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  padding-top: 30px;
+}
+
+.group-fill > legend {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  width: auto;
+}
+
+.fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.group > legend + * {
+  clear: both;
+}
+
+.hint {
+  margin: 2px 0 12px;
+  color: var(--muted);
+}
+
+.days {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+input[type="number"] {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-ground);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="number"][aria-invalid="true"] {
+  border-color: var(--negative);
+}
+
+.field-error {
+  margin: 10px 0 0;
+  color: var(--negative);
+}
+
+.field-error:empty {
+  margin: 0;
+}
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.slider > input {
+  flex: 1;
+  margin: 0;
+}
+
+.slider > output {
+  min-width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.speeds {
+  display: flex;
+  gap: 20px;
+}
+
+.speeds > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.speeds input {
+  margin: 0;
+}
+
+/* The padding keeps the checkboxes' focus rings inside the scroll box. */
+.well {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 88px;
+  padding: 4px 8px;
+  overflow-y: auto;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-ground);
+}
+
+.apps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.empty {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--muted);
+}
+
+.apps label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.apps input {
+  margin: 0;
+}
+
+.apps .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apps .note {
+  margin-left: auto;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+input:focus-visible {
+  outline: auto 3px -webkit-focus-ring-color;
+  outline-offset: 1px;
+}
+
+input[type="radio"]:focus-visible {
+  outline: 2px solid -webkit-focus-ring-color;
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid -webkit-focus-ring-color;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+input[type="range"]:focus-visible {
+  outline: 2px solid -webkit-focus-ring-color;
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+.notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--notice-ground);
+  color: var(--negative);
+}
+
+fieldset:disabled,
+.group:has(> .slider > input:disabled) {
+  opacity: 0.6;
+}
+
+.group-title + .hint {
+  margin-top: 0;
+}
+
+.apps:empty {
+  display: none;
+}

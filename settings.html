@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>DockMoss Settings</title>
+    <link rel="stylesheet" href="/src/settings.css" />
+    <script type="module" src="/src/settings.ts"></script>
+  </head>
+  <body>
+    <main>
+      <p id="save-error" class="notice" role="alert" hidden></p>
+
+      <fieldset id="stages" class="group" disabled>
+        <legend>Growth stages</legend>
+        <p id="stages-hint" class="hint">
+          Days without use before each stage begins.
+        </p>
+        <div class="days">
+          <label class="day">
+            <span>Fuzz</span>
+            <input
+              id="fuzz"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              aria-describedby="stages-hint stages-message"
+            />
+          </label>
+          <label class="day">
+            <span>Patchy</span>
+            <input
+              id="patchy"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              aria-describedby="stages-hint stages-message"
+            />
+          </label>
+          <label class="day">
+            <span>Overgrown</span>
+            <input
+              id="overgrown"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              aria-describedby="stages-hint stages-message"
+            />
+          </label>
+        </div>
+        <p id="stages-message" class="field-error" role="alert"></p>
+      </fieldset>
+
+      <div class="group">
+        <label class="group-title" for="intensity">Intensity</label>
+        <p id="intensity-hint" class="hint">How strongly moss is drawn.</p>
+        <div class="slider">
+          <input
+            id="intensity"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            aria-describedby="intensity-hint"
+            disabled
+          />
+          <output id="intensity-value" aria-hidden="true"></output>
+        </div>
+      </div>
+
+      <fieldset
+        id="fast-forward"
+        class="group"
+        aria-describedby="fast-forward-hint"
+        disabled
+      >
+        <legend>Fast-forward</legend>
+        <p id="fast-forward-hint" class="hint">
+          Preview growth by speeding up time since last use. Use 1× for normal
+          use.
+        </p>
+        <div class="speeds">
+          <label><input type="radio" name="fast-forward" value="1" /> 1×</label>
+          <label><input type="radio" name="fast-forward" value="10" /> 10×</label>
+          <label
+            ><input type="radio" name="fast-forward" value="100" /> 100×</label
+          >
+          <label
+            ><input type="radio" name="fast-forward" value="1000" /> 1000×</label
+          >
+        </div>
+      </fieldset>
+
+      <fieldset
+        id="excluded-group"
+        class="group group-fill"
+        aria-describedby="excluded-hint"
+        disabled
+      >
+        <legend>Excluded apps</legend>
+        <div class="fill">
+          <p id="excluded-hint" class="hint">These apps never grow moss.</p>
+          <div class="well">
+            <p id="dock-unknown" class="empty" hidden>
+              The list fills in once DockMoss can read the Dock.
+            </p>
+            <ul id="excluded-apps" class="apps"></ul>
+          </div>
+          <p id="excluded-message" class="field-error" role="alert"></p>
+        </div>
+      </fieldset>
+    </main>
+  </body>
+</html>

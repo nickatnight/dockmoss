@@ -89,6 +89,36 @@ fn stopped_usage_thread_has_its_own_kind() {
 }
 
 #[test]
+fn invalid_settings_carry_the_field_check_as_their_message() {
+    let error = Error::from(crate::settings::SettingsError::Intensity);
+
+    let json = serde_json::to_value(error).expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "invalid_settings",
+            "message": "intensity must be a whole percent from 0 to 100"
+        })
+    );
+}
+
+#[test]
+fn unsaved_settings_have_their_own_kind_and_no_path_in_the_message() {
+    let cause = std::io::Error::other("could not create /Users/someone/settings.json.tmp");
+    let json = serde_json::to_value(Error::from(crate::settings::NotSaved::new(cause)))
+        .expect("Error serializes to JSON");
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "kind": "settings_not_saved",
+            "message": "settings could not be saved"
+        })
+    );
+}
+
+#[test]
 fn error_kind_in_ipc_ts_lists_every_error_kind() {
     let errors = [
         Error::Tauri(tauri::Error::WindowNotFound),
@@ -97,6 +127,8 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
         Error::Dock(crate::dock::DockError::ApiDisabled),
         Error::TrackerStopped,
         Error::UsageStopped,
+        Error::InvalidSettings(crate::settings::SettingsError::Intensity),
+        Error::SettingsNotSaved(crate::settings::NotSaved::new(std::io::Error::other("x"))),
     ];
     for error in &errors {
         // A new variant must be added here and to `errors`; the `declared`
@@ -107,7 +139,9 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
             | Error::Overlay(_)
             | Error::Dock(_)
             | Error::TrackerStopped
-            | Error::UsageStopped => {}
+            | Error::UsageStopped
+            | Error::InvalidSettings(_)
+            | Error::SettingsNotSaved(_) => {}
         }
     }
     let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();

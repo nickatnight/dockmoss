@@ -1,7 +1,24 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+function noDebugModuleInBuild(): Plugin {
+  return {
+    name: "dockmoss:no-debug-module-in-build",
+    apply: "build",
+    generateBundle() {
+      for (const id of this.getModuleIds()) {
+        if (id.endsWith("/src/debug.ts")) {
+          this.error(
+            `${id} is in the release build. Load it only through import() under import.meta.env.DEV.`,
+          );
+        }
+      }
+    },
+  };
+}
 
 export default defineConfig({
   clearScreen: false,
+  plugins: [noDebugModuleInBuild()],
   server: {
     port: 5110,
     strictPort: true,
@@ -14,7 +31,7 @@ export default defineConfig({
     target: "safari18",
     modulePreload: { polyfill: false },
     rolldownOptions: {
-      input: { overlay: "overlay.html" },
+      input: { overlay: "overlay.html", settings: "settings.html" },
     },
   },
 });

@@ -12,25 +12,32 @@ use super::log::{DecodeError, Decoded, Dropped, LaunchLog, decode, encode};
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const FILE_MODE: u32 = 0o600;
 
+/// Why a file read through `read_capped` could not be used.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error("the file is larger than {cap} bytes")]
+    TooLarge { cap: u64 },
+}
+
 #[derive(Debug, thiserror::Error)]
 enum Unreadable {
     #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error("the file is larger than {MAX_FILE_BYTES} bytes")]
-    TooLarge,
+    Read(#[from] ReadError),
     #[error(transparent)]
     Decode(#[from] DecodeError),
 }
 
 pub fn load_or_set_aside(path: &Path, now: Timestamp) -> LaunchLog {
-    let text = match read_capped(path) {
+    let text = match read_capped(path, MAX_FILE_BYTES) {
         Ok(None) => {
             tracing::info!(path = %path.display(), "no launch log yet; starting empty");
             return LaunchLog::default();
         }
         Ok(Some(text)) => text,
         Err(error) => {
-            set_aside(path, &error);
+            set_aside(path, &error.into());
             return LaunchLog::default();
         }
     };
@@ -66,16 +73,18 @@ fn warn_dropped(entry: Dropped) {
     }
 }
 
-fn read_capped(path: &Path) -> Result<Option<String>, Unreadable> {
+/// Reads at most `cap` bytes of text. `None` when there is no file; a longer
+/// file is an error, so a huge or endless file cannot exhaust memory.
+pub fn read_capped(path: &Path, cap: u64) -> Result<Option<String>, ReadError> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
     let mut text = String::new();
-    file.take(MAX_FILE_BYTES + 1).read_to_string(&mut text)?;
-    if u64::try_from(text.len()).map_or(true, |len| len > MAX_FILE_BYTES) {
-        return Err(Unreadable::TooLarge);
+    file.take(cap.saturating_add(1)).read_to_string(&mut text)?;
+    if u64::try_from(text.len()).map_or(true, |len| len > cap) {
+        return Err(ReadError::TooLarge { cap });
     }
     Ok(Some(text))
 }
@@ -99,11 +108,17 @@ fn set_aside(path: &Path, error: &Unreadable) {
 }
 
 pub fn save(path: &Path, log: &LaunchLog) -> Result<(), UsageError> {
+    write_atomically(path, encode(log).as_bytes())
+}
+
+/// Replaces the file at `path` with `bytes`, mode 0600: a private temp file
+/// beside it, then `rename`. A crash leaves the old file or the new one.
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), UsageError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(io_error("create the directory", parent))?;
     }
     let tmp = sibling(path, ".tmp");
-    write_private(&tmp, encode(log).as_bytes())?;
+    write_private(&tmp, bytes)?;
     fs::rename(&tmp, path).map_err(io_error("rename the temp file over", path))
 }
 

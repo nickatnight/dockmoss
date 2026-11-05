@@ -29,7 +29,49 @@ export type ErrorKind =
   | "overlay"
   | "dock"
   | "tracker_stopped"
-  | "usage_stopped";
+  | "usage_stopped"
+  | "invalid_settings"
+  | "settings_not_saved";
+
+export interface Thresholds {
+  fuzz: number;
+  patchy: number;
+  overgrown: number;
+}
+
+export type FastForward = 1 | 10 | 100 | 1000;
+
+export interface Settings {
+  thresholds: Thresholds;
+  intensityPercent: number;
+  excluded: BundleId[];
+  fastForward: FastForward;
+}
+
+export type EnteredThresholds = {
+  [Stage in keyof Thresholds]: number | null;
+};
+
+export type SettingsInput = Omit<Settings, "thresholds"> & {
+  thresholds: EnteredThresholds;
+};
+
+export interface SettingsLimits {
+  minFuzzDays: number;
+  maxOvergrownDays: number;
+  maxExclusions: number;
+}
+
+export interface DockAppName {
+  bundleId: BundleId;
+  name: string;
+}
+
+export interface SettingsView {
+  settings: Settings;
+  limits: SettingsLimits;
+  dockApps: DockAppName[] | null;
+}
 
 export interface CommandError {
   kind: ErrorKind;
@@ -63,4 +105,38 @@ export function watchGrowth(
   const channel = new Channel<AppGrowth[]>();
   channel.onmessage = onGrowth;
   return invoke<void>("watch_growth", { onGrowth: channel });
+}
+
+export function getSettings(): Promise<SettingsView> {
+  return invoke<SettingsView>("get_settings");
+}
+
+export type SaveSettingsError =
+  | { kind: "invalid_settings"; message: string }
+  | { kind: "settings_not_saved"; message: string }
+  | { kind: "ipc_failed"; cause: unknown };
+
+export type SaveSettingsResult =
+  | { ok: true; settings: Settings }
+  | { ok: false; error: SaveSettingsError };
+
+export function saveSettingsError(error: unknown): SaveSettingsError {
+  if (
+    isCommandError(error) &&
+    (error.kind === "invalid_settings" || error.kind === "settings_not_saved")
+  ) {
+    return { kind: error.kind, message: error.message };
+  }
+  return { kind: "ipc_failed", cause: error };
+}
+
+export async function saveSettings(
+  settings: SettingsInput,
+): Promise<SaveSettingsResult> {
+  try {
+    const saved = await invoke<Settings>("save_settings", { settings });
+    return { ok: true, settings: saved };
+  } catch (error) {
+    return { ok: false, error: saveSettingsError(error) };
+  }
 }

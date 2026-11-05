@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use jiff::{SignedDuration, Timestamp};
 
-use super::{Change, DockApp, DockUpdate, SeedReport, UsageState};
+use super::{Change, DistinctDockApps, DockApp, DockUpdate, SeedReport, UsageState};
 use crate::bundle_id::BundleId;
 use crate::growth::{FastForward, Stage, Thresholds};
 use crate::usage::spotlight::SpotlightSeed;
@@ -540,5 +540,30 @@ fn an_app_pinned_twice_is_read_once_and_counted_once() {
             .len(),
         3,
         "growth keeps one entry per Dock item"
+    );
+}
+
+#[test]
+fn distinct_dock_apps_keep_the_first_entry_per_bundle_id_in_dock_order() {
+    let second_copy = DockApp {
+        bundle_id: id("com.apple.Safari"),
+        app_path: PathBuf::from("/Users/someone/Applications/Safari.app"),
+    };
+    let dock = [
+        app("com.apple.Safari"),
+        app("com.apple.Chess"),
+        second_copy,
+        app("com.apple.Notes"),
+    ];
+
+    let distinct = DistinctDockApps::new(&dock);
+
+    assert_eq!(
+        distinct.iter().cloned().collect::<Vec<_>>(),
+        vec![
+            app("com.apple.Safari"),
+            app("com.apple.Chess"),
+            app("com.apple.Notes")
+        ]
     );
 }

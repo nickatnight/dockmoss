@@ -15,6 +15,10 @@ pub enum Error {
     TrackerStopped,
     #[error("usage tracking is not running")]
     UsageStopped,
+    #[error(transparent)]
+    InvalidSettings(#[from] crate::settings::SettingsError),
+    #[error("settings could not be saved")]
+    SettingsNotSaved(#[from] crate::settings::NotSaved),
 }
 
 impl Error {
@@ -26,6 +30,8 @@ impl Error {
             Self::Dock(_) => "dock",
             Self::TrackerStopped => "tracker_stopped",
             Self::UsageStopped => "usage_stopped",
+            Self::InvalidSettings(_) => "invalid_settings",
+            Self::SettingsNotSaved(_) => "settings_not_saved",
         }
     }
 }

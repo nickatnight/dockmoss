@@ -52,6 +52,13 @@ const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
 /// Panics if the Tauri runtime fails to build.
 pub fn run() {
     let built = tauri::Builder::default()
+        // First: a second launch exits inside this plugin's setup, before
+        // any other plugin and before our setup() opens a file or a window.
+        // The callback's arguments are the second process's argv and cwd,
+        // which can hold the user's name, so they are not logged.
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
+            tracing::info!("dockmoss launched again; this copy keeps running");
+        }))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)

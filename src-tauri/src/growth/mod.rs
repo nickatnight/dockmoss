@@ -67,9 +67,7 @@ impl Thresholds {
             })
         }
     }
-}
 
-impl Thresholds {
     pub fn fuzz(self) -> u32 {
         self.fuzz
     }

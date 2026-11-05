@@ -192,21 +192,8 @@ fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
     for problem in &loaded.problems {
         tracing::warn!(%problem, "stored setting not loaded");
     }
-    log_settings(&loaded.settings, "settings loaded");
+    loaded.settings.log("settings loaded");
     (loaded.settings, Some(path))
-}
-
-pub(crate) fn log_settings(settings: &Settings, message: &'static str) {
-    let thresholds = settings.thresholds;
-    tracing::info!(
-        fuzz = thresholds.fuzz(),
-        patchy = thresholds.patchy(),
-        overgrown = thresholds.overgrown(),
-        intensity_percent = settings.intensity.percent(),
-        fast_forward = settings.fast_forward.factor(),
-        excluded_apps = settings.excluded.len(),
-        "{message}"
-    );
 }
 
 #[cfg(debug_assertions)]
@@ -861,6 +848,14 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
             .on_navigation(is_app_url)
             .build()?;
     window.set_ignore_cursor_events(true)?;
+    // Any webview granted core:window:allow-close (Settings) may name another
+    // window's label; quitting goes through app.exit, not CloseRequested.
+    window.on_window_event(|event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            tracing::warn!("overlay close request refused");
+        }
+    });
 
     tracing::info!(
         x = frame.x,
@@ -878,6 +873,10 @@ pub(crate) fn show_settings_window(app: &AppHandle) {
         tracing::warn!("settings requested off the main thread; window not shown");
         return;
     };
+    if let Some(pid) = macos::app::active_other_app(mtm) {
+        let return_to = app.state::<ReturnFocusTo>();
+        *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
+    }
     let window = if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
         window
     } else {
@@ -889,10 +888,6 @@ pub(crate) fn show_settings_window(app: &AppHandle) {
             }
         }
     };
-    if let Some(pid) = macos::app::active_other_app(mtm) {
-        let return_to = app.state::<ReturnFocusTo>();
-        *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
-    }
     let shown = window
         .unminimize()
         .and_then(|()| window.show())

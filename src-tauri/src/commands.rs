@@ -98,19 +98,24 @@ async fn dock_apps(app: &AppHandle) -> Option<DistinctDockApps> {
 pub async fn save_settings(
     settings: Map<String, Value>,
     app: AppHandle,
-    state: State<'_, Mutex<Settings>>,
 ) -> Result<Settings, Error> {
-    let settings = Settings::parse(&settings).inspect_err(|error| {
+    tauri::async_runtime::spawn_blocking(move || save_settings_blocking(&app, &settings)).await?
+}
+
+/// Writes and syncs the file, so it runs off the async runtime.
+fn save_settings_blocking(app: &AppHandle, value: &Map<String, Value>) -> Result<Settings, Error> {
+    let next = Settings::parse(value).inspect_err(|error| {
         tracing::info!(field = error.field().key(), %error, "settings not saved: invalid");
     })?;
     let path = app
         .try_state::<SettingsPath>()
         .ok_or_else(|| NotSaved::new(std::io::Error::other("the app data directory is unknown")))?;
+    let state = app.state::<Mutex<Settings>>();
     let mut saved = state.lock().unwrap_or_else(PoisonError::into_inner);
-    settings::commit(&mut saved, settings, |bytes| {
+    settings::commit(&mut saved, next, |bytes| {
         usage::write_atomically(&path.0, bytes)
     })
     .inspect_err(|error| tracing::warn!(%error, "settings not saved"))?;
-    crate::log_settings(&saved, "settings saved");
+    saved.log("settings saved");
     Ok(saved.clone())
 }

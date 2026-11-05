@@ -9,9 +9,11 @@ import type {
   SettingsLimits,
 } from "../ipc";
 import {
+  NO_FEEDBACK,
   createSettingsSaver,
   enteredDays,
   exclusionRows,
+  nextFeedback,
   nextSettings,
   thresholdMessage,
   toFastForward,
@@ -288,5 +290,74 @@ describe("createSettingsSaver", () => {
     await expect(first).rejects.toThrow("bridge gone");
     await expect(second).resolves.toMatchObject({ ok: true });
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("nextFeedback", () => {
+  const ok: SaveSettingsResult = { ok: true, settings: saved };
+  const invalid: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "invalid_settings", message: "bad" },
+  };
+  const notSaved: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "settings_not_saved", message: "settings could not be saved" },
+  };
+  const ipcFailed: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "ipc_failed", cause: "gone" },
+  };
+  const fuzz1 = {
+    field: "thresholds",
+    thresholds: { fuzz: 1, patchy: 10, overgrown: 30 },
+  } as const;
+  const intensity = { field: "intensityPercent", percent: 40 } as const;
+  const speed = { field: "fastForward", speed: 10 } as const;
+  const exclude = (bundleId: string) =>
+    ({ field: "excluded", bundleId: id(bundleId), excluded: true }) as const;
+
+  it("shows the threshold message for rejected thresholds, and no save notice", () => {
+    const feedback = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+    expect(feedback).toEqual({ thresholdError: true, unsaved: [] });
+  });
+
+  it("clears the threshold message on a valid threshold save", () => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+    expect(nextFeedback(shown, fuzz1, ok).thresholdError).toBe(false);
+  });
+
+  it("keeps the threshold message when another field saves", () => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+    expect(nextFeedback(shown, intensity, ok).thresholdError).toBe(true);
+  });
+
+  it.each([
+    ["settings_not_saved", notSaved],
+    ["ipc_failed", ipcFailed],
+  ])("shows the save notice after %s, leaving the threshold message alone", (_kind, result) => {
+    const feedback = nextFeedback(NO_FEEDBACK, fuzz1, result);
+
+    expect(feedback).toEqual({ thresholdError: false, unsaved: ["thresholds"] });
+  });
+
+  it("keeps the save notice until the control that failed saves, not another one", () => {
+    const failed = nextFeedback(NO_FEEDBACK, intensity, notSaved);
+    const otherSaved = nextFeedback(failed, speed, ok);
+    const retried = nextFeedback(otherSaved, intensity, ok);
+
+    expect(otherSaved.unsaved).toEqual(["intensityPercent"]);
+    expect(retried.unsaved).toEqual([]);
+  });
+
+  it("tracks each excluded app on its own", () => {
+    const failed = nextFeedback(NO_FEEDBACK, exclude("com.a"), notSaved);
+    const otherSaved = nextFeedback(failed, exclude("com.b"), ok);
+    const retried = nextFeedback(otherSaved, exclude("com.a"), ok);
+
+    expect(otherSaved.unsaved).toEqual(["excluded:com.a"]);
+    expect(retried.unsaved).toEqual([]);
   });
 });

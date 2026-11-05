@@ -565,3 +565,22 @@ fn a_saved_file_is_private() {
         .mode();
     assert_eq!(mode & 0o777, 0o600);
 }
+
+#[test]
+fn an_excluded_list_over_four_times_the_cap_is_refused_even_when_it_dedupes() {
+    let copies = vec![Value::from("com.apple.Chess"); 4 * MAX_EXCLUSIONS + 1];
+    let at_ceiling = vec![Value::from("com.apple.Chess"); 4 * MAX_EXCLUSIONS];
+
+    assert_eq!(
+        Settings::parse(&webview_with("excluded", copies.clone().into())),
+        Err(SettingsError::TooManyExclusions)
+    );
+    assert_eq!(
+        Settings::parse(&webview_with("excluded", at_ceiling.into())).map(|s| s.excluded.len()),
+        Ok(1)
+    );
+    assert_eq!(
+        super::load(&stored_with("excluded", copies.into())).problems,
+        [LoadProblem::Invalid(SettingsError::TooManyExclusions)]
+    );
+}

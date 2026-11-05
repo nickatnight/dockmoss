@@ -63,6 +63,41 @@ export function createSettingsSaver(
   };
 }
 
+export interface Feedback {
+  thresholdError: boolean;
+  unsaved: readonly string[];
+}
+
+export const NO_FEEDBACK: Feedback = { thresholdError: false, unsaved: [] };
+
+function changedControl(change: SettingsChange): string {
+  return change.field === "excluded"
+    ? `excluded:${change.bundleId}`
+    : change.field;
+}
+
+export function nextFeedback(
+  feedback: Feedback,
+  change: SettingsChange,
+  result: SaveSettingsResult,
+): Feedback {
+  const control = changedControl(change);
+  if (result.ok) {
+    return {
+      thresholdError:
+        change.field === "thresholds" ? false : feedback.thresholdError,
+      unsaved: feedback.unsaved.filter((other) => other !== control),
+    };
+  }
+  if (result.error.kind === "invalid_settings" && change.field === "thresholds") {
+    return { ...feedback, thresholdError: true };
+  }
+  return {
+    ...feedback,
+    unsaved: [...new Set([...feedback.unsaved, control])].sort(),
+  };
+}
+
 export interface ExclusionRow {
   bundleId: BundleId;
   label: string;

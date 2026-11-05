@@ -1,19 +1,14 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
-
+import { getSettings, saveSettings, type SettingsView } from "./ipc";
 import {
-  getSettings,
-  saveSettings,
-  type SaveSettingsError,
-  type SettingsLimits,
-  type SettingsView,
-} from "./ipc";
-import {
+  NO_FEEDBACK,
   createSettingsSaver,
   enteredDays,
   exclusionRows,
+  nextFeedback,
   thresholdMessage,
   toFastForward,
   type ExclusionRow,
+  type Feedback,
   type SettingsChange,
 } from "./settings/model";
 
@@ -57,10 +52,10 @@ const dayInputs = Object.values(page.days);
 document.addEventListener("keydown", (event) => {
   const commandOnly =
     event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
-  if (commandOnly && event.key.toLowerCase() === "w") {
+  if (commandOnly && event.code === "KeyW") {
     event.preventDefault();
-    getCurrentWindow()
-      .close()
+    import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) => getCurrentWindow().close())
       .catch((error: unknown) => {
         console.error("settings window did not close", error);
       });
@@ -111,15 +106,20 @@ function showIntensity(): void {
   page.intensityValue.textContent = `${page.intensity.value}%`;
 }
 
-function showThresholdError(message: string | null): void {
-  page.stagesMessage.textContent = message ?? "";
+function showFeedback(feedback: Feedback, message: string): void {
+  page.stagesMessage.textContent = feedback.thresholdError ? message : "";
   for (const input of dayInputs) {
-    if (message === null) {
-      input.removeAttribute("aria-invalid");
-    } else {
+    if (feedback.thresholdError) {
       input.setAttribute("aria-invalid", "true");
+    } else {
+      input.removeAttribute("aria-invalid");
     }
   }
+  showSaveError(
+    feedback.unsaved.length > 0
+      ? "This change could not be saved. Try it again."
+      : null,
+  );
 }
 
 function showSaveError(message: string | null): void {
@@ -138,19 +138,6 @@ function enteredThresholds(): SettingsChange {
   };
 }
 
-function reportUnsaved(
-  change: SettingsChange,
-  error: SaveSettingsError,
-  limits: SettingsLimits,
-): void {
-  if (error.kind === "invalid_settings" && change.field === "thresholds") {
-    showThresholdError(thresholdMessage(limits));
-    return;
-  }
-  console.error("settings not saved", error);
-  showSaveError("This change could not be saved. Try it again.");
-}
-
 async function start(): Promise<void> {
   const view = await getSettings();
   show(view);
@@ -159,21 +146,21 @@ async function start(): Promise<void> {
   }
 
   const saver = createSettingsSaver(view.settings, saveSettings);
+  const message = thresholdMessage(view.limits);
+  let feedback = NO_FEEDBACK;
   const commit = (change: SettingsChange): void => {
     saver
       .commit(change)
+      .catch((error: unknown) => ({
+        ok: false as const,
+        error: { kind: "ipc_failed" as const, cause: error },
+      }))
       .then((result) => {
         if (!result.ok) {
-          reportUnsaved(change, result.error, view.limits);
-          return;
+          console.error("settings not saved", result.error);
         }
-        showSaveError(null);
-        if (change.field === "thresholds") {
-          showThresholdError(null);
-        }
-      })
-      .catch((error: unknown) => {
-        reportUnsaved(change, { kind: "ipc_failed", cause: error }, view.limits);
+        feedback = nextFeedback(feedback, change, result);
+        showFeedback(feedback, message);
       });
   };
 

@@ -9,6 +9,9 @@ use crate::growth::{self, FastForward, GrowthError, Thresholds};
 use crate::usage::{DistinctDockApps, DockApp};
 
 pub const MAX_EXCLUSIONS: usize = 256;
+/// Longer lists are refused before their entries are read; duplicates make
+/// some room above the cap.
+const MAX_EXCLUDED_ENTRIES: usize = 4 * MAX_EXCLUSIONS;
 
 pub const LIMITS: Limits = Limits {
     min_fuzz_days: growth::MIN_FUZZ_DAYS,
@@ -145,6 +148,19 @@ impl Settings {
             excluded: excluded(field(value, Field::Excluded)?)?,
             fast_forward: fast_forward(field(value, Field::FastForward)?)?,
         })
+    }
+
+    pub fn log(&self, message: &'static str) {
+        let thresholds = self.thresholds;
+        tracing::info!(
+            fuzz = thresholds.fuzz(),
+            patchy = thresholds.patchy(),
+            overgrown = thresholds.overgrown(),
+            intensity_percent = self.intensity.percent(),
+            fast_forward = self.fast_forward.factor(),
+            excluded_apps = self.excluded.len(),
+            "{message}"
+        );
     }
 
     pub fn encode_file(&self) -> String {
@@ -360,9 +376,7 @@ fn fast_forward(value: &Value) -> Result<FastForward, SettingsError> {
 }
 
 fn excluded(value: &Value) -> Result<Exclusions, SettingsError> {
-    let ids = value
-        .as_array()
-        .ok_or(SettingsError::ExcludedNotAList)?
+    let ids = excluded_entries(value)?
         .iter()
         .map(|entry| bundle_id(entry).ok_or(SettingsError::ExcludedBundleId))
         .collect::<Result<Vec<_>, _>>()?;
@@ -370,10 +384,18 @@ fn excluded(value: &Value) -> Result<Exclusions, SettingsError> {
 }
 
 fn excluded_lenient(value: &Value) -> Result<(Exclusions, usize), SettingsError> {
-    let entries = value.as_array().ok_or(SettingsError::ExcludedNotAList)?;
+    let entries = excluded_entries(value)?;
     let ids: Vec<BundleId> = entries.iter().filter_map(bundle_id).collect();
     let dropped = entries.len() - ids.len();
     Ok((Exclusions::new(ids)?, dropped))
+}
+
+fn excluded_entries(value: &Value) -> Result<&Vec<Value>, SettingsError> {
+    let entries = value.as_array().ok_or(SettingsError::ExcludedNotAList)?;
+    if entries.len() > MAX_EXCLUDED_ENTRIES {
+        return Err(SettingsError::TooManyExclusions);
+    }
+    Ok(entries)
 }
 
 fn bundle_id(entry: &Value) -> Option<BundleId> {

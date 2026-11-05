@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import type {
   BundleId,
   DockAppName,
+  SaveSettingsResult,
   Settings,
+  SettingsInput,
   SettingsLimits,
 } from "../ipc";
 import {
+  createSettingsSaver,
   enteredDays,
   exclusionRows,
   nextSettings,
@@ -190,5 +193,100 @@ describe("enteredDays", () => {
 
   it.each([5, 5.5, -1, 0])("passes %d through for Rust to check", (days) => {
     expect(enteredDays(days)).toBe(days);
+  });
+});
+
+describe("createSettingsSaver", () => {
+  function manualSave() {
+    const calls: SettingsInput[] = [];
+    const pending: ((result: SaveSettingsResult) => void)[] = [];
+    const save = (settings: SettingsInput): Promise<SaveSettingsResult> => {
+      calls.push(settings);
+      return new Promise((resolve) => pending.push(resolve));
+    };
+    const settle = async (result: SaveSettingsResult): Promise<void> => {
+      pending.shift()?.(result);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    return { calls, save, settle };
+  }
+
+  const stored = (settings: SettingsInput): SaveSettingsResult => ({
+    ok: true,
+    settings: settings as Settings,
+  });
+
+  it("waits for one save to finish before starting the next", async () => {
+    const { calls, save, settle } = manualSave();
+    const saver = createSettingsSaver(saved, save);
+
+    void saver.commit({ field: "intensityPercent", percent: 40 });
+    void saver.commit({ field: "fastForward", speed: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toHaveLength(1);
+    await settle(stored(calls[0]));
+    expect(calls).toHaveLength(2);
+  });
+
+  it("builds each save from what the one before it stored, so quick changes keep each other", async () => {
+    const { calls, save, settle } = manualSave();
+    const saver = createSettingsSaver(saved, save);
+
+    void saver.commit({ field: "intensityPercent", percent: 40 });
+    void saver.commit({ field: "fastForward", speed: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle(stored(calls[0]));
+
+    expect(calls[1]).toEqual({ ...saved, intensityPercent: 40, fastForward: 100 });
+  });
+
+  it("builds from the last stored settings after a rejected save", async () => {
+    const { calls, save, settle } = manualSave();
+    const saver = createSettingsSaver(saved, save);
+
+    void saver.commit({
+      field: "thresholds",
+      thresholds: { fuzz: 1, patchy: 10, overgrown: 30 },
+    });
+    void saver.commit({ field: "intensityPercent", percent: 40 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle({
+      ok: false,
+      error: { kind: "invalid_settings", message: "bad fuzz" },
+    });
+
+    expect(calls[1]).toEqual({ ...saved, intensityPercent: 40 });
+  });
+
+  it("hands each commit its own result", async () => {
+    const { calls, save, settle } = manualSave();
+    const saver = createSettingsSaver(saved, save);
+
+    const result = saver.commit({ field: "fastForward", speed: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle(stored(calls[0]));
+
+    await expect(result).resolves.toEqual({
+      ok: true,
+      settings: { ...saved, fastForward: 10 },
+    });
+  });
+
+  it("keeps saving after a save throws", async () => {
+    const calls: SettingsInput[] = [];
+    const saver = createSettingsSaver(saved, (settings) => {
+      calls.push(settings);
+      return calls.length === 1
+        ? Promise.reject(new Error("bridge gone"))
+        : Promise.resolve(stored(settings));
+    });
+
+    const first = saver.commit({ field: "fastForward", speed: 10 });
+    const second = saver.commit({ field: "fastForward", speed: 100 });
+
+    await expect(first).rejects.toThrow("bridge gone");
+    await expect(second).resolves.toMatchObject({ ok: true });
+    expect(calls).toHaveLength(2);
   });
 });

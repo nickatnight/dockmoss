@@ -8,9 +8,9 @@ import {
   type SettingsView,
 } from "./ipc";
 import {
+  createSettingsSaver,
   enteredDays,
   exclusionRows,
-  nextSettings,
   thresholdMessage,
   toFastForward,
   type ExclusionRow,
@@ -153,26 +153,28 @@ function reportUnsaved(
 
 async function start(): Promise<void> {
   const view = await getSettings();
-  let saved = view.settings;
   show(view);
   for (const group of page.groups) {
     group.disabled = false;
   }
 
-  let saving = Promise.resolve();
+  const saver = createSettingsSaver(view.settings, saveSettings);
   const commit = (change: SettingsChange): void => {
-    saving = saving.then(async () => {
-      const result = await saveSettings(nextSettings(saved, change));
-      if (!result.ok) {
-        reportUnsaved(change, result.error, view.limits);
-        return;
-      }
-      saved = result.settings;
-      showSaveError(null);
-      if (change.field === "thresholds") {
-        showThresholdError(null);
-      }
-    });
+    saver
+      .commit(change)
+      .then((result) => {
+        if (!result.ok) {
+          reportUnsaved(change, result.error, view.limits);
+          return;
+        }
+        showSaveError(null);
+        if (change.field === "thresholds") {
+          showThresholdError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        reportUnsaved(change, { kind: "ipc_failed", cause: error }, view.limits);
+      });
   };
 
   for (const input of dayInputs) {

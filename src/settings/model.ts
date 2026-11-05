@@ -3,6 +3,7 @@ import type {
   DockAppName,
   EnteredThresholds,
   FastForward,
+  SaveSettingsResult,
   Settings,
   SettingsInput,
   SettingsLimits,
@@ -35,6 +36,31 @@ export function nextSettings(
       return { ...saved, excluded: [...excluded].sort() };
     }
   }
+}
+
+export interface SettingsSaver {
+  commit(change: SettingsChange): Promise<SaveSettingsResult>;
+}
+
+export function createSettingsSaver(
+  initial: Settings,
+  save: (settings: SettingsInput) => Promise<SaveSettingsResult>,
+): SettingsSaver {
+  let saved = initial;
+  let previous: Promise<unknown> = Promise.resolve();
+  return {
+    commit(change) {
+      const result = previous.then(async () => {
+        const outcome = await save(nextSettings(saved, change));
+        if (outcome.ok) {
+          saved = outcome.settings;
+        }
+        return outcome;
+      });
+      previous = result.catch(() => undefined);
+      return result;
+    },
+  };
 }
 
 export interface ExclusionRow {

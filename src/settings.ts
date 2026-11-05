@@ -248,10 +248,10 @@ async function start(): Promise<void> {
       });
   };
 
-  let loginChange = Promise.resolve();
+  let loginChangeQueue = Promise.resolve();
   page.launchAtLogin.addEventListener("change", () => {
     const wanted = page.launchAtLogin.checked;
-    loginChange = loginChange
+    loginChangeQueue = loginChangeQueue
       .then(() => setLaunchAtLogin(wanted))
       .then((result) => {
         if (!result.ok) {

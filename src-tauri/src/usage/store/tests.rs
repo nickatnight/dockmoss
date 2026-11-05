@@ -242,8 +242,6 @@ fn a_file_with_a_dropped_entry_is_copied_byte_for_byte_to_dropped() {
     );
 }
 
-/// The move to the new app folder carries only `MOVED_FILES`, so a copy
-/// set aside under any other name would stay behind in the old folder.
 #[test]
 fn every_copy_set_aside_beside_the_log_is_one_the_move_carries() {
     for (case, text) in [("corrupt", "not json"), ("dropped entry", ONE_BAD_ENTRY)] {

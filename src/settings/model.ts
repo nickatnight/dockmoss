@@ -227,8 +227,6 @@ export function toFastForward(value: string): FastForward | null {
   return FAST_FORWARD_SPEEDS.find((speed) => String(speed) === value) ?? null;
 }
 
-/** The box as Settings opens: what macOS reports, or unticked and disabled
- * with a note saying why when it did not answer in time. */
 export function launchAtLoginBox(status: boolean | null): {
   checked: boolean;
   disabled: boolean;

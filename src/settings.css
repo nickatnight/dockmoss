@@ -270,8 +270,6 @@ input[type="range"]:focus-visible {
   color: var(--negative);
 }
 
-/* The login card dims only its box and title, so the note saying why the
-   box is disabled keeps full contrast. */
 fieldset:disabled,
 .group:has(> .slider > input:disabled),
 .check:has(> input:disabled) > :is(input, label) {

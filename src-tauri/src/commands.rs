@@ -1,12 +1,19 @@
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
+use serde_json::{Map, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::Error;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
-use crate::usage::AppGrowth;
+use crate::settings::{Settings, SettingsView};
+use crate::usage::{AppGrowth, DockApp};
+
+/// How long `get_settings` waits for the usage thread's Dock list.
+const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
@@ -45,4 +52,68 @@ pub async fn watch_growth(on_growth: Channel<Vec<AppGrowth>>, app: AppHandle) ->
         .map_err(|_| Error::UsageStopped)?;
     tracing::debug!("growth watcher subscribing");
     Ok(())
+}
+
+/// The saved settings, their limits and the Dock's apps by name. The Dock
+/// list is empty until the Dock has been read, or when usage tracking is off.
+#[tauri::command]
+pub async fn get_settings(
+    app: AppHandle,
+    settings: State<'_, Mutex<Settings>>,
+) -> Result<SettingsView, Error> {
+    let dock = dock_apps(&app).await;
+    let settings = settings
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    Ok(SettingsView::new(settings, &dock))
+}
+
+async fn dock_apps(app: &AppHandle) -> Vec<DockApp> {
+    let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
+        tracing::debug!("settings opened with usage tracking off; no dock apps listed");
+        return Vec::new();
+    };
+    let (reply, replied) = mpsc::channel();
+    if inbox.0.send(WriterMessage::ListDockApps(reply)).is_err() {
+        tracing::warn!("dock apps not listed: the usage thread stopped");
+        return Vec::new();
+    }
+    let waited =
+        tauri::async_runtime::spawn_blocking(move || replied.recv_timeout(DOCK_APPS_TIMEOUT)).await;
+    match waited {
+        Ok(Ok(apps)) => apps,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "dock apps not listed in time");
+            Vec::new()
+        }
+        Err(error) => {
+            tracing::warn!(%error, "dock apps not listed");
+            Vec::new()
+        }
+    }
+}
+
+/// Validates and stores the whole settings value, then returns what was
+/// stored. Nothing changes, on disk or in memory, unless every field is valid
+/// and the write succeeds.
+#[tauri::command]
+pub async fn save_settings(
+    settings: Map<String, Value>,
+    app: AppHandle,
+    state: State<'_, Mutex<Settings>>,
+) -> Result<Settings, Error> {
+    let settings = Settings::parse(&settings).inspect_err(|error| {
+        tracing::info!(field = error.field().key(), %error, "settings not saved: invalid");
+    })?;
+    // Held through the write, so two saves cannot interleave and the file and
+    // the managed copy always match.
+    let mut saved = state.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Err(error) = crate::store_settings(&app, &settings, &saved) {
+        tracing::warn!(%error, "settings not saved: the store write failed");
+        return Err(Error::SettingsNotSaved);
+    }
+    saved.clone_from(&settings);
+    crate::log_settings(&settings, "settings saved");
+    Ok(settings)
 }

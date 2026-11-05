@@ -7,14 +7,23 @@
 //! loading falls back to a field's default and keeps the rest.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
 use crate::bundle_id::BundleId;
-use crate::growth::{FastForward, GrowthError, Thresholds};
+use crate::growth::{self, FastForward, GrowthError, Thresholds};
+use crate::usage::DockApp;
 
 pub const MAX_EXCLUSIONS: usize = 256;
+
+/// The bounds the settings form shows, from the constants that enforce them.
+pub const LIMITS: Limits = Limits {
+    min_fuzz_days: growth::MIN_FUZZ_DAYS,
+    max_overgrown_days: growth::MAX_OVERGROWN_DAYS,
+    max_exclusions: MAX_EXCLUSIONS,
+};
 
 const VERSION_KEY: &str = "version";
 const VERSION: u64 = 1;
@@ -104,13 +113,6 @@ pub enum SettingsError {
     FastForward,
     #[error("excluded apps must be a list of bundle IDs")]
     ExcludedNotAList,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "save_settings, in the next commit, parses and stores settings"
-        )
-    )]
     #[error("an excluded bundle ID is not text, is empty or is longer than 255 bytes")]
     ExcludedBundleId,
     #[error("at most {MAX_EXCLUSIONS} apps can be excluded")]
@@ -149,13 +151,6 @@ pub struct Loaded {
 }
 
 impl Settings {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "save_settings, in the next commit, parses and stores settings"
-        )
-    )]
     /// Parses the webview's settings value. Every field must be present and
     /// valid; other keys are ignored.
     pub fn parse(value: &Map<String, Value>) -> Result<Self, SettingsError> {
@@ -167,13 +162,6 @@ impl Settings {
         })
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "save_settings, in the next commit, parses and stores settings"
-        )
-    )]
     /// The stored shape: the webview shape plus `version`.
     pub fn to_stored(&self) -> Map<String, Value> {
         let mut stored = self.to_map();
@@ -211,6 +199,60 @@ impl Serialize for Settings {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.to_map().serialize(serializer)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Limits {
+    min_fuzz_days: u32,
+    max_overgrown_days: u32,
+    max_exclusions: usize,
+}
+
+/// What the settings window needs on open: the settings, their limits, and
+/// the Dock's apps by name. Paths stay in Rust.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsView {
+    settings: Settings,
+    limits: Limits,
+    dock_apps: Vec<DockAppName>,
+}
+
+impl SettingsView {
+    /// `dock` is one entry per bundle ID, in Dock order.
+    pub fn new(settings: Settings, dock: &[DockApp]) -> Self {
+        Self {
+            settings,
+            limits: LIMITS,
+            dock_apps: dock.iter().map(DockAppName::new).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DockAppName {
+    pub bundle_id: BundleId,
+    pub name: String,
+}
+
+impl DockAppName {
+    /// Names the app after its bundle's file name without `.app`, or after
+    /// its bundle ID when the path has no usable name.
+    pub fn new(app: &DockApp) -> Self {
+        let name = bundle_name(&app.app_path).unwrap_or_else(|| app.bundle_id.as_str().to_owned());
+        Self {
+            bundle_id: app.bundle_id.clone(),
+            name,
+        }
+    }
+}
+
+fn bundle_name(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    let name = file_name.strip_suffix(".app").unwrap_or(file_name);
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// Reads the stored file's entries. An empty store (no file yet) gives the
@@ -298,13 +340,6 @@ fn fast_forward(value: &Value) -> Result<FastForward, SettingsError> {
         .ok_or(SettingsError::FastForward)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "save_settings, in the next commit, parses and stores settings"
-    )
-)]
 fn excluded(value: &Value) -> Result<Exclusions, SettingsError> {
     let ids = value
         .as_array()

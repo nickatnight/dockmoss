@@ -1,8 +1,14 @@
 use serde_json::{Map, Value, json};
 
-use super::{Exclusions, Field, Intensity, LoadProblem, MAX_EXCLUSIONS, Settings, SettingsError};
+use std::path::PathBuf;
+
+use super::{
+    DockAppName, Exclusions, Field, Intensity, LIMITS, LoadProblem, MAX_EXCLUSIONS, Settings,
+    SettingsError, SettingsView,
+};
 use crate::bundle_id::BundleId;
 use crate::growth::{FastForward, GrowthError, Thresholds};
+use crate::usage::DockApp;
 
 fn object(value: Value) -> Map<String, Value> {
     match value {
@@ -383,4 +389,64 @@ fn load_problems_name_the_field_but_never_an_excluded_bundle_id() {
             assert!(!text.contains(secret), "{text}");
         }
     }
+}
+
+fn dock_app(bundle_id: &str, path: &str) -> DockApp {
+    DockApp {
+        bundle_id: BundleId::new(bundle_id).expect("valid bundle ID"),
+        app_path: PathBuf::from(path),
+    }
+}
+
+#[test]
+fn a_dock_app_is_named_after_its_bundle_without_dot_app() {
+    let cases = [
+        ("/Applications/Safari.app", "Safari"),
+        ("/Applications/Visual Studio Code.app", "Visual Studio Code"),
+        ("/System/Applications/Utilities/Terminal.app/", "Terminal"),
+        ("/Applications/Tool", "Tool"),
+        ("/Applications/My.app.app", "My.app"),
+        ("/Applications/.app", "com.example.id"),
+        ("/", "com.example.id"),
+        ("", "com.example.id"),
+    ];
+
+    for (path, name) in cases {
+        let named = DockAppName::new(&dock_app("com.example.id", path));
+
+        assert_eq!(named.name, name, "{path:?}");
+        assert_eq!(named.bundle_id.as_str(), "com.example.id", "{path:?}");
+    }
+}
+
+#[test]
+fn limits_come_from_the_growth_rules_and_the_exclusion_cap() {
+    assert_eq!(
+        serde_json::to_value(LIMITS).expect("Limits serializes"),
+        json!({ "minFuzzDays": 2, "maxOvergrownDays": 3650, "maxExclusions": 256 })
+    );
+}
+
+#[test]
+fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
+    let dock = [
+        dock_app("com.apple.Safari", "/Users/someone/Applications/Safari.app"),
+        dock_app("com.apple.Chess", "/System/Applications/Chess.app"),
+    ];
+
+    let view = SettingsView::new(Settings::default(), &dock);
+
+    let json = serde_json::to_value(&view).expect("SettingsView serializes");
+    assert_eq!(
+        json,
+        json!({
+            "settings": serde_json::to_value(Settings::default()).expect("Settings serializes"),
+            "limits": serde_json::to_value(LIMITS).expect("Limits serializes"),
+            "dockApps": [
+                { "bundleId": "com.apple.Safari", "name": "Safari" },
+                { "bundleId": "com.apple.Chess", "name": "Chess" },
+            ],
+        })
+    );
+    assert!(!json.to_string().contains("someone"), "{json}");
 }

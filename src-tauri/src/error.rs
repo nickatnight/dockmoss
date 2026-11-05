@@ -15,6 +15,12 @@ pub enum Error {
     TrackerStopped,
     #[error("usage tracking is not running")]
     UsageStopped,
+    #[error(transparent)]
+    InvalidSettings(#[from] crate::settings::SettingsError),
+    /// The store write failed; the cause is logged, not sent, because it can
+    /// name a path in the user's home folder.
+    #[error("settings could not be saved")]
+    SettingsNotSaved,
 }
 
 impl Error {
@@ -26,6 +32,8 @@ impl Error {
             Self::Dock(_) => "dock",
             Self::TrackerStopped => "tracker_stopped",
             Self::UsageStopped => "usage_stopped",
+            Self::InvalidSettings(_) => "invalid_settings",
+            Self::SettingsNotSaved => "settings_not_saved",
         }
     }
 }

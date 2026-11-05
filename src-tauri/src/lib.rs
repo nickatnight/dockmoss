@@ -61,7 +61,9 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::watch_dock,
-            commands::watch_growth
+            commands::watch_growth,
+            commands::get_settings,
+            commands::save_settings
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -201,7 +203,29 @@ fn load_settings(app: &AppHandle) -> Settings {
     loaded.settings
 }
 
-fn log_settings(settings: &Settings, message: &'static str) {
+/// Writes every setting to the store and saves it. On failure the store's
+/// cache goes back to `saved`, because the plugin saves open stores at exit.
+pub(crate) fn store_settings(
+    app: &AppHandle,
+    settings: &Settings,
+    saved: &Settings,
+) -> Result<(), tauri_plugin_store::Error> {
+    let store = settings_store(app)?;
+    let replace_entries = |settings: &Settings| {
+        store.clear();
+        for (key, value) in settings.to_stored() {
+            store.set(key, value);
+        }
+    };
+    replace_entries(settings);
+    let written = store.save();
+    if written.is_err() {
+        replace_entries(saved);
+    }
+    written
+}
+
+pub(crate) fn log_settings(settings: &Settings, message: &'static str) {
     let thresholds = settings.thresholds;
     tracing::info!(
         fuzz = thresholds.fuzz(),
@@ -293,6 +317,8 @@ mod launch_log_writer {
             kind: AppEventKind,
         },
         DockApps(Vec<DockApp>),
+        /// Replies with the latest Dock list, one entry per bundle ID.
+        ListDockApps(Sender<Vec<DockApp>>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
         Flush(Sender<()>),
     }
@@ -387,6 +413,13 @@ mod launch_log_writer {
                     match self.state.dock_apps(apps, Timestamp::now()) {
                         DockUpdate::Seed(apps) => self.start_seed_read(apps),
                         DockUpdate::Applied(change) => self.apply(change),
+                    }
+                }
+                WriterMessage::ListDockApps(reply) => {
+                    if reply.send(self.state.distinct_dock_apps()).is_err() {
+                        tracing::debug!(
+                            "dock apps listed after the settings window stopped waiting"
+                        );
                     }
                 }
                 WriterMessage::WatchGrowth(channel) => {

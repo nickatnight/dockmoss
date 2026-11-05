@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -126,14 +126,16 @@ fn save_settings_blocking(app: &AppHandle, value: &Map<String, Value>) -> Result
     Ok(saved.clone())
 }
 
-fn apply_to_growth(app: &AppHandle, saved: &Settings) {
+/// Takes the guard, so a send can only happen under the settings lock: the
+/// usage thread then applies saves in the order they were written.
+fn apply_to_growth(app: &AppHandle, saved: &MutexGuard<'_, Settings>) {
     let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
         tracing::debug!("settings saved; usage tracking is off, so nothing to apply");
         return;
     };
     if inbox
         .0
-        .send(WriterMessage::Settings(saved.clone()))
+        .send(WriterMessage::Settings(Settings::clone(saved)))
         .is_err()
     {
         tracing::warn!("saved settings not applied: the usage thread stopped");

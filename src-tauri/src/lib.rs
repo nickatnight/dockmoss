@@ -902,7 +902,7 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let window =
         WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App("settings.html".into()))
             .title("DockMoss Settings")
-            .inner_size(440.0, 700.0)
+            .inner_size(440.0, 760.0)
             .resizable(false)
             .maximizable(false)
             .center()

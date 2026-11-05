@@ -3,7 +3,7 @@
   --ground: light-dark(#f0f0f0, #1e1e1e);
   --surface: light-dark(#ffffff, #2a2a2a);
   --border: light-dark(#dedede, #3a3a3a);
-  --control-border: light-dark(#c4c4c4, #565656);
+  --control-border: light-dark(#8a8a8a, #757575);
   --control-ground: light-dark(#ffffff, #1f1f1f);
   --text: light-dark(#1d1d1f, #f2f2f2);
   --muted: light-dark(#5f6368, #ababab);
@@ -17,11 +17,20 @@
   cursor: default;
 }
 
+/* The window is the scroll boundary: only the app list scrolls. */
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  overflow: hidden;
 }
 
 main {
+  box-sizing: border-box;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -43,6 +52,36 @@ main {
   font-weight: 600;
 }
 
+.group-title {
+  display: block;
+  font-weight: 600;
+}
+
+/* A flex fieldset ignores the legend's float and draws it on the border, so
+   this group positions its legend instead. */
+.group-fill {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 30px;
+}
+
+.group-fill > legend {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  width: auto;
+}
+
+.fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .group > legend + * {
   clear: both;
 }
@@ -62,10 +101,6 @@ main {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.day > span {
-  color: var(--muted);
 }
 
 input[type="number"] {
@@ -90,7 +125,7 @@ input[type="number"][aria-invalid="true"] {
 }
 
 .field-error:empty {
-  display: none;
+  margin: 0;
 }
 
 .slider {
@@ -126,13 +161,17 @@ input[type="number"][aria-invalid="true"] {
   margin: 0;
 }
 
-/* The side padding keeps the checkboxes' focus rings inside the scroll box. */
+/* The padding keeps the checkboxes' focus rings inside the scroll box. */
 .apps {
-  max-height: 196px;
-  margin: 0 -4px;
-  padding: 0 4px;
+  flex: 1 1 auto;
+  min-height: 88px;
+  margin: 0;
+  padding: 4px 8px;
   overflow-y: auto;
   list-style: none;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-ground);
 }
 
 .apps label {
@@ -191,4 +230,12 @@ input[type="range"]:focus-visible {
 
 fieldset:disabled {
   opacity: 0.6;
+}
+
+.group-title + .hint {
+  margin-top: 0;
+}
+
+.apps:empty {
+  display: none;
 }

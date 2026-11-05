@@ -139,7 +139,7 @@ export function enteredDays(valueAsNumber: number): number | null {
 }
 
 export function thresholdMessage(limits: SettingsLimits): string {
-  return `Days must rise from Fuzz to Patchy to Overgrown, from ${limits.minFuzzDays} to ${limits.maxOvergrownDays}.`;
+  return `Use whole days from ${limits.minFuzzDays} to ${limits.maxOvergrownDays}, each stage longer than the one before.`;
 }
 
 const FAST_FORWARD_SPEEDS: readonly FastForward[] = [1, 10, 100, 1000];

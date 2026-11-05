@@ -27,7 +27,6 @@ const page = {
   saveError: byId("save-error", HTMLParagraphElement),
   groups: [
     byId("stages", HTMLFieldSetElement),
-    byId("intensity-group", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
     byId("excluded-group", HTMLFieldSetElement),
   ],
@@ -103,11 +102,27 @@ function exclusionItem(
 }
 
 function showIntensity(): void {
-  page.intensityValue.textContent = `${page.intensity.value}%`;
+  const percent = `${page.intensity.value}%`;
+  page.intensityValue.textContent = percent;
+  page.intensity.setAttribute("aria-valuetext", percent);
 }
 
-function showFeedback(feedback: Feedback, message: string): void {
-  page.stagesMessage.textContent = feedback.thresholdError ? message : "";
+/** `reannounce` empties the alert for a frame first, because setting the
+ * same text again is not a change a screen reader announces. */
+function showFeedback(
+  feedback: Feedback,
+  message: string,
+  reannounce: boolean,
+): void {
+  const text = feedback.thresholdError ? message : "";
+  if (reannounce) {
+    page.stagesMessage.textContent = "";
+    requestAnimationFrame(() => {
+      page.stagesMessage.textContent = text;
+    });
+  } else {
+    page.stagesMessage.textContent = text;
+  }
   for (const input of dayInputs) {
     if (feedback.thresholdError) {
       input.setAttribute("aria-invalid", "true");
@@ -117,7 +132,7 @@ function showFeedback(feedback: Feedback, message: string): void {
   }
   showSaveError(
     feedback.unsaved.length > 0
-      ? "This change could not be saved. Try it again."
+      ? "This change could not be saved. Try again."
       : null,
   );
 }
@@ -144,6 +159,7 @@ async function start(): Promise<void> {
   for (const group of page.groups) {
     group.disabled = false;
   }
+  page.intensity.disabled = false;
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const message = thresholdMessage(view.limits);
@@ -159,8 +175,13 @@ async function start(): Promise<void> {
         if (!result.ok) {
           console.error("settings not saved", result.error);
         }
+        const before = feedback;
         feedback = nextFeedback(feedback, change, result);
-        showFeedback(feedback, message);
+        showFeedback(
+          feedback,
+          message,
+          before.thresholdError && feedback.thresholdError && change.field === "thresholds",
+        );
       });
   };
 

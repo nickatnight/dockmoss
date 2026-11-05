@@ -117,7 +117,7 @@ describe("thresholdMessage", () => {
     };
 
     expect(thresholdMessage(limits)).toBe(
-      "Days must rise from Fuzz to Patchy to Overgrown, from 2 to 3650.",
+      "Use whole days from 2 to 3650, each stage longer than the one before.",
     );
   });
 
@@ -129,7 +129,7 @@ describe("thresholdMessage", () => {
     };
 
     expect(thresholdMessage(limits)).toBe(
-      "Days must rise from Fuzz to Patchy to Overgrown, from 3 to 400.",
+      "Use whole days from 3 to 400, each stage longer than the one before.",
     );
   });
 });

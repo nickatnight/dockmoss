@@ -235,7 +235,7 @@ mod tests {
     use crate::usage::{AppEventKind, LaunchLog};
 
     const TOLERANCE: f64 = 1e-5;
-    /// Safari's jitter, from the golden table in growth/jitter/tests.rs.
+    /// Safari's jitter, from the golden table in growth/jitter.rs's tests.
     const SAFARI_JITTER_SECONDS: f64 = 38_842.0;
     const SECONDS_PER_DAY: f64 = 86_400.0;
     const DEFAULT_FUZZ_DAYS: f64 = 5.0;
@@ -870,7 +870,7 @@ mod tests {
         assert_eq!(got[2], ("com.apple.Chess".to_owned(), 0.0, Stage::Clean));
     }
 
-    /// Finder's jitter, from the golden table in growth/jitter/tests.rs.
+    /// Finder's jitter, from the golden table in growth/jitter.rs's tests.
     const FINDER_JITTER_SECONDS: f64 = 31_764.0;
 
     /// Where an app unused for `unused_days` sits on the curve, jitter included.

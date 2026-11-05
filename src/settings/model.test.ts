@@ -759,9 +759,17 @@ describe("createLoginToggle", () => {
 
 describe("launchAtLoginBox", () => {
   it.each([
-    ["on", true, { checked: true, disabled: false }],
-    ["off", false, { checked: false, disabled: false }],
-    ["unknown: macOS did not answer in time", null, { checked: false, disabled: true }],
+    ["on", true, { checked: true, disabled: false, note: null }],
+    ["off", false, { checked: false, disabled: false, note: null }],
+    [
+      "unknown: macOS did not answer in time, and the note says why",
+      null,
+      {
+        checked: false,
+        disabled: true,
+        note: "macOS did not say whether this is on. To ask again, close and reopen Settings.",
+      },
+    ],
   ] as const)("%s", (_case, status, expected) => {
     expect(launchAtLoginBox(status)).toEqual(expected);
   });

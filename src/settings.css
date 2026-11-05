@@ -172,6 +172,10 @@ input[type="number"][aria-invalid="true"] {
   margin: 0;
 }
 
+.check > .hint + .hint {
+  margin-top: 4px;
+}
+
 .speeds {
   display: flex;
   gap: 20px;
@@ -266,9 +270,11 @@ input[type="range"]:focus-visible {
   color: var(--negative);
 }
 
+/* The login card dims only its box and title, so the note saying why the
+   box is disabled keeps full contrast. */
 fieldset:disabled,
 .group:has(> .slider > input:disabled),
-.check:has(> input:disabled) {
+.check:has(> input:disabled) > :is(input, label) {
   opacity: 0.6;
 }
 

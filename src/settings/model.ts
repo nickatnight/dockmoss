@@ -228,12 +228,20 @@ export function toFastForward(value: string): FastForward | null {
 }
 
 /** The box as Settings opens: what macOS reports, or unticked and disabled
- * when it did not answer in time. */
+ * with a note saying why when it did not answer in time. */
 export function launchAtLoginBox(status: boolean | null): {
   checked: boolean;
   disabled: boolean;
+  note: string | null;
 } {
-  return { checked: status === true, disabled: status === null };
+  return {
+    checked: status === true,
+    disabled: status === null,
+    note:
+      status === null
+        ? "macOS did not say whether this is on. To ask again, close and reopen Settings."
+        : null,
+  };
 }
 
 export interface LoginChangeDone {

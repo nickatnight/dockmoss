@@ -39,6 +39,7 @@ function byId<T extends HTMLElement>(
 const page = {
   saveError: byId("save-error", HTMLParagraphElement),
   launchAtLogin: byId("launch-at-login", HTMLInputElement),
+  launchAtLoginNote: byId("launch-at-login-note", HTMLParagraphElement),
   groups: [
     byId("stages", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
@@ -221,7 +222,10 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
   page.intensity.disabled = false;
-  page.launchAtLogin.disabled = launchAtLoginBox(view.launchAtLogin).disabled;
+  const loginBox = launchAtLoginBox(view.launchAtLogin);
+  page.launchAtLogin.disabled = loginBox.disabled;
+  page.launchAtLoginNote.textContent = loginBox.note;
+  page.launchAtLoginNote.hidden = loginBox.note === null;
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const messages = {

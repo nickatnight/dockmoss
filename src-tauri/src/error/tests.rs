@@ -162,7 +162,7 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
     }
     let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();
 
-    let ipc = include_str!("../../../src/ipc.ts");
+    let ipc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/ipc.ts"));
     let union = ipc
         .split("export type ErrorKind =")
         .nth(1)
@@ -171,7 +171,7 @@ fn error_kind_in_ipc_ts_lists_every_error_kind() {
     let typescript: std::collections::BTreeSet<&str> =
         union.split('"').skip(1).step_by(2).collect();
 
-    let source = include_str!("../error.rs");
+    let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/error.rs"));
     let kind_body = source
         .split("fn kind(&self)")
         .nth(1)

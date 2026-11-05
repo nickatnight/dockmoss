@@ -1021,7 +1021,9 @@ mod dock_tracker {
                 &mut screen_changed,
             );
 
-            assert!(matches!(woken, Woken::DockHover { at } if at >= started));
+            let returned = Instant::now();
+
+            assert!(matches!(woken, Woken::DockHover { at } if at >= started && at <= returned));
             assert!(
                 started.elapsed() < Duration::from_secs(1),
                 "returned after {:?}",

@@ -92,7 +92,7 @@ impl MoveReport {
     /// The file is still in the old folder and a later start may move it, so
     /// nothing may write a new one in its place this session: the new one
     /// would be kept, and the old one never read again.
-    pub fn left_behind(&self, name: &str) -> bool {
+    fn left_behind(&self, name: &str) -> bool {
         self.failed.contains(&name)
     }
 

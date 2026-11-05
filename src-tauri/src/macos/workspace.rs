@@ -106,7 +106,10 @@ pub fn on_app_activated(
 
 /// Calls `on_app` on the main thread with the application of each workspace
 /// notification named `name`.
-#[expect(unsafe_code, reason = "the observer API takes a block")]
+#[expect(
+    unsafe_code,
+    reason = "the observer API takes a block, and the block dereferences the delivered notification"
+)]
 fn observe(
     name: &NSString,
     on_app: impl Fn(&NSRunningApplication) + Send + Sync + 'static,

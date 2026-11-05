@@ -5,6 +5,7 @@ use jiff::{SignedDuration, Timestamp};
 use super::{Change, DistinctDockApps, DockApp, DockUpdate, SeedReport, UsageState};
 use crate::bundle_id::BundleId;
 use crate::growth::{FastForward, Stage, Thresholds};
+use crate::settings::{Exclusions, Intensity, Settings};
 use crate::usage::spotlight::SpotlightSeed;
 use crate::usage::{AppEventKind, LaunchLog};
 
@@ -75,8 +76,15 @@ fn seeded_with_no_dates(apps: Vec<DockApp>, at: Timestamp) -> UsageState {
     state
 }
 
+fn at_speed(fast_forward: FastForward) -> Settings {
+    Settings {
+        fast_forward,
+        ..Settings::default()
+    }
+}
+
 fn stage_of(state: &UsageState, bundle_id: &str, at: Timestamp, ff: FastForward) -> (f32, Stage) {
-    let growth = state.growth(at, &Thresholds::default(), ff);
+    let growth = state.growth(at, &at_speed(ff));
     let entry = growth
         .iter()
         .find(|entry| entry.bundle_id == id(bundle_id))
@@ -438,7 +446,7 @@ fn growth_lists_the_dock_apps_in_dock_order() {
     );
 
     let order: Vec<String> = state
-        .growth(now(), &Thresholds::default(), FastForward::X1)
+        .growth(now(), &Settings::default())
         .into_iter()
         .map(|entry| entry.bundle_id.as_str().to_owned())
         .collect();
@@ -474,7 +482,7 @@ fn an_app_with_no_data_at_all_is_clean() {
 fn growth_serializes_in_camel_case_with_a_lowercase_stage() {
     let state = seeded_with_no_dates(vec![app("com.apple.Safari")], ago(days(6)));
 
-    let json = serde_json::to_value(state.growth(now(), &Thresholds::default(), FastForward::X1))
+    let json = serde_json::to_value(state.growth(now(), &Settings::default()))
         .expect("growth serializes to JSON");
 
     let entry = json.get(0).expect("one entry");
@@ -535,9 +543,7 @@ fn an_app_pinned_twice_is_read_once_and_counted_once() {
         })
     );
     assert_eq!(
-        state
-            .growth(now(), &Thresholds::default(), FastForward::X1)
-            .len(),
+        state.growth(now(), &Settings::default()).len(),
         3,
         "growth keeps one entry per Dock item"
     );
@@ -566,4 +572,191 @@ fn distinct_dock_apps_keep_the_first_entry_per_bundle_id_in_dock_order() {
             app("com.apple.Notes")
         ]
     );
+}
+
+/// Finder first seen 40 days ago (Overgrown), Safari 6 days ago (Fuzz),
+/// Chess now (Clean).
+fn three_apps() -> UsageState {
+    let mut log = baselined();
+    log.set_first_seen(id("com.apple.finder"), ago(days(40)));
+    log.set_first_seen(id("com.apple.Safari"), ago(days(6)));
+    log.set_first_seen(id("com.apple.Chess"), now());
+    let mut state = UsageState::new(log);
+    state.dock_apps(
+        vec![
+            app("com.apple.finder"),
+            app("com.apple.Safari"),
+            app("com.apple.Chess"),
+        ],
+        now(),
+    );
+    state.used(
+        id("com.apple.finder"),
+        ago(days(40)),
+        AppEventKind::Terminated,
+    );
+    state
+}
+
+fn frame(state: &UsageState, settings: &Settings) -> Vec<(String, f32, Stage)> {
+    state
+        .growth(now(), settings)
+        .into_iter()
+        .map(|entry| {
+            (
+                entry.bundle_id.as_str().to_owned(),
+                entry.overgrowth.get(),
+                entry.stage,
+            )
+        })
+        .collect()
+}
+
+fn excluding(ids: &[&str]) -> Exclusions {
+    Exclusions::new(ids.iter().map(|text| id(text))).expect("under the cap")
+}
+
+fn intensity(percent: u64) -> Intensity {
+    Intensity::new(percent).expect("0 to 100")
+}
+
+fn approx(actual: f32, expected: f64) -> bool {
+    (f64::from(actual) - expected).abs() < TOLERANCE
+}
+
+#[test]
+fn the_default_settings_draw_the_curve_unchanged() {
+    let got = frame(&three_apps(), &Settings::default());
+
+    let safari = safari_in_fuzz(days(6), 1.0);
+    assert_eq!(got.len(), 3);
+    assert_eq!(
+        got[0],
+        ("com.apple.finder".to_owned(), 1.0, Stage::Overgrown)
+    );
+    assert_eq!(
+        (got[1].0.as_str(), got[1].2),
+        ("com.apple.Safari", Stage::Fuzz)
+    );
+    assert!(approx(got[1].1, safari), "{}, expected {safari}", got[1].1);
+    assert_eq!(got[2], ("com.apple.Chess".to_owned(), 0.0, Stage::Clean));
+}
+
+#[test]
+fn thresholds_move_each_app_along_the_curve() {
+    let cases = [
+        // Safari's 6 days plus 0.45 days of jitter.
+        ("later stages", (8, 15, 40), Stage::Clean, Stage::Overgrown),
+        (
+            "earlier stages",
+            (2, 3, 4),
+            Stage::Overgrown,
+            Stage::Overgrown,
+        ),
+        (
+            "a far overgrown stage",
+            (5, 10, 100),
+            Stage::Fuzz,
+            Stage::Patchy,
+        ),
+    ];
+    for (case, (fuzz, patchy, overgrown), safari, finder) in cases {
+        let settings = Settings {
+            thresholds: Thresholds::new(fuzz, patchy, overgrown).expect("valid"),
+            ..Settings::default()
+        };
+
+        let got = frame(&three_apps(), &settings);
+
+        assert_eq!(got[1].2, safari, "{case}: Safari");
+        assert_eq!(got[0].2, finder, "{case}: Finder");
+        assert_eq!(got[2].2, Stage::Clean, "{case}: Chess");
+    }
+}
+
+#[test]
+fn fast_forward_from_the_settings_speeds_up_growth() {
+    let settings = at_speed(FastForward::X10);
+
+    let got = frame(&three_apps(), &settings);
+
+    // 6 days at 10x is 60 days: overgrown.
+    assert_eq!(got[1].2, Stage::Overgrown);
+    // Chess was first seen at `now`, so nothing has elapsed to multiply.
+    assert_eq!(got[2].2, Stage::Clean);
+}
+
+#[test]
+fn an_excluded_app_is_clean_and_keeps_its_entry() {
+    let settings = Settings {
+        excluded: excluding(&["com.apple.finder", "com.example.NotInTheDock"]),
+        ..Settings::default()
+    };
+
+    let got = frame(&three_apps(), &settings);
+
+    assert_eq!(got.len(), 3, "one entry per Dock app");
+    assert_eq!(got[0], ("com.apple.finder".to_owned(), 0.0, Stage::Clean));
+    assert_eq!(got[1].2, Stage::Fuzz, "Safari is not excluded");
+}
+
+#[test]
+fn intensity_scales_overgrowth_and_keeps_the_stage() {
+    let safari = safari_in_fuzz(days(6), 1.0);
+    let cases = [
+        (100, 1.0, safari),
+        (30, 0.3, 0.3 * safari),
+        (50, 0.5, 0.5 * safari),
+        (1, 0.01, 0.01 * safari),
+        (0, 0.0, 0.0),
+    ];
+    for (percent, finder, expected_safari) in cases {
+        let settings = Settings {
+            intensity: intensity(percent),
+            ..Settings::default()
+        };
+
+        let got = frame(&three_apps(), &settings);
+
+        assert!(approx(got[0].1, finder), "{percent}%: Finder {}", got[0].1);
+        assert_eq!(got[0].2, Stage::Overgrown, "{percent}%: Finder's stage");
+        assert!(
+            approx(got[1].1, expected_safari),
+            "{percent}%: Safari {}, expected {expected_safari}",
+            got[1].1
+        );
+        assert_eq!(got[1].2, Stage::Fuzz, "{percent}%: Safari's stage");
+        assert_eq!(got[2].1, 0.0, "{percent}%: Chess");
+    }
+}
+
+#[test]
+fn intensity_100_sends_exactly_the_unscaled_overgrowth() {
+    let unscaled = frame(&three_apps(), &Settings::default());
+    let settings = Settings {
+        intensity: intensity(100),
+        ..Settings::default()
+    };
+
+    assert_eq!(frame(&three_apps(), &settings), unscaled);
+}
+
+#[test]
+fn an_excluded_app_stays_clean_at_any_intensity() {
+    for percent in [0, 30, 100] {
+        let settings = Settings {
+            excluded: excluding(&["com.apple.Safari"]),
+            intensity: intensity(percent),
+            ..Settings::default()
+        };
+
+        let got = frame(&three_apps(), &settings);
+
+        assert_eq!(
+            got[1],
+            ("com.apple.Safari".to_owned(), 0.0, Stage::Clean),
+            "{percent}%"
+        );
+        assert_eq!(got[0].2, Stage::Overgrown, "{percent}%: Finder");
+    }
 }

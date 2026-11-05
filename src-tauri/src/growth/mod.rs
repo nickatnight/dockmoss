@@ -111,6 +111,11 @@ impl FastForward {
         }
     }
 
+    /// A factor written as text, such as an environment variable's value.
+    pub fn parse(text: &str) -> Option<Self> {
+        text.trim().parse().ok().and_then(Self::from_factor)
+    }
+
     pub fn factor(self) -> u32 {
         match self {
             Self::X1 => 1,

@@ -5,7 +5,7 @@ use serde::{Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
 use crate::bundle_id::BundleId;
-use crate::growth::{self, FastForward, GrowthError, Thresholds};
+use crate::growth::{self, FastForward, GrowthError, Overgrowth, Thresholds};
 use crate::usage::{self, DistinctDockApps, DockApp};
 
 pub const MAX_EXCLUSIONS: usize = 256;
@@ -47,6 +47,12 @@ impl Intensity {
     pub fn percent(self) -> u8 {
         self.0
     }
+
+    /// The overgrowth drawn: `overgrowth` times this percent. 100% returns
+    /// it unchanged, and 0% returns 0.
+    pub fn scale(self, overgrowth: Overgrowth) -> Overgrowth {
+        Overgrowth::new(overgrowth.get() * (f32::from(self.0) / 100.0))
+    }
 }
 
 impl Default for Intensity {
@@ -69,6 +75,10 @@ impl Exclusions {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn contains(&self, bundle_id: &BundleId) -> bool {
+        self.0.contains(bundle_id)
     }
 }
 
@@ -153,6 +163,17 @@ impl Settings {
             excluded: excluded(field(value, Field::Excluded)?)?,
             fast_forward: fast_forward(field(value, Field::FastForward)?)?,
         })
+    }
+
+    /// The settings growth applies: these, with `fast_forward_override` in
+    /// place of the saved speed when there is one (debug builds'
+    /// `DOCKMOSS_FAST_FORWARD`).
+    #[must_use]
+    pub fn applied(&self, fast_forward_override: Option<FastForward>) -> Self {
+        Self {
+            fast_forward: fast_forward_override.unwrap_or(self.fast_forward),
+            ..self.clone()
+        }
     }
 
     pub fn log(&self, message: &'static str) {

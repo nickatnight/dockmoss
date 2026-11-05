@@ -146,3 +146,19 @@ fn fast_forward_from_factor_accepts_only_the_four_speeds() {
         assert_eq!(FastForward::from_factor(factor), expected, "{factor}");
     }
 }
+
+#[test]
+fn fast_forward_parses_a_factor_written_as_text() {
+    let cases = [
+        ("1000", Some(FastForward::X1000)),
+        (" 10\n", Some(FastForward::X10)),
+        ("1", Some(FastForward::X1)),
+        ("7", None),
+        ("-10", None),
+        ("10x", None),
+        ("", None),
+    ];
+    for (text, expected) in cases {
+        assert_eq!(FastForward::parse(text), expected, "{text:?}");
+    }
+}

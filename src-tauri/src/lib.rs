@@ -187,8 +187,9 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     let log = usage::load_or_set_aside(&path, Timestamp::now());
     let entries = log.len();
     let first_run = log.baseline_at().is_none();
-    let fast_forward = fast_forward();
-    let inbox = launch_log_writer::spawn(path.clone(), log, fast_forward)?;
+    let applied = Settings::default().applied(fast_forward_override());
+    let fast_forward = applied.fast_forward;
+    let inbox = launch_log_writer::spawn(path.clone(), log, applied)?;
     let own_bundle_id = app.config().identifier.clone();
     let now = Timestamp::now();
     let mut running = 0_usize;
@@ -256,28 +257,25 @@ fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
     (loaded.settings, Some(path))
 }
 
+/// Debug builds only: `DOCKMOSS_FAST_FORWARD`, when set to 1, 10, 100 or
+/// 1000, wins over the saved fast-forward. It never reads or writes settings.
 #[cfg(debug_assertions)]
-fn fast_forward() -> FastForward {
+fn fast_forward_override() -> Option<FastForward> {
     const VARIABLE: &str = "DOCKMOSS_FAST_FORWARD";
-    let Some(value) = std::env::var_os(VARIABLE) else {
-        return FastForward::X1;
-    };
-    let parsed = value
-        .to_str()
-        .and_then(|text| text.trim().parse::<u32>().ok())
-        .and_then(FastForward::from_factor);
+    let value = std::env::var_os(VARIABLE)?;
+    let parsed = value.to_str().and_then(FastForward::parse);
     if parsed.is_none() {
         tracing::warn!(
             value = %value.to_string_lossy(),
-            "{VARIABLE} is not 1, 10, 100 or 1000; using 1x"
+            "{VARIABLE} is not 1, 10, 100 or 1000; using the saved fast-forward"
         );
     }
-    parsed.unwrap_or_default()
+    parsed
 }
 
 #[cfg(not(debug_assertions))]
-fn fast_forward() -> FastForward {
-    FastForward::X1
+fn fast_forward_override() -> Option<FastForward> {
+    None
 }
 
 fn record_app_event(
@@ -325,8 +323,8 @@ mod launch_log_writer {
     use tauri::ipc::Channel;
 
     use crate::bundle_id::BundleId;
-    use crate::growth::{FastForward, Thresholds};
     use crate::macos;
+    use crate::settings::Settings;
     use crate::usage::{
         self, AppEventKind, AppGrowth, Change, DistinctDockApps, DockApp, DockUpdate, LaunchLog,
         SaveSchedule, UsageState,
@@ -355,7 +353,7 @@ mod launch_log_writer {
     pub fn spawn(
         path: PathBuf,
         log: LaunchLog,
-        fast_forward: FastForward,
+        settings: Settings,
     ) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
         let writer = Writer {
@@ -363,8 +361,7 @@ mod launch_log_writer {
             state: UsageState::new(log),
             schedule: SaveSchedule::default(),
             seed_read: None,
-            fast_forward,
-            thresholds: Thresholds::default(),
+            settings,
             watcher: None,
             last_sent: None,
             next_recompute: Instant::now(),
@@ -380,8 +377,8 @@ mod launch_log_writer {
         state: UsageState,
         schedule: SaveSchedule,
         seed_read: Option<JoinHandle<Readings>>,
-        fast_forward: FastForward,
-        thresholds: Thresholds,
+        /// The settings growth applies, fast-forward override included.
+        settings: Settings,
         watcher: Option<Channel<Vec<AppGrowth>>>,
         last_sent: Option<Vec<AppGrowth>>,
         next_recompute: Instant,
@@ -518,11 +515,9 @@ mod launch_log_writer {
         fn recompute(&mut self) {
             let now = Instant::now();
             self.next_recompute = now
-                .checked_add(usage::recompute_interval(self.fast_forward))
+                .checked_add(usage::recompute_interval(self.settings.fast_forward))
                 .unwrap_or(now);
-            let frame = self
-                .state
-                .growth(Timestamp::now(), &self.thresholds, self.fast_forward);
+            let frame = self.state.growth(Timestamp::now(), &self.settings);
             if self.last_sent.as_ref() == Some(&frame) {
                 tracing::debug!(apps = frame.len(), "growth recomputed; unchanged");
                 return;

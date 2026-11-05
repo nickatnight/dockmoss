@@ -8,9 +8,8 @@ use super::log::{LaunchLog, Recorded};
 use super::running::AppEventKind;
 use super::spotlight::{SaneSeeds, SpotlightSeed, sane_seeds};
 use crate::bundle_id::BundleId;
-use crate::growth::{
-    self, FastForward, LastUsedSources, Overgrowth, Stage, Thresholds, effective_last_used,
-};
+use crate::growth::{self, LastUsedSources, Overgrowth, Stage, effective_last_used};
+use crate::settings::Settings;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DockApp {
@@ -166,17 +165,21 @@ impl UsageState {
         })
     }
 
-    /// One entry per current Dock app, in Dock order.
-    pub fn growth(
-        &self,
-        now: Timestamp,
-        thresholds: &Thresholds,
-        fast_forward: FastForward,
-    ) -> Vec<AppGrowth> {
+    /// One entry per current Dock app, in Dock order, under the applied
+    /// settings: an excluded app is clean, and intensity scales the
+    /// overgrowth but not the stage.
+    pub fn growth(&self, now: Timestamp, settings: &Settings) -> Vec<AppGrowth> {
         self.dock
             .iter()
             .map(|app| {
                 let id = &app.bundle_id;
+                if settings.excluded.contains(id) {
+                    return AppGrowth {
+                        bundle_id: id.clone(),
+                        overgrowth: Overgrowth::new(0.0),
+                        stage: Stage::Clean,
+                    };
+                }
                 let sources = LastUsedSources {
                     launch_log: self.log.last_launched(id),
                     spotlight_seed: self.log.spotlight_seed(id).map(SpotlightSeed::at),
@@ -184,11 +187,16 @@ impl UsageState {
                     running: self.running.contains(id),
                 };
                 let last_used = effective_last_used(now, &sources);
-                let growth =
-                    growth::growth(now, last_used, growth::jitter(id), thresholds, fast_forward);
+                let growth = growth::growth(
+                    now,
+                    last_used,
+                    growth::jitter(id),
+                    &settings.thresholds,
+                    settings.fast_forward,
+                );
                 AppGrowth {
                     bundle_id: id.clone(),
-                    overgrowth: growth.overgrowth(),
+                    overgrowth: settings.intensity.scale(growth.overgrowth()),
                     stage: growth.stage(),
                 }
             })

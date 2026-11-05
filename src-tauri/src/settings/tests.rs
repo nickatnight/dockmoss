@@ -7,7 +7,7 @@ use super::{
     Settings, SettingsError, SettingsView, commit, decode_file, load_file,
 };
 use crate::bundle_id::BundleId;
-use crate::growth::{FastForward, GrowthError, Thresholds};
+use crate::growth::{FastForward, GrowthError, Overgrowth, Thresholds};
 use crate::usage::{DistinctDockApps, DockApp};
 
 fn object(value: Value) -> Map<String, Value> {
@@ -651,4 +651,70 @@ fn an_unreadable_file_is_one_problem_not_two() {
         "{:?}",
         loaded.problems
     );
+}
+
+#[test]
+fn applied_settings_take_the_override_speed_only_when_there_is_one() {
+    let saved = customised();
+    let cases = [
+        ("no override", None, FastForward::X100),
+        ("an override", Some(FastForward::X1000), FastForward::X1000),
+        (
+            "an override back to 1x",
+            Some(FastForward::X1),
+            FastForward::X1,
+        ),
+    ];
+    for (case, override_speed, expected) in cases {
+        let applied = saved.applied(override_speed);
+
+        assert_eq!(applied.fast_forward, expected, "{case}");
+        assert_eq!(
+            Settings {
+                fast_forward: saved.fast_forward,
+                ..applied
+            },
+            saved,
+            "{case}: every other setting is the saved one"
+        );
+    }
+}
+
+#[test]
+fn intensity_scales_overgrowth_by_its_percent() {
+    let cases = [
+        (100, 0.73, 0.73),
+        (100, 1.0, 1.0),
+        (50, 0.8, 0.4),
+        (30, 1.0, 0.3),
+        (0, 1.0, 0.0),
+        (0, 0.0, 0.0),
+    ];
+    for (percent, overgrowth, expected) in cases {
+        let scaled = Intensity::new(percent)
+            .expect("0 to 100")
+            .scale(Overgrowth::new(overgrowth));
+
+        assert!(
+            (scaled.get() - expected).abs() < 1e-6,
+            "{percent}% of {overgrowth}: {}",
+            scaled.get()
+        );
+    }
+    assert_eq!(
+        Intensity::new(100)
+            .expect("0 to 100")
+            .scale(Overgrowth::new(0.712_345_6))
+            .get(),
+        0.712_345_6,
+        "100% is exact"
+    );
+}
+
+#[test]
+fn exclusions_contain_only_their_bundle_ids() {
+    let excluded = customised().excluded;
+
+    assert!(excluded.contains(&BundleId::new("com.apple.Chess").expect("valid")));
+    assert!(!excluded.contains(&BundleId::new("com.apple.Chess2").expect("valid")));
 }

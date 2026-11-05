@@ -57,7 +57,10 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 
 ## Known risks / open questions
 
-- **Dock magnification lag:** polling icon positions can trail the animation by a frame. The launch lift of a Dock icon shows the same one-frame lag (job 011). Mask or accept it; consider an `AXObserver` later.
+- **Dock magnification lag:**
+  - **Steady magnification:** once the tracker reads at 60 Hz, the moss trails the icons by about one frame (about 11 ms read to screen), the WebKit pipeline's floor. Predicting the motion in the renderer gained only 2 to 3 ms and was reverted (job 016).
+  - **Entry:** the visible trail was the start of a magnification, while the tracker still polled at 2 Hz. It is fixed: the Dock's hover-change notification (`AXSelectedChildrenChanged`) wakes the tracker at once, and entry went from a median of 117 to 304 ms down to 17 ms (job 016, ADR-0017). The Dock posts no move or resize notification for its items, so reads stay polled.
+  - **Launch lift:** still open. The Dock posts nothing for a lift, and with the pointer away from the Dock the lift is followed at 2 Hz for its whole bounce. After a click on the icon the pointer is near, so the lift is followed within a frame (job 011).
 - **Auto-hidden Dock:** icons sit offscreen, so draw nothing.
 - **Slow start:** with the launch log starting empty, real moss only appears after weeks of use. The Spotlight seed covers part of it at the first run, and the fast-forward setting previews growth for testing and screenshots.
 - **Apps launched outside our watch:** apps already running at first start, or launched while DockMoss was quit, won't be logged. Treat "app is running" as in use, and accept the gap while the app is closed.

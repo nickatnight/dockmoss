@@ -10,7 +10,7 @@ mod state;
 mod store;
 
 pub use log::LaunchLog;
-pub use migrate::{MoveReport, move_old_data, old_data_dir};
+pub use migrate::{LAUNCH_LOG_FILE, MoveReport, SETTINGS_FILE, move_old_data, old_data_dir};
 pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
 pub use schedule::{SaveSchedule, recompute_interval};
 pub use spotlight::parse_mdls;

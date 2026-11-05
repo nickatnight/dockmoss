@@ -7,9 +7,14 @@ use super::store::private_dir;
 
 const OLD_IDENTIFIER: &str = "com.dockmoss.app";
 
+pub const LAUNCH_LOG_FILE: &str = "launch_log.json";
+pub const SETTINGS_FILE: &str = "settings.json";
+
+/// `lib.rs` asks for the first two by these same constants, so a renamed
+/// file cannot stop being recognised as left behind.
 pub const MOVED_FILES: [&str; 4] = [
-    "launch_log.json",
-    "settings.json",
+    LAUNCH_LOG_FILE,
+    SETTINGS_FILE,
     "launch_log.json.corrupt",
     "launch_log.json.dropped",
 ];

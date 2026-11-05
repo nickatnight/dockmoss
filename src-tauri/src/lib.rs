@@ -35,12 +35,11 @@ use launch_log_writer::{LaunchLogInbox, WriterMessage};
 use settings::Settings;
 use tracker::Visibility;
 use trust::TrustState;
+use usage::{LAUNCH_LOG_FILE, SETTINGS_FILE};
 
 const OVERLAY_LABEL: &str = "overlay";
 const SETTINGS_LABEL: &str = "settings";
 const SETTINGS_HEIGHT: f64 = 760.0;
-const LAUNCH_LOG_FILE: &str = "launch_log.json";
-const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {

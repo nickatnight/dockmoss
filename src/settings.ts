@@ -135,6 +135,8 @@ function showIntensity(): void {
   page.intensity.setAttribute("aria-valuetext", percent);
 }
 
+/** Each alert's pending refill: a newer text cancels it, so it cannot put
+ * back text that is no longer true. */
 const refills = new Map<HTMLElement, number>();
 
 /** Sets an alert's text. `again` empties it for a frame first, because

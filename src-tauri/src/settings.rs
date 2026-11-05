@@ -163,6 +163,8 @@ impl Settings {
         })
     }
 
+    /// The settings growth applies: these, with `fast_forward_override` (the
+    /// debug-only `DOCKMOSS_FAST_FORWARD`) in place of the saved speed.
     #[must_use]
     pub fn applied(&self, fast_forward_override: Option<FastForward>) -> Self {
         Self {

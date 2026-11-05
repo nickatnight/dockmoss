@@ -19,8 +19,6 @@ fn the_moved_names_are_the_four_user_data_files() {
             "launch_log.json.dropped",
         ]
     );
-    assert_eq!(MOVED_FILES[0], crate::LAUNCH_LOG_FILE);
-    assert_eq!(MOVED_FILES[1], crate::SETTINGS_FILE);
 }
 
 #[test]

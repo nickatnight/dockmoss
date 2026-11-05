@@ -15,6 +15,18 @@ fn only_regular_apps_with_a_bundle_id_are_tracked() {
         ("regular without an ID", None, true, None),
         ("regular with an empty ID", Some(""), true, None),
         (
+            "an ID that extends DockMoss's",
+            Some("com.dockmoss.app.helper"),
+            true,
+            BundleId::new("com.dockmoss.app.helper"),
+        ),
+        (
+            "an ID that DockMoss's extends",
+            Some("com.dockmoss"),
+            true,
+            BundleId::new("com.dockmoss"),
+        ),
+        (
             "an agent or helper with an ID",
             Some("com.apple.Spotlight"),
             false,

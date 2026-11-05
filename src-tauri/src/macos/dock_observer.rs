@@ -40,6 +40,7 @@ impl RegisterError {
     fn registration(&self) -> HoverRegistration {
         match self {
             Self::Ax(AXError::NotificationUnsupported) => HoverRegistration::Unsupported,
+            Self::Ax(AXError::APIDisabled) => HoverRegistration::ApiDisabled,
             Self::Ax(_) | Self::NullObserver | Self::NoRunLoop => HoverRegistration::Failed,
         }
     }
@@ -62,7 +63,7 @@ fn observe(trust: &dyn Fn() -> Trust, on_hover: &dyn Fn()) {
     };
     let mut gate = HoverObserverGate::default();
     while !gate.gave_up() {
-        if gate.may_register(trust())
+        if gate.may_register(trust(), super::ax::check_trust)
             && let Some(pid) = dock_pid()
         {
             match Registration::new(pid, &on_hover, mode) {

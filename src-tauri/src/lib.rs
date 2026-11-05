@@ -39,6 +39,8 @@ const LAUNCH_LOG_FILE: &str = "launch_log.json";
 const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const SECOND_LAUNCH_POLL: Duration = Duration::from_millis(20);
+const SECOND_LAUNCH_POLLS: u32 = 50;
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
     LevelFilter::Debug
 } else {
@@ -56,8 +58,8 @@ pub fn run() {
         // any other plugin and before our setup() opens a file or a window.
         // The callback's arguments are the second process's argv and cwd,
         // which can hold the user's name, so they are not logged.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
-            tracing::info!("dockmoss launched again; this copy keeps running");
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            on_second_launch(app);
         }))
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -136,6 +138,47 @@ pub fn run() {
             flush_launch_log(app);
         }
     });
+}
+
+/// The app has no Dock icon, so launching it again is how a user looks for
+/// it: open Settings as the tray's Settings… does.
+///
+/// A second launch opened from Finder or `open -n` is the active app until it
+/// exits. Settings records the active app as the one to hand focus back to on
+/// close, so wait until macOS has given the front back to that app, for at
+/// most `SECOND_LAUNCH_POLLS` × `SECOND_LAUNCH_POLL`.
+///
+/// The plugin calls this on a tokio task. Main-thread tasks run only once the
+/// event loop runs, which is after `setup()` has managed the state Settings
+/// needs.
+fn on_second_launch(app: &AppHandle) {
+    tracing::info!("dockmoss launched again; opening settings");
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        for _ in 0..SECOND_LAUNCH_POLLS {
+            if !another_copy_or_nothing_in_front(&app) {
+                break;
+            }
+            std::thread::sleep(SECOND_LAUNCH_POLL);
+        }
+        let handle = app.clone();
+        if let Err(error) = app.run_on_main_thread(move || show_settings_window(&handle)) {
+            tracing::warn!(%error, "settings not opened for the second launch");
+        }
+    });
+}
+
+fn another_copy_or_nothing_in_front(app: &AppHandle) -> bool {
+    let own_bundle_id = app.config().identifier.clone();
+    let (reply, answer) = mpsc::channel();
+    let asked = app.run_on_main_thread(move || {
+        let in_front = macos::MainThreadMarker::new()
+            .is_some_and(|mtm| macos::app::another_copy_or_nothing_in_front(&own_bundle_id, mtm));
+        if reply.send(in_front).is_err() {
+            tracing::debug!("front app check finished after its caller stopped waiting");
+        }
+    });
+    asked.is_ok() && answer.recv().unwrap_or(false)
 }
 
 fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {

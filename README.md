@@ -63,7 +63,8 @@ Settings are stored in `~/Library/Application Support/app.dockmoss.DockMoss/sett
 - macOS 15 or later (the only platform; the bundle's `minimumSystemVersion` is 15.0)
 - Rust 1.99 or later
 - Node 22 and pnpm
-- For `pnpm check:task`: `cargo install cargo-llvm-cov cargo-deny` and gitleaks 8.30.1. On first run, cargo-llvm-cov installs the `llvm-tools-preview` rustup component.
+- For `pnpm check:task`: `cargo install cargo-deny` and gitleaks 8.30.1.
+- For `pnpm coverage`: `cargo install cargo-llvm-cov`. On first run, it installs the `llvm-tools-preview` rustup component.
 
 ## Quick start
 
@@ -132,9 +133,10 @@ Builds before job 014 used the bundle identifier `com.dockmoss.app`. On its firs
 |---|---|
 | `pnpm tauri dev` | The app, with Vite on `http://localhost:5110` |
 | `pnpm check` | Same as `check:fast` |
-| `pnpm check:fast` | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, three grep guards (unit tests only in `tests.rs`, `unsafe_code` opt-ins only in `src/macos/`, no `@ts-ignore` or `@ts-expect-error` under `src/`), `tsc --noEmit` |
+| `pnpm check:fast` | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` (which also fails a `#[test]` outside a `#[cfg(test)]` module), the test layout guards (two greps and a `find` that keep each module's unit tests in one inline `mod tests {` and refuse a separate test file), two more grep guards (`unsafe_code` opt-ins only in `src/macos/`, no `@ts-ignore` or `@ts-expect-error` under `src/`), `tsc --noEmit` |
 | `pnpm test` | vitest, once, over the frontend's pure modules (`src/**/*.test.ts`) |
-| `pnpm check:task` | `check:fast`, then `pnpm test`, a `pnpm build` whose `dist/` must hold no debug layer, `cargo test`, the 80% line-coverage gate, `cargo deny`, `pnpm audit` and three gitleaks passes |
+| `pnpm check:task` | `check:fast`, then `pnpm test`, a `pnpm build` whose `dist/` must hold no debug layer, `cargo test`, `cargo deny`, `pnpm audit` and three gitleaks passes |
+| `pnpm coverage` | `cargo llvm-cov` over `src-tauri/src`, leaving out `macos/`, `main.rs`, `lib.rs`, `tray.rs` and `commands.rs`. On demand, with no threshold, and not part of any check. Unit tests sit inline, so their lines count too, and the figure is a rough guide. Extra arguments pass through: `pnpm coverage --html`, or `pnpm coverage --lcov --output-path target/lcov.info` (written to `src-tauri/target/lcov.info`) |
 
 [CONSTRAINTS.md](CONSTRAINTS.md) defines what each check enforces. If the scripts and that file disagree, the file wins.
 

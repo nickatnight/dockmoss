@@ -7,6 +7,7 @@ import type {
   SettingsLimits,
 } from "../ipc";
 import {
+  enteredDays,
   exclusionRows,
   nextSettings,
   thresholdMessage,
@@ -50,13 +51,13 @@ describe("nextSettings", () => {
     expect(next).toEqual({ ...saved, fastForward: 100 });
   });
 
-  it("passes an invalid threshold through for Rust to reject", () => {
+  it("passes an unreadable threshold through as null for Rust to reject", () => {
     const next = nextSettings(saved, {
       field: "thresholds",
-      thresholds: { fuzz: Number.NaN, patchy: 10, overgrown: 30 },
+      thresholds: { fuzz: null, patchy: 10, overgrown: 30 },
     });
 
-    expect(next.thresholds.fuzz).toBeNaN();
+    expect(next.thresholds).toEqual({ fuzz: null, patchy: 10, overgrown: 30 });
     expect(next.intensityPercent).toBe(100);
   });
 
@@ -179,5 +180,15 @@ describe("exclusionRows", () => {
     expect(exclusionRows(null, [id("com.apple.Chess")])).toEqual([
       { bundleId: "com.apple.Chess", label: "com.apple.Chess", excluded: true, place: "unknown" },
     ]);
+  });
+});
+
+describe("enteredDays", () => {
+  it("reads an empty or unparseable number input as null", () => {
+    expect(enteredDays(Number.NaN)).toBeNull();
+  });
+
+  it.each([5, 5.5, -1, 0])("passes %d through for Rust to check", (days) => {
+    expect(enteredDays(days)).toBe(days);
   });
 });

@@ -48,6 +48,14 @@ export interface Settings {
   fastForward: FastForward;
 }
 
+export type EnteredThresholds = {
+  [Stage in keyof Thresholds]: number | null;
+};
+
+export type SettingsInput = Omit<Settings, "thresholds"> & {
+  thresholds: EnteredThresholds;
+};
+
 export interface SettingsLimits {
   minFuzzDays: number;
   maxOvergrownDays: number;
@@ -123,7 +131,7 @@ export function saveSettingsError(error: unknown): SaveSettingsError {
 }
 
 export async function saveSettings(
-  settings: Settings,
+  settings: SettingsInput,
 ): Promise<SaveSettingsResult> {
   try {
     const saved = await invoke<Settings>("save_settings", { settings });

@@ -8,6 +8,7 @@ import {
   type SettingsView,
 } from "./ipc";
 import {
+  enteredDays,
   exclusionRows,
   nextSettings,
   thresholdMessage,
@@ -130,9 +131,9 @@ function enteredThresholds(): SettingsChange {
   return {
     field: "thresholds",
     thresholds: {
-      fuzz: page.days.fuzz.valueAsNumber,
-      patchy: page.days.patchy.valueAsNumber,
-      overgrown: page.days.overgrown.valueAsNumber,
+      fuzz: enteredDays(page.days.fuzz.valueAsNumber),
+      patchy: enteredDays(page.days.patchy.valueAsNumber),
+      overgrown: enteredDays(page.days.overgrown.valueAsNumber),
     },
   };
 }

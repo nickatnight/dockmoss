@@ -1,14 +1,15 @@
 import type {
   BundleId,
   DockAppName,
+  EnteredThresholds,
   FastForward,
   Settings,
+  SettingsInput,
   SettingsLimits,
-  Thresholds,
 } from "../ipc";
 
 export type SettingsChange =
-  | { field: "thresholds"; thresholds: Thresholds }
+  | { field: "thresholds"; thresholds: EnteredThresholds }
   | { field: "intensityPercent"; percent: number }
   | { field: "fastForward"; speed: FastForward }
   | { field: "excluded"; bundleId: BundleId; excluded: boolean };
@@ -16,7 +17,7 @@ export type SettingsChange =
 export function nextSettings(
   saved: Settings,
   change: SettingsChange,
-): Settings {
+): SettingsInput {
   switch (change.field) {
     case "thresholds":
       return { ...saved, thresholds: { ...change.thresholds } };
@@ -70,6 +71,10 @@ export function exclusionRows(
       }),
     );
   return [...docked, ...strays];
+}
+
+export function enteredDays(valueAsNumber: number): number | null {
+  return Number.isNaN(valueAsNumber) ? null : valueAsNumber;
 }
 
 export function thresholdMessage(limits: SettingsLimits): string {

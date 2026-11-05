@@ -79,7 +79,6 @@ document.addEventListener("keydown", (event) => {
 
 function show(view: SettingsView): void {
   const { settings, limits } = view;
-  page.launchAtLogin.checked = launchAtLoginBox(view.launchAtLogin).checked;
   for (const input of dayInputs) {
     input.min = String(limits.minFuzzDays);
     input.max = String(limits.maxOvergrownDays);
@@ -223,6 +222,7 @@ async function start(): Promise<void> {
   }
   page.intensity.disabled = false;
   const loginBox = launchAtLoginBox(view.launchAtLogin);
+  page.launchAtLogin.checked = loginBox.checked;
   page.launchAtLogin.disabled = loginBox.disabled;
   page.launchAtLoginNote.textContent = loginBox.note;
   page.launchAtLoginNote.hidden = loginBox.note === null;

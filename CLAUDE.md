@@ -44,9 +44,11 @@ src/                      # webview: overlay.ts (one subscription per channel, f
                           #   ipc.ts, debug.ts / debug.css (dev builds only)
   render/                 # WebGL2 moss: model.ts (pure: mossy icons, item keys and seeds,
                           #   art box, draw rule, sprites, reach bound, shader constants,
-                          #   instance attribute layout),
-                          #   renderer.ts (draw and sway loop behind an injected schedule
-                          #   and MossGl), gl.ts (one instanced draw), index.ts (DOM wiring),
+                          #   instance attribute layout, and the shrivel: which items
+                          #   start one, its progress, and an icon's instance at a progress),
+                          #   renderer.ts (draws on change, plus a 30 fps loop for sway and
+                          #   the shrivel, behind an injected schedule and MossGl),
+                          #   gl.ts (one instanced draw), index.ts (DOM wiring),
                           #   moss.{vert,frag}.glsl
 ```
 
@@ -79,7 +81,8 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). For the same reason `src/overlay.ts` subscribes once per channel and passes each frame to every consumer (the renderer, and the debug layer in dev builds). Send only what the webview draws: `DockItem::app_path` stays in Rust (`#[serde(skip_serializing)]`), because a path can hold the user's name. An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
 - **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label. The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` and `allow-watch-growth` (the commands that hand Rust its `Channel`s). The settings window gets the plugin permissions it uses. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
 - **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels, `VITE_DOCKMOSS_OVERGROWTH` and `VITE_DOCKMOSS_SWAY`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). Put Dock data into the DOM with `textContent` only.
-- **Renderer constants have one source.** Shape, sway and sprite constants live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`, and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call (ADR-0012).
+- **Renderer constants have one source.** Shape, sway, sprite and shrivel constants live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`, and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call (ADR-0012), shrivelling ones included.
+- **The shrivel is inferred, not sent.** The webview starts one when an icon it drew as mossy comes back clean in the growth stream; Rust sends no event for it (ADR-0013). So any drop of a mossy icon to 0 shrivels. Its 600 ms run is one more condition of `createRenderer`'s time-limited loop, and the loop stops when the last shrivel draws the icon clean.
 
 ## macOS overlay gotchas
 

@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-04 (approved at Gate 1, emgee job 001; Idle CPU counts the Dock process from job 005 Gate 2; no-panic lints crate-wide from job 007; `pnpm test` added to Tests from job 009 Gate 1; the Release bundle row from job 009's polish; cold start and GPU memory recorded in job 010)
+Last reviewed: 2026-11-04 (approved at Gate 1, emgee job 001; Idle CPU counts the Dock process from job 005 Gate 2; no-panic lints crate-wide from job 007; `pnpm test` added to Tests from job 009 Gate 1; the Release bundle row from job 009's polish; cold start and GPU memory recorded in job 010; the release guard fails on a missing `dist/` from job 011)
 
 Read alongside `CLAUDE.md`. This file does not get weakened to make a change pass.
 
@@ -24,7 +24,7 @@ Read alongside `CLAUDE.md`. This file does not get weakened to make a change pas
 | Lint (Rust) | Zero warnings, pedantic on | `cargo clippy --all-targets -- -D warnings` | every edit | Lints in `Cargo.toml` are the project's bar |
 | Types (TS) | Zero errors, `strict: true` | `pnpm exec tsc --noEmit` | every edit | Keeps the IPC wrapper honest |
 | Tests | All pass | `cargo test` (in `src-tauri/`) and `pnpm test` (vitest, the pure TS beside its `*.test.ts`) | task end | |
-| Release bundle | No debug layer and no dev override in `dist/` | `pnpm build && ! grep -rqE 'debug-dock-item\|VITE_DOCKMOSS' dist` | task end | The outlines, labels and overgrowth override are for dev builds only (job 009 Gate 1 Q3). `overlay.ts` loads them under `import.meta.env.DEV`; this checks the bundle, so a static import anywhere fails it |
+| Release bundle | No debug layer and no dev override in `dist/` | `pnpm build && test -d dist && ! grep -rqE 'debug-dock-item\|VITE_DOCKMOSS' dist` | task end | The outlines, labels and overgrowth override are for dev builds only (job 009 Gate 1 Q3). `overlay.ts` loads them under `import.meta.env.DEV`; this checks the bundle, so a static import anywhere fails it |
 | Coverage | ≥ 80% line coverage of `src-tauri/src/`, excluding only the hand-verified platform and glue files (`macos/`, `main.rs`, `lib.rs`, `tray.rs`, `commands.rs`) and the `tests.rs` files that hold unit tests | `cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/\|(main\|lib\|tray\|commands)[.]rs)\|/tests[.]rs$'` | task end | Pure logic is fully testable. Platform and glue code is verified manually, so it is excluded instead of padded. Excluding a new file means adding it to this regex in CONSTRAINTS.md, where review sees it. |
 | Deps: advisories | No advisory at high or above; no unknown licences | `cargo deny check advisories licenses` | task end | External opinion (RustSec DB) |
 | Deps: JS | Nothing at high or above | `pnpm audit --audit-level high` | task end | External opinion |
@@ -37,7 +37,7 @@ Scripts in `package.json` mirror this file; if they drift, this file wins:
 
 ```json
 "check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rlE --include='*.rs' '#\\[([a-z_]+::)?test\\]' src | grep -v '/tests[.]rs$' && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
-"check:task": "pnpm check:fast && pnpm test && pnpm build && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)|/tests[.]rs$' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
+"check:task": "pnpm check:fast && pnpm test && pnpm build && test -d dist && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)|/tests[.]rs$' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
 "check": "pnpm check:fast"
 ```
 

@@ -54,12 +54,12 @@ Spotlight metadata turned out to be unreliable. In a real test on one Mac, 12 of
 
 ## Known risks / open questions
 
-- **Dock magnification lag:** polling icon positions can trail the animation by a frame. Mask or accept it; consider an `AXObserver` later.
+- **Dock magnification lag:** polling icon positions can trail the animation by a frame. The launch lift of a Dock icon shows the same one-frame lag (job 011). Mask or accept it; consider an `AXObserver` later.
 - **Auto-hidden Dock:** icons sit offscreen, so draw nothing.
 - **Slow start:** with the launch log starting empty, real moss only appears after weeks of use. Consider a "demo/fast-forward" setting for testing and screenshots.
 - **Apps launched outside our watch:** apps already running at first start, or launched while DockMoss was quit, won't be logged. Treat "app is running" as in use, and accept the gap while the app is closed.
 - **Moss that fits the icon shape:** icons are irregular, so grow moss from the bottom edge and corners, clipped to the icon's rounded rect, rather than reading the artwork.
-- **Battery:** keep the render loop idle when nothing is animating. Static moss only needs a redraw when the Dock moves. While the Dock is hidden (auto-hide, a full-screen Space) or cannot be read, the overlay window is ordered out, so WindowServer has nothing of ours to composite; it is ordered back in when the Dock shows. Every Dock read also costs the Dock process CPU, so the tracker reads fast only while something moves near the Dock. A continuous animation is the expensive case: a 30 fps `requestAnimationFrame` sway cost about 19% CPU (job 010), so sway stays off until a cheaper one is found.
+- **Battery:** keep the render loop idle when nothing is animating. Static moss only needs a redraw when the Dock moves. While the Dock is hidden (auto-hide, a full-screen Space) or cannot be read, the overlay window is ordered out, so WindowServer has nothing of ours to composite; it is ordered back in when the Dock shows. Every Dock read also costs the Dock process CPU, so the tracker reads fast only while something moves near the Dock. A continuous animation is the expensive case: a 30 fps `requestAnimationFrame` sway cost about 19% CPU (job 010), so sway stays off until a cheaper one is found. The launch shrivel is bounded instead: it runs the same 30 fps loop for 600 ms per mossy app opened, then the loop stops and no frame callback runs until something changes again (job 011).
 - **Many icons:** use one shared shader or instanced draw rather than a layer per icon. Since slice 10, every mossy icon is one instance of a single draw call.
 
 ## Possible milestones

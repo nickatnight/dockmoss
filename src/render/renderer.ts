@@ -2,11 +2,15 @@ import type { AppGrowth, DockItem } from "../ipc";
 import type { MossGl } from "./gl";
 import {
   type Drawn,
+  LOOP_MIN_FRAME_INTERVAL_MS,
   type MossyIcon,
+  NOTHING_DRAWN,
   SWAY_CYCLE_SECONDS,
-  SWAY_MIN_FRAME_INTERVAL_MS,
+  type Shrivels,
   mossInstances,
   mossyIcons,
+  shrivelFrame,
+  shrivelsAfter,
   step,
   swaying,
 } from "./model";
@@ -38,12 +42,14 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let growth: AppGrowth[] = [];
   let latest: MossyIcon[] = [];
   let drawn: Drawn = "unknown";
+  let shrivels: Shrivels = new Map();
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
-  let lastSwayFrameMs: number | null = null;
+  let lastLoopFrameMs: number | null = null;
   let swaySeconds = 0;
 
-  const loopRuns = (): boolean => options.sway && swaying(latest);
+  const swayRuns = (): boolean => options.sway && swaying(latest);
+  const loopRuns = (): boolean => swayRuns() || shrivels.size > 0;
 
   const requestFrame = (): void => {
     if (gl !== null && !frameRequested) {
@@ -57,36 +63,44 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     if (gl === null) {
       return;
     }
-    const changed = step(drawn, latest).kind === "draw";
-    let swayDue = false;
+    const due =
+      loopRuns() && (lastLoopFrameMs === null || time - lastLoopFrameMs >= LOOP_MIN_FRAME_INTERVAL_MS);
+    const changed = step(drawn, latest, shrivels).kind !== "none";
+    if (due) {
+      lastLoopFrameMs = time;
+      if (swayRuns()) {
+        swaySeconds = (time / 1000) % SWAY_CYCLE_SECONDS;
+      }
+    }
+    if (due || changed) {
+      const canvasHeight = Math.round(size.height * size.pixelRatio);
+      const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight);
+      shrivels = shrivelling.running;
+      gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight), ...shrivelling.instances], swaySeconds);
+      drawn = { icons: latest, showsShrivel: shrivelling.instances.length > 0 };
+    }
     if (loopRuns()) {
       requestFrame();
-      swayDue = lastSwayFrameMs === null || time - lastSwayFrameMs >= SWAY_MIN_FRAME_INTERVAL_MS;
     } else {
-      lastSwayFrameMs = null;
+      lastLoopFrameMs = null;
     }
-    if (!changed && !swayDue) {
-      return;
-    }
-    if (swayDue) {
-      lastSwayFrameMs = time;
-      swaySeconds = (time / 1000) % SWAY_CYCLE_SECONDS;
-    }
-    const canvasHeight = Math.round(size.height * size.pixelRatio);
-    gl.draw(mossInstances(latest, size.pixelRatio, canvasHeight), swaySeconds);
-    drawn = latest;
   }
 
   const update = (): void => {
     latest = mossyIcons(items, growth, options.overgrowthOverride);
-    const next = step(drawn, latest);
+    shrivels = shrivelsAfter(shrivels, drawn, items, growth, latest);
+    const next = step(drawn, latest, shrivels);
     if (next.kind === "clear") {
       // At once: the window may be ordered out already, and WebKit runs no
       // frame callbacks there, so the old moss would show at the next order-in.
       gl?.clear();
-      drawn = [];
-    } else if (next.kind === "draw") {
+      drawn = NOTHING_DRAWN;
+    } else if (next.kind === "draw" || shrivels.size > 0) {
+      // A running shrivel always has a frame pending already; the size check states that it needs one.
       requestFrame();
+    }
+    if (!loopRuns()) {
+      lastLoopFrameMs = null;
     }
   };
 
@@ -110,6 +124,8 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     contextLost() {
       gl = null;
       drawn = "unknown";
+      shrivels = new Map();
+      lastLoopFrameMs = null;
     },
     contextRestored() {
       gl = options.createGl();

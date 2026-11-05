@@ -7,6 +7,7 @@ flat in vec4 v_box;
 flat in vec2 v_seed;
 flat in float v_overgrowth;
 flat in float v_hue;
+flat in float v_wither;
 flat in vec4 v_sprites[MAX_SPRITES];
 
 uniform float u_sway_seconds;
@@ -110,6 +111,8 @@ vec3 mossColour(vec2 p, float grain, float side, float hue) {
   return colour;
 }
 
+const vec3 REC709_LUMA = vec3(0.2126, 0.7152, 0.0722);
+
 const float CONTACT_SHADOW_STRENGTH = 0.18;
 
 float contactShadow(float front, float cover) {
@@ -199,5 +202,6 @@ void main() {
       moss = drawn + moss * (1.0 - drawn.a);
     }
   }
+  moss.rgb = mix(moss.rgb, WITHER_TINT * dot(moss.rgb, REC709_LUMA), v_wither);
   fragColor = moss * clip;
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use block2::RcBlock;
 use objc2::MainThreadMarker;
+use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
@@ -47,9 +48,9 @@ pub fn running_apps(_mtm: MainThreadMarker) -> Vec<RunningApp> {
 
 #[expect(
     unsafe_code,
-    reason = "the notification names are AppKit extern statics and the observer API takes a block"
+    reason = "the notification names are AppKit extern statics"
 )]
-pub fn on_app_events(on_event: impl Fn(AppEvent) + Send + Sync + 'static, _mtm: MainThreadMarker) {
+pub fn on_app_events(on_event: impl Fn(AppEvent) + Send + Sync + 'static, mtm: MainThreadMarker) {
     let on_event = Arc::new(on_event);
     // SAFETY: the names are immutable NSString constants that AppKit
     // initialises before any Rust code runs.
@@ -69,50 +70,63 @@ pub fn on_app_events(on_event: impl Fn(AppEvent) + Send + Sync + 'static, _mtm: 
             ),
         ]
     };
+    for (name, kind) in names {
+        let on_event = Arc::clone(&on_event);
+        observe(
+            name,
+            move |app| {
+                on_event(AppEvent {
+                    kind,
+                    app: running_app(app),
+                });
+            },
+            mtm,
+        );
+    }
+}
+
+/// Calls `on_app` on the main thread with the application of each workspace
+/// notification named `name`.
+#[expect(unsafe_code, reason = "the observer API takes a block")]
+fn observe(
+    name: &NSString,
+    on_app: impl Fn(&NSRunningApplication) + Send + Sync + 'static,
+    _mtm: MainThreadMarker,
+) {
     // Workspace notifications are posted only to NSWorkspace's own center,
     // never to NSNotificationCenter.defaultCenter.
     let center = NSWorkspace::sharedWorkspace().notificationCenter();
     let queue = NSOperationQueue::mainQueue();
-    for (name, kind) in names {
-        let on_event = Arc::clone(&on_event);
-        let block = RcBlock::new(move |notification: NonNull<NSNotification>| {
-            // SAFETY: Foundation calls the block with the notification being
-            // delivered, which stays alive for the duration of the call.
-            let notification = unsafe { notification.as_ref() };
-            if let Some(app) = notified_app(notification) {
-                on_event(AppEvent { kind, app });
-            } else {
-                tracing::debug!(?kind, "workspace notification without an application");
-            }
-        });
-        // SAFETY: `obj` is None (any sender). The block is sendable, as the
-        // binding requires: it captures only `kind` (Copy) and an `Arc` of
-        // `on_event`, which is `Send + Sync + 'static`, so Foundation may copy,
-        // call or release it on any thread. The main queue runs it on the
-        // main thread, where `_mtm` shows the registration also happens.
-        let observer = unsafe {
-            center.addObserverForName_object_queue_usingBlock(
-                Some(name),
-                None,
-                Some(&queue),
-                &block,
-            )
-        };
-        drop(observer);
-    }
+    let block = RcBlock::new(move |notification: NonNull<NSNotification>| {
+        // SAFETY: Foundation calls the block with the notification being
+        // delivered, which stays alive for the duration of the call.
+        let notification = unsafe { notification.as_ref() };
+        if let Some(app) = notified_app(notification) {
+            on_app(&app);
+        } else {
+            tracing::debug!(name = %notification.name(), "workspace notification without an application");
+        }
+    });
+    // SAFETY: `obj` is None (any sender). The block is sendable, as the
+    // binding requires: it captures only `on_app`, which is
+    // `Send + Sync + 'static`, so Foundation may copy, call or release it on
+    // any thread. The main queue runs it on the main thread, where `_mtm`
+    // shows the registration also happens.
+    let observer = unsafe {
+        center.addObserverForName_object_queue_usingBlock(Some(name), None, Some(&queue), &block)
+    };
+    drop(observer);
 }
 
 #[expect(unsafe_code, reason = "the user-info key is an AppKit extern static")]
-fn notified_app(notification: &NSNotification) -> Option<RunningApp> {
+fn notified_app(notification: &NSNotification) -> Option<Retained<NSRunningApplication>> {
     let info = notification.userInfo()?;
     // SAFETY: the key is an immutable NSString constant that AppKit
     // initialises before any Rust code runs.
     let key = unsafe { NSWorkspaceApplicationKey };
-    let app = info
-        .objectForKey(key.as_ref())?
+    info.objectForKey(key.as_ref())?
         .downcast::<NSRunningApplication>()
-        .ok()?;
-    Some(running_app(&app))
+        .ok()
 }
 
 fn running_app(app: &NSRunningApplication) -> RunningApp {

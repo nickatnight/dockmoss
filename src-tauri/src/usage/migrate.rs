@@ -18,7 +18,7 @@ pub const MOVED_FILES: [&str; 4] = [
 pub enum Entry {
     Missing,
     File,
-    Other,
+    NotARegularFile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -42,7 +42,7 @@ fn entry_at(path: &Path) -> Entry {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_file() => Entry::File,
         Err(error) if error.kind() == io::ErrorKind::NotFound => Entry::Missing,
-        Ok(_) | Err(_) => Entry::Other,
+        Ok(_) | Err(_) => Entry::NotARegularFile,
     }
 }
 
@@ -58,9 +58,9 @@ pub fn plan_move(old: &Listing, new: &Listing) -> Vec<Step> {
         .into_iter()
         .filter_map(|name| match (old.get(name), new.get(name)) {
             (Entry::Missing, _) => None,
-            (Entry::Other, _) => Some(Step::LeaveNotAFile(name)),
+            (Entry::NotARegularFile, _) => Some(Step::LeaveNotAFile(name)),
             (Entry::File, Entry::Missing) => Some(Step::Move(name)),
-            (Entry::File, Entry::File | Entry::Other) => Some(Step::KeepNew(name)),
+            (Entry::File, Entry::File | Entry::NotARegularFile) => Some(Step::KeepNew(name)),
         })
         .collect()
 }

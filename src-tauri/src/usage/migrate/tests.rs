@@ -65,12 +65,12 @@ fn plan_move_moves_a_regular_file_only_into_an_empty_name() {
         (
             "a name the new folder holds as a link",
             listing(&[("settings.json", Entry::File)]),
-            listing(&[("settings.json", Entry::Other)]),
+            listing(&[("settings.json", Entry::NotARegularFile)]),
             vec![Step::KeepNew("settings.json")],
         ),
         (
             "a link or folder in the old folder",
-            listing(&[("launch_log.json", Entry::Other)]),
+            listing(&[("launch_log.json", Entry::NotARegularFile)]),
             listing(&[]),
             vec![Step::LeaveNotAFile("launch_log.json")],
         ),

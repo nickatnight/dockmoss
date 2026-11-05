@@ -5,6 +5,7 @@ mod error;
 mod geometry;
 mod growth;
 mod macos;
+mod settings;
 mod tracker;
 mod tray;
 mod trust;
@@ -12,25 +13,30 @@ mod usage;
 
 pub use error::Error;
 
-use std::sync::{Mutex, PoisonError, mpsc};
+use std::io::ErrorKind;
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use jiff::Timestamp;
 use tauri::{
-    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent, Wry,
 };
 use tauri_plugin_log::log::LevelFilter;
+use tauri_plugin_store::{Store, StoreExt};
 
 use commands::{TrackerInbox, TrackerMessage};
 use geometry::Display;
 use growth::FastForward;
 use launch_log_writer::{LaunchLogInbox, WriterMessage};
+use settings::Settings;
 use tracker::Visibility;
 use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
 const SETTINGS_LABEL: &str = "settings";
 const LAUNCH_LOG_FILE: &str = "launch_log.json";
+const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
@@ -52,6 +58,7 @@ pub fn run() {
                 .level_for("dockmoss_lib", APP_LOG_LEVEL)
                 .build(),
         )
+        .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::watch_dock,
             commands::watch_growth
@@ -59,6 +66,7 @@ pub fn run() {
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             app.manage(ReturnFocusTo::default());
+            app.manage(Mutex::new(load_settings(app.handle())));
             let trust = macos::ax::request_trust();
             tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
             tray::build(app.handle(), trust)?;
@@ -155,6 +163,55 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
         "launch log started"
     );
     Ok(())
+}
+
+/// The settings store, opened once with auto-save off: settings are written
+/// only by `save_settings`. The plugin also saves every open store at exit.
+fn settings_store(app: &AppHandle) -> Result<Arc<Store<Wry>>, tauri_plugin_store::Error> {
+    app.store_builder(SETTINGS_FILE).disable_auto_save().build()
+}
+
+/// Never fails: a missing file, one that does not decode and every bad field
+/// fall back to defaults.
+fn load_settings(app: &AppHandle) -> Settings {
+    let store = match settings_store(app) {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(%error, "settings store not opened; using defaults");
+            return Settings::default();
+        }
+    };
+    // The store opens empty both when the file is missing and when it does
+    // not decode; reading it again tells the two apart.
+    let stored: serde_json::Map<String, serde_json::Value> = match store.reload() {
+        Ok(()) => store.entries().into_iter().collect(),
+        Err(tauri_plugin_store::Error::Io(error)) if error.kind() == ErrorKind::NotFound => {
+            serde_json::Map::new()
+        }
+        Err(error) => {
+            tracing::warn!(%error, "settings file did not decode; using defaults until the next save");
+            serde_json::Map::new()
+        }
+    };
+    let loaded = settings::load(&stored);
+    for problem in &loaded.problems {
+        tracing::warn!(%problem, "stored setting not loaded");
+    }
+    log_settings(&loaded.settings, "settings loaded");
+    loaded.settings
+}
+
+fn log_settings(settings: &Settings, message: &'static str) {
+    let thresholds = settings.thresholds;
+    tracing::info!(
+        fuzz = thresholds.fuzz(),
+        patchy = thresholds.patchy(),
+        overgrown = thresholds.overgrown(),
+        intensity_percent = settings.intensity.percent(),
+        fast_forward = settings.fast_forward.factor(),
+        excluded_apps = settings.excluded.len(),
+        "{message}"
+    );
 }
 
 #[cfg(debug_assertions)]

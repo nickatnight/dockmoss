@@ -8,22 +8,8 @@ pub use curve::growth;
 pub use jitter::jitter;
 pub use last_used::{LastUsedSources, effective_last_used};
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the settings window (slice 12) validates thresholds with Thresholds::new"
-    )
-)]
-const MIN_FUZZ_DAYS: u32 = jitter::MAX_JITTER_DAYS + 1;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the settings window (slice 12) validates thresholds with Thresholds::new"
-    )
-)]
-const MAX_OVERGROWN_DAYS: u32 = 3650;
+pub const MIN_FUZZ_DAYS: u32 = jitter::MAX_JITTER_DAYS + 1;
+pub const MAX_OVERGROWN_DAYS: u32 = 3650;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
@@ -62,13 +48,6 @@ pub struct Thresholds {
 }
 
 impl Thresholds {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the settings window (slice 12) validates thresholds with Thresholds::new"
-        )
-    )]
     pub fn new(fuzz: u32, patchy: u32, overgrown: u32) -> Result<Self, GrowthError> {
         if MIN_FUZZ_DAYS <= fuzz
             && fuzz < patchy
@@ -90,6 +69,20 @@ impl Thresholds {
     }
 }
 
+impl Thresholds {
+    pub fn fuzz(self) -> u32 {
+        self.fuzz
+    }
+
+    pub fn patchy(self) -> u32 {
+        self.patchy
+    }
+
+    pub fn overgrown(self) -> u32 {
+        self.overgrown
+    }
+}
+
 impl Default for Thresholds {
     fn default() -> Self {
         Self {
@@ -100,13 +93,6 @@ impl Default for Thresholds {
     }
 }
 
-#[cfg_attr(
-    not(any(test, debug_assertions)),
-    expect(
-        dead_code,
-        reason = "release builds run at 1x until the settings window (slice 12) picks a speed"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FastForward {
     #[default]
@@ -117,13 +103,6 @@ pub enum FastForward {
 }
 
 impl FastForward {
-    #[cfg_attr(
-        not(any(test, debug_assertions)),
-        expect(
-            dead_code,
-            reason = "release builds run at 1x until the settings window (slice 12) picks a speed"
-        )
-    )]
     pub fn from_factor(factor: u32) -> Option<Self> {
         match factor {
             1 => Some(Self::X1),
@@ -144,13 +123,6 @@ impl FastForward {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the settings window (slice 12) validates thresholds with Thresholds::new"
-    )
-)]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GrowthError {
     #[error(

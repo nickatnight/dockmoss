@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-05 (approved at Gate 1, emgee job 001; Idle CPU counts the Dock process from job 005 Gate 2; no-panic lints crate-wide from job 007; `pnpm test` added to Tests from job 009 Gate 1; the Release bundle row from job 009's polish; cold start and GPU memory recorded in job 010; the release guard fails on a missing `dist/` from job 011; the first `.app` size and Checkpoint D's cold start recorded in job 014)
+Last reviewed: 2026-11-05 (approved at Gate 1, emgee job 001; Idle CPU counts the Dock process from job 005 Gate 2; no-panic lints crate-wide from job 007; `pnpm test` added to Tests from job 009 Gate 1; the Release bundle row from job 009's polish; cold start and GPU memory recorded in job 010; the release guard fails on a missing `dist/` from job 011; the first `.app` size and Checkpoint D's cold start recorded in job 014; in job 015, at the user's choice at Gate 1, unit tests moved inline into their modules, `clippy::tests_outside_test_module` replaced the `#[test]` grep in `check:fast`, and the 80% line-coverage threshold left `check:task` for the on-demand `pnpm coverage`)
 
 Read alongside `CLAUDE.md`. This file does not get weakened to make a change pass.
 
@@ -25,7 +25,6 @@ Read alongside `CLAUDE.md`. This file does not get weakened to make a change pas
 | Types (TS) | Zero errors, `strict: true` | `pnpm exec tsc --noEmit` | every edit | Keeps the IPC wrapper honest |
 | Tests | All pass | `cargo test` (in `src-tauri/`) and `pnpm test` (vitest, the pure TS beside its `*.test.ts`) | task end | |
 | Release bundle | No debug layer and no dev override in `dist/` | `pnpm build && test -d dist && ! grep -rqE 'debug-dock-item\|VITE_DOCKMOSS' dist` | task end | The outlines, labels and overgrowth override are for dev builds only (job 009 Gate 1 Q3). `overlay.ts` loads them under `import.meta.env.DEV`; this checks the bundle, so a static import anywhere fails it |
-| Coverage | ≥ 80% line coverage of `src-tauri/src/`, excluding only the hand-verified platform and glue files (`macos/`, `main.rs`, `lib.rs`, `tray.rs`, `commands.rs`) and the `tests.rs` files that hold unit tests | `cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/\|(main\|lib\|tray\|commands)[.]rs)\|/tests[.]rs$'` | task end | Pure logic is fully testable. Platform and glue code is verified manually, so it is excluded instead of padded. Excluding a new file means adding it to this regex in CONSTRAINTS.md, where review sees it. |
 | Deps: advisories | No advisory at high or above; no unknown licences | `cargo deny check advisories licenses` | task end | External opinion (RustSec DB) |
 | Deps: JS | Nothing at high or above | `pnpm audit --audit-level high` | task end | External opinion |
 | Secrets | No findings in history, unstaged changes or staged changes | `gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner` | task end | `--redact` keeps any match out of transcripts. Untracked files are scanned only once added. Pinned: gitleaks 8.30.1. |
@@ -37,8 +36,9 @@ Scripts in `package.json` mirror this file; if they drift, this file wins:
 
 ```json
 "check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
-"check:task": "pnpm check:fast && pnpm test && pnpm build && test -d dist && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo llvm-cov --fail-under-lines 80 --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)|/tests[.]rs$' && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
-"check": "pnpm check:fast"
+"check:task": "pnpm check:fast && pnpm test && pnpm build && test -d dist && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
+"check": "pnpm check:fast",
+"coverage": "cd src-tauri && cargo llvm-cov --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)'"
 ```
 
 ## Measured, not yet enforced
@@ -48,6 +48,7 @@ Scripts in `package.json` mirror this file; if they drift, this file wins:
 | Release `.app` size | 3.8 MiB (3912 KB, `du -sk DockMoss.app`; binary 3,765,712 bytes), job 014: `pnpm tauri build`, opt-level "s", `targets: ["app"]`, unsigned. It was 4928 KB at opt-level 3 | record, must not grow > 10% per change |
 | Cold start to first overlay frame | 0.72 s, median of 5 (0.714 to 0.745 s), job 014 (Checkpoint D): the release bundle's binary on the real log, same method as job 010, from launch to the first ScreenCaptureKit capture of Discord's lower art box that shows moss (captures about 22 ms apart). An earlier set of 5 had a median of 0.736 s, its first run (1.04 s) the first launch of a fresh build. Job 010: 0.72 s (0.718 to 0.741 s) | record, must not grow |
 | WebKit GPU process memory (`footprint -p`, phys_footprint), every mossy icon drawn | 17 MB idle and 174 MB at the peak of a magnification sweep, with a 191 MB process peak at startup, job 010 (four overgrown icons, the canvas the size of the 3024x1964 display) | record, must not grow |
+| Line coverage of `src-tauri/src/`, excluding the hand-verified platform and glue files (`macos/`, `main.rs`, `lib.rs`, `tray.rs`, `commands.rs`) | 99.24% (6200 lines, 47 missed), job 015, from `pnpm coverage` (`cargo llvm-cov` with that exclusion; extra arguments pass through, such as `--html` or `--lcov --output-path lcov.info`). Unit tests sit inline since job 015, so their lines count too | on demand, no threshold: a rough guide only. The 80% gate in `check:task` was dropped at the user's choice in job 015 (Gate 1, 2026-11-05) |
 
 ## Exceptions
 

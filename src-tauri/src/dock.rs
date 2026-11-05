@@ -352,6 +352,8 @@ mod tests {
         assert_eq!(xs, [(vscode.clone(), 640.0), (vscode, 760.0)]);
     }
 
+    /// One gated tick: returns the result, whether the AX read ran and whether
+    /// trust was re-checked.
     fn gated(
         gate: &mut ReadGate,
         trust: Trust,

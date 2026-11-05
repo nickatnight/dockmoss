@@ -199,6 +199,8 @@ mod tests {
             Error::LoginItemNotChanged(crate::login_item::NotChanged),
         ];
         for error in &errors {
+            // A new variant must be added here and to `errors`; the `declared`
+            // check below fails if `errors` misses the variant's kind.
             match error {
                 Error::Tauri(_)
                 | Error::NoMainDisplay

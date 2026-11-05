@@ -508,6 +508,9 @@ mod tests {
         assert_eq!(read(&folders.old, "launch_log.json"), "log");
     }
 
+    /// Clears the immutable flag on its paths when dropped, even when a test
+    /// fails, so `TempDir` can delete them. Declared after the folders, so it
+    /// drops first.
     struct ClearsImmutable(Vec<std::path::PathBuf>);
 
     impl Drop for ClearsImmutable {

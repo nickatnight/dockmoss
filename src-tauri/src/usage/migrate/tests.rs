@@ -267,8 +267,6 @@ fn a_read_only_old_folder_still_gives_the_new_folder_the_file() {
     assert_eq!(read(&folders.old, "launch_log.json"), "log");
 }
 
-/// `chflags uchg` makes a file immutable: macOS refuses to link or rename
-/// it, which is how a move fails here.
 /// Clears the immutable flag on its paths when dropped, even when a test
 /// fails, so `TempDir` can delete them. Declared after the folders, so it
 /// drops first.
@@ -290,6 +288,8 @@ impl Drop for ClearsImmutable {
     }
 }
 
+/// `chflags uchg` makes a file immutable: macOS refuses to link or rename
+/// it, which is how a move fails here.
 fn set_immutable(path: &Path, immutable: bool) {
     let flag = if immutable { "uchg" } else { "nouchg" };
     let status = std::process::Command::new("chflags")

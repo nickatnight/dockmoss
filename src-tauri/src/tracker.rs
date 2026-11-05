@@ -315,8 +315,8 @@ impl Activity {
         let mut wait = |until: Instant| loop {
             match wait_until(until) {
                 Woken::Due => return None,
-                Woken::DockHover(at) if longer_than_a_fast_interval => return Some(at),
-                Woken::DockHover(_) => {}
+                Woken::DockHover { at } if longer_than_a_fast_interval => return Some(at),
+                Woken::DockHover { .. } => {}
             }
         };
         let mut checked = now;
@@ -339,7 +339,7 @@ impl Activity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Woken {
     Due,
-    DockHover(Instant),
+    DockHover { at: Instant },
 }
 
 /// When the tick after one due at `previous` is due: one interval later, so
@@ -1250,7 +1250,7 @@ mod tests {
             |until| {
                 if let Some(hover) = hovers.next_if(|&hover| hover <= until) {
                     clock.set(hover.max(clock.get()));
-                    return Woken::DockHover(clock.get());
+                    return Woken::DockHover { at: clock.get() };
                 }
                 clock.set(until);
                 Woken::Due

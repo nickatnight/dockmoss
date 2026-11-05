@@ -797,7 +797,9 @@ mod dock_tracker {
                 }
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
-                Ok(TrackerMessage::DockHoverChanged) => return Woken::DockHover(Instant::now()),
+                Ok(TrackerMessage::DockHoverChanged) => {
+                    return Woken::DockHover { at: Instant::now() };
+                }
                 Err(RecvTimeoutError::Timeout) => return Woken::Due,
                 Err(RecvTimeoutError::Disconnected) => {
                     std::thread::sleep(left);
@@ -1019,7 +1021,7 @@ mod dock_tracker {
                 &mut screen_changed,
             );
 
-            assert!(matches!(woken, Woken::DockHover(at) if at >= started));
+            assert!(matches!(woken, Woken::DockHover { at } if at >= started));
             assert!(
                 started.elapsed() < Duration::from_secs(1),
                 "returned after {:?}",

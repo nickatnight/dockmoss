@@ -211,8 +211,11 @@ input[type="number"][aria-invalid="true"] {
   padding: 4px 0;
 }
 
+/* Focus scrolls the whole row in, with its ring, not just the checkbox:
+   half the row's height left over around the box, plus the ring. */
 .apps input {
   margin: 0;
+  scroll-margin-block: 10px;
 }
 
 .apps .name {

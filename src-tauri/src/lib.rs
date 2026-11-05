@@ -59,6 +59,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             on_second_launch(app);
         }))
+        .plugin(private_log_dir())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)
@@ -73,6 +74,9 @@ pub fn run() {
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if let Some(error) = app.try_state::<LogDirNotPrivate>() {
+                tracing::warn!(kind = %error.0, "log folder not made private");
+            }
             app.manage(LastOtherApp::default());
             move_old_app_data(app.handle());
             let (settings, settings_path) = load_settings(app.handle());
@@ -144,6 +148,28 @@ pub fn run() {
         _ => {}
     });
 }
+
+/// The log plugin's setup creates the log folder and opens the file, so this
+/// runs before it (plugins set up in the order they are registered). The
+/// folder is 0700 before the first line is written, so a rotated file's mode
+/// no longer matters. No logger exists yet: `setup()` logs a failure.
+fn private_log_dir() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("private-log-dir")
+        .setup(|app, _api| {
+            let made = app
+                .path()
+                .app_log_dir()
+                .map_err(|error| std::io::Error::other(error.to_string()))
+                .and_then(|dir| usage::private_dir(&dir));
+            if let Err(error) = made {
+                app.manage(LogDirNotPrivate(error.kind()));
+            }
+            Ok(())
+        })
+        .build()
+}
+
+struct LogDirNotPrivate(std::io::ErrorKind);
 
 /// The plugin calls this on a tokio task. Main-thread tasks run only once the
 /// event loop runs, which is after `setup()` has managed the state Settings

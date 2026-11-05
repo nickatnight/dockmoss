@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import type { BundleId, Settings, SettingsLimits } from "../ipc";
-import { nextSettings, thresholdMessage, toFastForward } from "./model";
+import type {
+  BundleId,
+  DockAppName,
+  Settings,
+  SettingsLimits,
+} from "../ipc";
+import {
+  exclusionRows,
+  nextSettings,
+  thresholdMessage,
+  toFastForward,
+} from "./model";
+
+const id = (value: string): BundleId => value as BundleId;
 
 const saved: Settings = {
   thresholds: { fuzz: 5, patchy: 10, overgrown: 30 },
@@ -46,6 +58,39 @@ describe("nextSettings", () => {
 
     expect(next.thresholds.fuzz).toBeNaN();
     expect(next.intensityPercent).toBe(100);
+  });
+
+  it("adds an exclusion in sorted order and keeps every other saved field", () => {
+    const next = nextSettings(saved, {
+      field: "excluded",
+      bundleId: id("com.apple.Calculator"),
+      excluded: true,
+    });
+
+    expect(next).toEqual({
+      ...saved,
+      excluded: [id("com.apple.Calculator"), id("com.apple.Chess")],
+    });
+  });
+
+  it("lists an app once when it is excluded again", () => {
+    const next = nextSettings(saved, {
+      field: "excluded",
+      bundleId: id("com.apple.Chess"),
+      excluded: true,
+    });
+
+    expect(next.excluded).toEqual([id("com.apple.Chess")]);
+  });
+
+  it("removes an exclusion", () => {
+    const next = nextSettings(saved, {
+      field: "excluded",
+      bundleId: id("com.apple.Chess"),
+      excluded: false,
+    });
+
+    expect(next).toEqual({ ...saved, excluded: [] });
   });
 
   it("leaves the saved settings untouched", () => {
@@ -95,5 +140,44 @@ describe("toFastForward", () => {
 
   it.each(["", "2", "1001", "ten"])("rejects %j", (value) => {
     expect(toFastForward(value)).toBeNull();
+  });
+});
+
+describe("exclusionRows", () => {
+  const dockApps: DockAppName[] = [
+    { bundleId: id("com.apple.finder"), name: "Finder" },
+    { bundleId: id("com.apple.Chess"), name: "Chess" },
+    { bundleId: id("com.tinyspeck.slackmacgap"), name: "Slack" },
+  ];
+
+  it("lists the Dock's apps by name in Dock order, checked when excluded", () => {
+    const rows = exclusionRows(dockApps, [id("com.apple.Chess")]);
+
+    expect(rows).toEqual([
+      { bundleId: "com.apple.finder", label: "Finder", excluded: false, inDock: true },
+      { bundleId: "com.apple.Chess", label: "Chess", excluded: true, inDock: true },
+      { bundleId: "com.tinyspeck.slackmacgap", label: "Slack", excluded: false, inDock: true },
+    ]);
+  });
+
+  it("follows with excluded apps that left the Dock, by bundle ID, so they can be cleared", () => {
+    const rows = exclusionRows(dockApps, [
+      id("com.apple.Chess"),
+      id("com.example.Gone"),
+      id("com.another.Removed"),
+    ]);
+
+    expect(rows.slice(3)).toEqual([
+      { bundleId: "com.another.Removed", label: "com.another.Removed", excluded: true, inDock: false },
+      { bundleId: "com.example.Gone", label: "com.example.Gone", excluded: true, inDock: false },
+    ]);
+    expect(rows.filter((row) => row.bundleId === "com.apple.Chess")).toHaveLength(1);
+  });
+
+  it("lists only stray exclusions while the Dock is unknown", () => {
+    expect(exclusionRows([], [])).toEqual([]);
+    expect(exclusionRows([], [id("com.apple.Chess")])).toEqual([
+      { bundleId: "com.apple.Chess", label: "com.apple.Chess", excluded: true, inDock: false },
+    ]);
   });
 });

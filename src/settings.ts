@@ -8,9 +8,11 @@ import {
   type SettingsView,
 } from "./ipc";
 import {
+  exclusionRows,
   nextSettings,
   thresholdMessage,
   toFastForward,
+  type ExclusionRow,
   type SettingsChange,
 } from "./settings/model";
 
@@ -31,6 +33,7 @@ const page = {
     byId("stages", HTMLFieldSetElement),
     byId("intensity-group", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
+    byId("excluded-group", HTMLFieldSetElement),
   ],
   days: {
     fuzz: byId("fuzz", HTMLInputElement),
@@ -40,6 +43,8 @@ const page = {
   stagesMessage: byId("stages-message", HTMLParagraphElement),
   intensity: byId("intensity", HTMLInputElement),
   intensityValue: byId("intensity-value", HTMLOutputElement),
+  dockUnknown: byId("dock-unknown", HTMLParagraphElement),
+  excludedApps: byId("excluded-apps", HTMLUListElement),
   speeds: Array.from(
     document.querySelectorAll<HTMLInputElement>('input[name="fast-forward"]'),
   ),
@@ -75,6 +80,31 @@ function show(view: SettingsView): void {
   for (const radio of page.speeds) {
     radio.checked = toFastForward(radio.value) === settings.fastForward;
   }
+}
+
+/** Dock names and bundle IDs go into the DOM as text only. */
+function exclusionItem(
+  row: ExclusionRow,
+  onChange: (excluded: boolean) => void,
+): HTMLLIElement {
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = row.excluded;
+  checkbox.addEventListener("change", () => onChange(checkbox.checked));
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = row.label;
+  const label = document.createElement("label");
+  label.append(checkbox, name);
+  if (!row.inDock) {
+    const note = document.createElement("span");
+    note.className = "note";
+    note.textContent = "Not in the Dock";
+    label.append(note);
+  }
+  const item = document.createElement("li");
+  item.append(label);
+  return item;
 }
 
 function showIntensity(): void {
@@ -157,6 +187,14 @@ async function start(): Promise<void> {
       field: "intensityPercent",
       percent: page.intensity.valueAsNumber,
     }),
+  );
+  page.dockUnknown.hidden = view.dockApps.length > 0;
+  page.excludedApps.replaceChildren(
+    ...exclusionRows(view.dockApps, view.settings.excluded).map((row) =>
+      exclusionItem(row, (excluded) =>
+        commit({ field: "excluded", bundleId: row.bundleId, excluded }),
+      ),
+    ),
   );
   for (const radio of page.speeds) {
     radio.addEventListener("change", () => {

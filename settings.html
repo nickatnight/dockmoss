@@ -88,6 +88,20 @@
           >
         </div>
       </fieldset>
+
+      <fieldset
+        id="excluded-group"
+        class="group"
+        aria-describedby="excluded-hint"
+        disabled
+      >
+        <legend>Excluded apps</legend>
+        <p id="excluded-hint" class="hint">These apps never grow moss.</p>
+        <p id="dock-unknown" class="hint" hidden>
+          The list fills in once DockMoss can read the Dock.
+        </p>
+        <ul id="excluded-apps" class="apps"></ul>
+      </fieldset>
     </main>
   </body>
 </html>

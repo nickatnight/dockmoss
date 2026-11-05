@@ -1,6 +1,8 @@
 // The settings form's pure parts: no DOM and no IPC.
 
 import type {
+  BundleId,
+  DockAppName,
   FastForward,
   Settings,
   SettingsLimits,
@@ -11,7 +13,8 @@ import type {
 export type SettingsChange =
   | { field: "thresholds"; thresholds: Thresholds }
   | { field: "intensityPercent"; percent: number }
-  | { field: "fastForward"; speed: FastForward };
+  | { field: "fastForward"; speed: FastForward }
+  | { field: "excluded"; bundleId: BundleId; excluded: boolean };
 
 /**
  * The settings to save after one change: the last saved settings with that
@@ -29,7 +32,53 @@ export function nextSettings(
       return { ...saved, intensityPercent: change.percent };
     case "fastForward":
       return { ...saved, fastForward: change.speed };
+    case "excluded": {
+      const excluded = new Set(saved.excluded);
+      if (change.excluded) {
+        excluded.add(change.bundleId);
+      } else {
+        excluded.delete(change.bundleId);
+      }
+      return { ...saved, excluded: [...excluded].sort() };
+    }
   }
+}
+
+/** One checkbox in the excluded apps list. */
+export interface ExclusionRow {
+  bundleId: BundleId;
+  /** The app's name, or its bundle ID when it is not in the Dock. */
+  label: string;
+  excluded: boolean;
+  inDock: boolean;
+}
+
+/**
+ * The Dock's apps in Dock order, then the excluded apps that are no longer
+ * in the Dock, sorted, so an exclusion can always be cleared.
+ */
+export function exclusionRows(
+  dockApps: readonly DockAppName[],
+  excluded: readonly BundleId[],
+): ExclusionRow[] {
+  const excludedSet = new Set(excluded);
+  const inDock = new Set(dockApps.map((app) => app.bundleId));
+  const docked = dockApps.map((app) => ({
+    bundleId: app.bundleId,
+    label: app.name,
+    excluded: excludedSet.has(app.bundleId),
+    inDock: true,
+  }));
+  const strays = [...excludedSet]
+    .filter((bundleId) => !inDock.has(bundleId))
+    .sort()
+    .map((bundleId) => ({
+      bundleId,
+      label: bundleId,
+      excluded: true,
+      inDock: false,
+    }));
+  return [...docked, ...strays];
 }
 
 /** The stage fieldset's message when Rust rejects the thresholds. */

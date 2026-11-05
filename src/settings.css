@@ -126,6 +126,38 @@ input[type="number"][aria-invalid="true"] {
   margin: 0;
 }
 
+/* The side padding keeps the checkboxes' focus rings inside the scroll box. */
+.apps {
+  max-height: 196px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.apps label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.apps input {
+  margin: 0;
+}
+
+.apps .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apps .note {
+  margin-left: auto;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 input:focus-visible {
   outline: auto 3px -webkit-focus-ring-color;
   outline-offset: 1px;

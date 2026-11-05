@@ -640,19 +640,47 @@ fn the_default_settings_draw_the_curve_unchanged() {
     assert_eq!(got[2], ("com.apple.Chess".to_owned(), 0.0, Stage::Clean));
 }
 
+/// Finder's jitter, from the golden table in growth/jitter/tests.rs.
+const FINDER_JITTER_SECONDS: f64 = 31_764.0;
+
+/// Where an app unused for `unused_days` sits on the curve, jitter included.
+fn curve_day(unused_days: f64, jitter_seconds: f64) -> f64 {
+    unused_days + jitter_seconds / SECONDS_PER_DAY
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the test's curve days are small and positive"
+)]
+fn whole(days: f64) -> u32 {
+    days as u32
+}
+
 #[test]
 fn thresholds_move_each_app_along_the_curve() {
+    let safari = curve_day(6.0, SAFARI_JITTER_SECONDS);
+    let finder = curve_day(40.0, FINDER_JITTER_SECONDS);
     let cases = [
-        ("later stages", (8, 15, 40), Stage::Clean, Stage::Overgrown),
         (
-            "earlier stages",
-            (2, 3, 4),
+            "fuzz starts after Safari's day, overgrown before Finder's",
+            (
+                whole(safari.ceil()),
+                whole(safari.ceil()) + 1,
+                whole(finder.floor()),
+            ),
+            Stage::Clean,
+            Stage::Overgrown,
+        ),
+        (
+            "every stage starts before Safari's day",
+            (2, 3, whole(safari.floor())),
             Stage::Overgrown,
             Stage::Overgrown,
         ),
         (
-            "a far overgrown stage",
-            (5, 10, 100),
+            "Safari between fuzz and patchy, overgrown after Finder's day",
+            (5, 10, whole(finder.ceil())),
             Stage::Fuzz,
             Stage::Patchy,
         ),

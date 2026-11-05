@@ -672,8 +672,6 @@ fn refresh_tray_on_main_thread(app: &AppHandle) {
     }
 }
 
-/// Passes each Dock hover change to the tracker, which reads at once when it
-/// was waiting longer than a `Fast` interval.
 fn spawn_dock_observer(
     app: AppHandle,
     tracker: mpsc::Sender<TrackerMessage>,
@@ -783,9 +781,6 @@ mod dock_tracker {
         }
     }
 
-    /// Returns at `deadline`, so a burst of screen notifications (one per
-    /// frame while the Dock slides in) adds no Dock reads, or at once on a
-    /// Dock hover change, which `Activity::wait_for_read` may act on.
     fn drain_inbox_until(
         deadline: Instant,
         messages: &Receiver<TrackerMessage>,

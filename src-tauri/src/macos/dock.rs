@@ -177,7 +177,6 @@ fn find_dock() -> Result<CFRetained<AXUIElement>, DockError> {
     Ok(application(pid))
 }
 
-/// Run inside an autorelease pool.
 pub(super) fn system_dock_pid() -> Option<i32> {
     NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
         .iter()

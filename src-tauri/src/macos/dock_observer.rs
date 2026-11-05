@@ -1,5 +1,3 @@
-//! Wakes the Dock tracker when the Dock's hovered item changes.
-//!
 //! The Dock posts `AXSelectedChildrenChanged` when the pointer enters, crosses
 //! or leaves one of its items, and no move or resize notification for them:
 //! `AXMoved`, `AXResized` and `AXLayoutChanged` all return
@@ -7,9 +5,6 @@
 //! start of a magnification, not each of its frames, and the reads stay
 //! polled. Registered on the application element, it covers every element of
 //! the Dock, so a rebuilt item list needs no new registration.
-//!
-//! Its thread runs its own `CFRunLoop`, never the main thread, and makes no AX
-//! call while Accessibility is untrusted.
 
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -23,11 +18,8 @@ use objc2_core_foundation::{
 };
 
 const HOVER_CHANGED: &str = "AXSelectedChildrenChanged";
-/// How often the thread checks that it is still trusted and that the Dock it
-/// watches still runs: a restarted Dock has a new pid.
 const RECHECK: Duration = Duration::from_secs(2);
 
-/// Calls `on_hover` on the `dock-observer` thread at each hover change.
 pub fn spawn(
     trusted: impl Fn() -> bool + Send + 'static,
     on_hover: impl Fn() + Send + 'static,
@@ -76,8 +68,6 @@ fn default_mode() -> Option<&'static CFRunLoopMode> {
     unsafe { kCFRunLoopDefaultMode }
 }
 
-/// The observer's source in this thread's run loop. Dropping it removes the
-/// source, so no callback runs after `callback` is gone.
 struct Registration<'a> {
     run_loop: CFRetained<CFRunLoop>,
     source: CFRetained<CFRunLoopSource>,

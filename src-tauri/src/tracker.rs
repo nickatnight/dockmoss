@@ -303,18 +303,6 @@ impl Activity {
         }
     }
 
-    /// Waits, through `wait_until`, for the next Dock read, and returns the
-    /// instant it became due: `read_due`, or sooner if the pointer rests in
-    /// the band and moves, or if the Dock reports a hover change during a
-    /// wait longer than a `Fast` interval. While the pointer rests in the
-    /// band, it alone is checked every `REST_POINTER_CHECK_INTERVAL`, with no
-    /// Dock read.
-    ///
-    /// The Dock posts a hover change when the pointer enters, crosses or
-    /// leaves an item, about 5 a second during a sweep and never per
-    /// animation frame. So it only starts reading; `Fast` reads still follow
-    /// the motion. Between `Fast` reads it changes nothing, since the next
-    /// read is at most one interval away.
     pub fn wait_for_read(
         &self,
         read_due: Instant,
@@ -347,12 +335,9 @@ impl Activity {
     }
 }
 
-/// Why a wait for the next Dock read ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Woken {
-    /// The instant waited for came.
     Due,
-    /// The Dock reported, at this instant, that its hovered item changed.
     DockHover(Instant),
 }
 
@@ -1243,9 +1228,6 @@ mod tests {
         wait_for_read_with_hovers(activity, start, now_ms, read_due_ms, pointer, &[])
     }
 
-    /// Runs `wait_for_read` on a simulated clock. `hovers_ms` are the
-    /// instants the Dock reports a hover change; a wait whose deadline is at
-    /// or after the next one ends there.
     fn wait_for_read_with_hovers(
         activity: &Activity,
         start: Instant,

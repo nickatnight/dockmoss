@@ -23,7 +23,6 @@ pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
     ScreenParametersChanged,
     OverlayOrderFailed,
-    /// The Dock's hovered item changed (`macos::dock_observer`).
     DockHoverChanged,
 }
 

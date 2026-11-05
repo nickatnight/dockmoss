@@ -672,25 +672,8 @@ fn refresh_tray_on_main_thread(app: &AppHandle) {
     }
 }
 
-fn spawn_dock_observer(
-    app: AppHandle,
-    tracker: mpsc::Sender<TrackerMessage>,
-) -> std::io::Result<()> {
-    macos::dock_observer::spawn(
-        move || {
-            app.try_state::<TrustState>()
-                .is_some_and(|trust| trust.current().is_trusted())
-        },
-        move || {
-            if tracker.send(TrackerMessage::DockHoverChanged).is_err() {
-                tracing::debug!("dock hover change not passed on: the dock tracker stopped");
-            }
-        },
-    )
-}
-
 mod dock_tracker {
-    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
     use std::time::{Duration, Instant};
 
     use tauri::ipc::Channel;
@@ -712,7 +695,7 @@ mod dock_tracker {
         overlay: Visibility,
     ) -> std::io::Result<()> {
         if let Some(inbox) = app.try_state::<TrackerInbox>() {
-            super::spawn_dock_observer(app.clone(), inbox.0.clone())?;
+            spawn_observer(app.clone(), inbox.0.clone())?;
         } else {
             tracing::warn!("no tracker inbox; dock hover changes not observed");
         }
@@ -720,6 +703,20 @@ mod dock_tracker {
             .name("dock-tracker".into())
             .spawn(move || track_dock(&app, &messages, display, overlay))?;
         Ok(())
+    }
+
+    fn spawn_observer(app: AppHandle, tracker: Sender<TrackerMessage>) -> std::io::Result<()> {
+        macos::dock_observer::spawn(
+            move || {
+                app.try_state::<TrustState>()
+                    .is_some_and(|trust| trust.current().is_trusted())
+            },
+            move || {
+                if tracker.send(TrackerMessage::DockHoverChanged).is_err() {
+                    tracing::debug!("dock hover change not passed on: the dock tracker stopped");
+                }
+            },
+        )
     }
 
     fn track_dock(

@@ -166,6 +166,7 @@ pub struct HoverObserverGate {
 }
 
 impl HoverObserverGate {
+    /// Seeing the cached trust revoked releases the latch.
     pub fn may_register(&mut self, trust: Trust, check: impl FnOnce() -> Trust) -> bool {
         if self.refused {
             return false;
@@ -722,9 +723,33 @@ mod tests {
     /// makes one), and the outcome recorded if the attempt was allowed.
     type Step = (Trust, Trust, HoverRegistration);
 
-    /// Whether an attempt is allowed, how many fresh checks it made, and
-    /// whether the gate gave up.
-    type GateAnswer = (bool, u32, bool);
+    #[derive(Debug, PartialEq)]
+    struct GateAnswer {
+        allowed: bool,
+        fresh_checks: u32,
+        gave_up: bool,
+    }
+
+    const ALLOWED: GateAnswer = GateAnswer {
+        allowed: true,
+        fresh_checks: 1,
+        gave_up: false,
+    };
+    const BLOCKED_UNCHECKED: GateAnswer = GateAnswer {
+        allowed: false,
+        fresh_checks: 0,
+        gave_up: false,
+    };
+    const BLOCKED_BY_CHECK: GateAnswer = GateAnswer {
+        allowed: false,
+        fresh_checks: 1,
+        gave_up: false,
+    };
+    const GAVE_UP: GateAnswer = GateAnswer {
+        allowed: false,
+        fresh_checks: 0,
+        gave_up: true,
+    };
 
     /// Replays `history`, then asks once more with `trust` and `check`.
     fn hover_gate_after(history: &[Step], trust: Trust, check: Trust) -> GateAnswer {
@@ -739,7 +764,11 @@ mod tests {
             made.set(made.get() + 1);
             check
         });
-        (allowed, made.get(), gate.gave_up())
+        GateAnswer {
+            allowed,
+            fresh_checks: made.get(),
+            gave_up: gate.gave_up(),
+        }
     }
 
     const TRUSTED: Trust = Trust::Trusted;
@@ -752,19 +781,14 @@ mod tests {
                 "untrusted: no fresh check",
                 UNTRUSTED,
                 TRUSTED,
-                (false, 0, false),
+                BLOCKED_UNCHECKED,
             ),
-            (
-                "trusted, checked trusted",
-                TRUSTED,
-                TRUSTED,
-                (true, 1, false),
-            ),
+            ("trusted, checked trusted", TRUSTED, TRUSTED, ALLOWED),
             (
                 "trusted, but the fresh check says untrusted",
                 TRUSTED,
                 UNTRUSTED,
-                (false, 1, false),
+                BLOCKED_BY_CHECK,
             ),
         ];
 
@@ -779,17 +803,17 @@ mod tests {
             (
                 "after a failure worth a retry",
                 HoverRegistration::Failed,
-                (true, 1, false),
+                ALLOWED,
             ),
             (
                 "after a registration that held",
                 HoverRegistration::Registered,
-                (true, 1, false),
+                ALLOWED,
             ),
             (
                 "after the Dock refused",
                 HoverRegistration::Unsupported,
-                (false, 0, true),
+                GAVE_UP,
             ),
         ];
 
@@ -812,13 +836,13 @@ mod tests {
             (
                 "refused while cached as trusted: no fresh check",
                 &[refused],
-                (false, 0, false),
+                BLOCKED_UNCHECKED,
             ),
-            ("still latched later", &[refused, held], (false, 0, false)),
+            ("still latched later", &[refused, held], BLOCKED_UNCHECKED),
             (
                 "revoked, then granted again: released",
                 &[refused, revoked],
-                (true, 1, false),
+                ALLOWED,
             ),
         ];
 

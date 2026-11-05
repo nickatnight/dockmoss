@@ -303,6 +303,8 @@ impl Activity {
         }
     }
 
+    /// Returns the instant the read became due; the next deadline counts on
+    /// from it.
     pub fn wait_for_read(
         &self,
         read_due: Instant,
@@ -1448,41 +1450,120 @@ mod tests {
     const IN_BAND: ScreenPoint = ScreenPoint { x: 720.0, y: 850.0 };
 
     /// Still and away from the Dock: `Slow`, with no pointer checks.
-    fn still_far(start: Instant) -> Activity {
-        settled_activity(PollRate::Slow, Some(FAR), start, HOVER_NOW_MS)
+    fn still_far(start: Instant) -> (Activity, ScreenPoint) {
+        let activity = settled_activity(PollRate::Slow, Some(FAR), start, HOVER_NOW_MS);
+        (activity, FAR)
     }
 
     /// Still in the band: `Slow`, with a pointer check every 100 ms.
-    fn resting_in_band(start: Instant) -> Activity {
-        settled_activity(PollRate::Fast, Some(IN_BAND), start, HOVER_NOW_MS)
+    fn resting_in_band(start: Instant) -> (Activity, ScreenPoint) {
+        let activity = settled_activity(PollRate::Fast, Some(IN_BAND), start, HOVER_NOW_MS);
+        (activity, IN_BAND)
     }
 
     /// Moving in the band: `Fast`.
-    fn moving_in_band(start: Instant) -> Activity {
+    fn moving_in_band(start: Instant) -> (Activity, ScreenPoint) {
+        let moved = point(724.0, 850.0);
         let mut activity = Activity::default();
         activity.rate(PollRate::Fast, false, Some(IN_BAND), false, start);
         let rate = activity.rate(
             PollRate::Fast,
             false,
-            Some(point(724.0, 850.0)),
+            Some(moved),
             false,
             start.checked_add(ms(HOVER_NOW_MS)).expect("in range"),
         );
         assert_eq!(rate, PollRate::Fast);
-        activity
+        (activity, moved)
     }
 
+    /// A wait that starts at `HOVER_NOW_MS`. `pointer` gives the activity
+    /// and where the pointer stays.
     struct HoverCase {
         case: &'static str,
-        activity: fn(Instant) -> Activity,
+        pointer: fn(Instant) -> (Activity, ScreenPoint),
         read_due: Duration,
         hovers: Vec<Duration>,
         expected_read: Duration,
         expected_checks_ms: Vec<u64>,
     }
 
+    fn run_hover_cases(start: Instant, cases: impl IntoIterator<Item = HoverCase>) {
+        for HoverCase {
+            case,
+            pointer,
+            read_due,
+            hovers,
+            expected_read,
+            expected_checks_ms,
+        } in cases
+        {
+            let (activity, cursor) = pointer(start);
+
+            let (read, checks) = wait_for_read_with_hovers(
+                &activity,
+                start,
+                ms(HOVER_NOW_MS),
+                read_due,
+                &[Some(cursor)],
+                &hovers,
+            );
+
+            assert_eq!(read, expected_read, "{case}: read");
+            assert_eq!(checks, expected_checks_ms, "{case}: checks");
+        }
+    }
+
     #[test]
-    fn a_dock_hover_change_makes_a_slow_read_due_at_once_and_leaves_fast_reads_alone() {
+    fn a_dock_hover_change_makes_a_slow_read_due_at_once() {
+        let cases = [
+            HoverCase {
+                case: "pointer away from the Dock: read at the hover",
+                pointer: still_far,
+                read_due: ms(800),
+                hovers: vec![ms(420)],
+                expected_read: ms(420),
+                expected_checks_ms: vec![],
+            },
+            HoverCase {
+                case: "pointer resting in the band: read at the hover, before the next check",
+                pointer: resting_in_band,
+                read_due: ms(800),
+                hovers: vec![ms(350)],
+                expected_read: ms(350),
+                expected_checks_ms: vec![],
+            },
+            HoverCase {
+                case: "pointer resting in the band: a hover after one pointer check",
+                pointer: resting_in_band,
+                read_due: ms(800),
+                hovers: vec![ms(450)],
+                expected_read: ms(450),
+                expected_checks_ms: vec![400],
+            },
+            HoverCase {
+                case: "the first of a pair of hovers makes the read due",
+                pointer: still_far,
+                read_due: ms(800),
+                hovers: vec![ms(420), ms(422)],
+                expected_read: ms(420),
+                expected_checks_ms: vec![],
+            },
+            HoverCase {
+                case: "no hover: the Slow read",
+                pointer: still_far,
+                read_due: ms(800),
+                hovers: vec![],
+                expected_read: ms(800),
+                expected_checks_ms: vec![],
+            },
+        ];
+
+        run_hover_cases(Instant::now(), cases);
+    }
+
+    #[test]
+    fn hover_reads_wait_one_fast_interval_after_the_last_read_and_leave_fast_reads_alone() {
         let start = Instant::now();
         let now = ms(HOVER_NOW_MS);
         let fast = PollRate::Fast.interval();
@@ -1494,48 +1575,8 @@ mod tests {
         .duration_since(start);
         let cases = [
             HoverCase {
-                case: "slow, pointer away from the Dock: read at the hover",
-                activity: still_far,
-                read_due: ms(800),
-                hovers: vec![ms(420)],
-                expected_read: ms(420),
-                expected_checks_ms: vec![],
-            },
-            HoverCase {
-                case: "slow, pointer resting in the band: read at the hover, before the next check",
-                activity: resting_in_band,
-                read_due: ms(800),
-                hovers: vec![ms(350)],
-                expected_read: ms(350),
-                expected_checks_ms: vec![],
-            },
-            HoverCase {
-                case: "slow, pointer resting in the band: a hover after one pointer check",
-                activity: resting_in_band,
-                read_due: ms(800),
-                hovers: vec![ms(450)],
-                expected_read: ms(450),
-                expected_checks_ms: vec![400],
-            },
-            HoverCase {
-                case: "slow: the first of a pair of hovers makes the read due",
-                activity: still_far,
-                read_due: ms(800),
-                hovers: vec![ms(420), ms(422)],
-                expected_read: ms(420),
-                expected_checks_ms: vec![],
-            },
-            HoverCase {
-                case: "slow, no hover: the Slow read",
-                activity: still_far,
-                read_due: ms(800),
-                hovers: vec![],
-                expected_read: ms(800),
-                expected_checks_ms: vec![],
-            },
-            HoverCase {
                 case: "slow: a hover 2 ms after the last read is read one Fast interval after it",
-                activity: still_far,
+                pointer: still_far,
                 read_due: ms(800),
                 hovers: vec![ms(302)],
                 expected_read: now + fast,
@@ -1543,7 +1584,7 @@ mod tests {
             },
             HoverCase {
                 case: "fast: hovers between Fast reads wait for the Fast read",
-                activity: moving_in_band,
+                pointer: moving_in_band,
                 read_due: fast_read_due,
                 hovers: vec![ms(305), ms(306)],
                 expected_read: fast_read_due,
@@ -1551,7 +1592,7 @@ mod tests {
             },
             HoverCase {
                 case: "a wait of exactly one Fast interval: the hover changes nothing",
-                activity: still_far,
+                pointer: still_far,
                 read_due: now + fast,
                 hovers: vec![ms(305)],
                 expected_read: now + fast,
@@ -1559,34 +1600,13 @@ mod tests {
             },
         ];
 
-        for HoverCase {
-            case,
-            activity,
-            read_due,
-            hovers,
-            expected_read,
-            expected_checks_ms,
-        } in cases
-        {
-            let activity = activity(start);
-            let cursor = if case.contains("band") {
-                Some(IN_BAND)
-            } else {
-                Some(FAR)
-            };
-
-            let (read, checks) =
-                wait_for_read_with_hovers(&activity, start, now, read_due, &[cursor], &hovers);
-
-            assert_eq!(read, expected_read, "{case}: read");
-            assert_eq!(checks, expected_checks_ms, "{case}: checks");
-        }
+        run_hover_cases(start, cases);
     }
 
     #[test]
     fn a_pair_of_hovers_with_the_pointer_still_reads_at_most_once_per_fast_interval() {
         let start = Instant::now();
-        let activity = still_far(start);
+        let (activity, _) = still_far(start);
 
         let (first, _) = wait_for_read_with_hovers(
             &activity,

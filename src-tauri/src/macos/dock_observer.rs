@@ -76,7 +76,11 @@ fn observe(trust: &dyn Fn() -> Trust, on_hover: &dyn Fn()) {
                 }
                 Err(error) => {
                     tracing::debug!(pid, %error, "dock hover observer not registered");
-                    gate.record(error.registration());
+                    let registration = error.registration();
+                    if registration == HoverRegistration::ApiDisabled {
+                        tracing::info!("dock hover observer paused until access is re-granted");
+                    }
+                    gate.record(registration);
                 }
             }
         }
@@ -189,4 +193,40 @@ unsafe extern "C-unwind" fn hover_changed(
     // thread while the registration, and so the callback, is alive.
     let on_hover = unsafe { &*refcon.cast::<&dyn Fn()>() };
     on_hover();
+}
+
+#[cfg(test)]
+mod tests {
+    use objc2_application_services::AXError;
+
+    use super::RegisterError;
+    use crate::dock::HoverRegistration;
+
+    #[test]
+    fn registration_errors_map_to_what_the_gate_records() {
+        let cases = [
+            (
+                RegisterError::Ax(AXError::NotificationUnsupported),
+                HoverRegistration::Unsupported,
+            ),
+            (
+                RegisterError::Ax(AXError::APIDisabled),
+                HoverRegistration::ApiDisabled,
+            ),
+            (
+                RegisterError::Ax(AXError::CannotComplete),
+                HoverRegistration::Failed,
+            ),
+            (
+                RegisterError::Ax(AXError::Failure),
+                HoverRegistration::Failed,
+            ),
+            (RegisterError::NullObserver, HoverRegistration::Failed),
+            (RegisterError::NoRunLoop, HoverRegistration::Failed),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.registration(), expected, "{error}");
+        }
+    }
 }

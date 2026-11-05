@@ -80,8 +80,8 @@ pub fn run() {
                 tracing::warn!(kind = %error.0, "log folder not made private");
             }
             app.manage(LastOtherApp::default());
-            move_old_app_data(app.handle());
-            let (settings, settings_path) = load_settings(app.handle());
+            let data_dir = moved_app_data_dir(app.handle());
+            let (settings, settings_path) = load_settings(data_dir.as_ref());
             app.manage(Mutex::new(settings));
             if let Some(path) = settings_path {
                 app.manage(SettingsPath(path));
@@ -103,8 +103,12 @@ pub fn run() {
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
             track_last_other_app(app.handle(), mtm);
-            if let Err(error) = start_launch_log(app.handle(), mtm) {
-                tracing::warn!(%error, "usage tracking not started; running without growth");
+            if let Some(data_dir) = &data_dir {
+                if let Err(error) = start_launch_log(app.handle(), mtm, data_dir) {
+                    tracing::warn!(%error, "usage tracking not started; running without growth");
+                }
+            } else {
+                tracing::warn!("usage tracking not started: the app data folder is unknown");
             }
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
@@ -182,8 +186,12 @@ fn on_second_launch(app: &AppHandle) {
     }
 }
 
-fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
-    let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
+fn start_launch_log(
+    app: &AppHandle,
+    mtm: macos::MainThreadMarker,
+    data_dir: &DataDir,
+) -> tauri::Result<()> {
+    let path = data_dir.0.join(LAUNCH_LOG_FILE);
     let log = usage::load_or_set_aside(&path, Timestamp::now());
     let entries = log.len();
     let first_run = log.baseline_at().is_none();
@@ -231,27 +239,31 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-fn move_old_app_data(app: &AppHandle) {
+/// The app data folder once the old folder's files are in it. Only
+/// `moved_app_data_dir` makes one, so nothing that reads app data can run
+/// before the move.
+struct DataDir(PathBuf);
+
+fn moved_app_data_dir(app: &AppHandle) -> Option<DataDir> {
     let new_dir = match app.path().app_data_dir() {
         Ok(dir) => dir,
         Err(error) => {
             tracing::warn!(%error, "app data folder unknown; old data not moved");
-            return;
+            return None;
         }
     };
     if let Some(old_dir) = usage::old_data_dir(&new_dir) {
         usage::move_old_data(&old_dir, &new_dir).log();
     }
+    Some(DataDir(new_dir))
 }
 
-fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
-    let path = match app.path().app_data_dir() {
-        Ok(dir) => dir.join(SETTINGS_FILE),
-        Err(error) => {
-            tracing::warn!(%error, "settings path unknown; using defaults, saving off");
-            return (Settings::default(), None);
-        }
+fn load_settings(data_dir: Option<&DataDir>) -> (Settings, Option<PathBuf>) {
+    let Some(DataDir(dir)) = data_dir else {
+        tracing::warn!("settings path unknown; using defaults, saving off");
+        return (Settings::default(), None);
     };
+    let path = dir.join(SETTINGS_FILE);
     let loaded = settings::load_file(&path);
     for problem in &loaded.problems {
         tracing::warn!(%problem, "stored setting not loaded");

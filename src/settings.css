@@ -17,7 +17,8 @@
   cursor: default;
 }
 
-/* The window is the scroll boundary: only the app list scrolls. */
+/* The window never scrolls: the app list does, and main does when the
+   window is clamped shorter than the form. */
 html,
 body {
   height: 100%;

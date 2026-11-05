@@ -3,8 +3,10 @@ import {
   NO_FEEDBACK,
   createSettingsSaver,
   enteredDays,
+  exclusionLimitMessage,
   exclusionRows,
   nextFeedback,
+  reannounced,
   thresholdMessage,
   toFastForward,
   type ExclusionRow,
@@ -39,6 +41,7 @@ const page = {
   intensity: byId("intensity", HTMLInputElement),
   intensityValue: byId("intensity-value", HTMLOutputElement),
   dockUnknown: byId("dock-unknown", HTMLParagraphElement),
+  excludedMessage: byId("excluded-message", HTMLParagraphElement),
   excludedApps: byId("excluded-apps", HTMLUListElement),
   speeds: Array.from(
     document.querySelectorAll<HTMLInputElement>('input[name="fast-forward"]'),
@@ -79,12 +82,17 @@ function show(view: SettingsView): void {
 
 function exclusionItem(
   row: ExclusionRow,
-  onChange: (excluded: boolean) => void,
+  onChange: (excluded: boolean, undo: () => void) => void,
 ): HTMLLIElement {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = row.excluded;
-  checkbox.addEventListener("change", () => onChange(checkbox.checked));
+  checkbox.addEventListener("change", () => {
+    const wanted = checkbox.checked;
+    onChange(wanted, () => {
+      checkbox.checked = !wanted;
+    });
+  });
   const name = document.createElement("span");
   name.className = "name";
   name.textContent = row.label;
@@ -107,22 +115,40 @@ function showIntensity(): void {
   page.intensity.setAttribute("aria-valuetext", percent);
 }
 
-/** `reannounce` empties the alert for a frame first, because setting the
- * same text again is not a change a screen reader announces. */
+/** Sets an alert's text. `again` empties it for a frame first, because
+ * setting the text it already shows is not a change a screen reader
+ * announces. */
+function setAlert(element: HTMLElement, text: string, again: boolean): void {
+  if (!again) {
+    element.textContent = text;
+    return;
+  }
+  element.textContent = "";
+  requestAnimationFrame(() => {
+    element.textContent = text;
+  });
+}
+
+interface Messages {
+  threshold: string;
+  exclusionLimit: string;
+}
+
 function showFeedback(
   feedback: Feedback,
-  message: string,
-  reannounce: boolean,
+  messages: Messages,
+  again: { threshold: boolean; exclusionLimit: boolean },
 ): void {
-  const text = feedback.thresholdError ? message : "";
-  if (reannounce) {
-    page.stagesMessage.textContent = "";
-    requestAnimationFrame(() => {
-      page.stagesMessage.textContent = text;
-    });
-  } else {
-    page.stagesMessage.textContent = text;
-  }
+  setAlert(
+    page.stagesMessage,
+    feedback.thresholdError ? messages.threshold : "",
+    again.threshold,
+  );
+  setAlert(
+    page.excludedMessage,
+    feedback.exclusionLimit ? messages.exclusionLimit : "",
+    again.exclusionLimit,
+  );
   for (const input of dayInputs) {
     if (feedback.thresholdError) {
       input.setAttribute("aria-invalid", "true");
@@ -162,9 +188,14 @@ async function start(): Promise<void> {
   page.intensity.disabled = false;
 
   const saver = createSettingsSaver(view.settings, saveSettings);
-  const message = thresholdMessage(view.limits);
+  const messages = {
+    threshold: thresholdMessage(view.limits),
+    exclusionLimit: exclusionLimitMessage(view.limits),
+  };
   let feedback = NO_FEEDBACK;
-  const commit = (change: SettingsChange): void => {
+  /** `undo` puts the control back when Rust refuses the value outright, as
+   * for an exclusion past the cap, which no retry can store. */
+  const commit = (change: SettingsChange, undo?: () => void): void => {
     saver
       .commit(change)
       .catch((error: unknown) => ({
@@ -175,13 +206,12 @@ async function start(): Promise<void> {
         if (!result.ok) {
           console.error("settings not saved", result.error);
         }
-        const before = feedback;
+        const again = reannounced(feedback, change, result);
         feedback = nextFeedback(feedback, change, result);
-        showFeedback(
-          feedback,
-          message,
-          before.thresholdError && feedback.thresholdError && change.field === "thresholds",
-        );
+        showFeedback(feedback, messages, again);
+        if (!result.ok && result.error.kind === "invalid_settings") {
+          undo?.();
+        }
       });
   };
 
@@ -198,8 +228,8 @@ async function start(): Promise<void> {
   page.dockUnknown.hidden = view.dockApps !== null;
   page.excludedApps.replaceChildren(
     ...exclusionRows(view.dockApps, view.settings.excluded).map((row) =>
-      exclusionItem(row, (excluded) =>
-        commit({ field: "excluded", bundleId: row.bundleId, excluded }),
+      exclusionItem(row, (excluded, undo) =>
+        commit({ field: "excluded", bundleId: row.bundleId, excluded }, undo),
       ),
     ),
   );

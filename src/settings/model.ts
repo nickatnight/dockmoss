@@ -65,15 +65,24 @@ export function createSettingsSaver(
 
 export interface Feedback {
   thresholdError: boolean;
+  exclusionLimit: boolean;
   unsaved: readonly string[];
 }
 
-export const NO_FEEDBACK: Feedback = { thresholdError: false, unsaved: [] };
+export const NO_FEEDBACK: Feedback = {
+  thresholdError: false,
+  exclusionLimit: false,
+  unsaved: [],
+};
 
 function changedControl(change: SettingsChange): string {
   return change.field === "excluded"
     ? `excluded:${change.bundleId}`
     : change.field;
+}
+
+function rejected(result: SaveSettingsResult): boolean {
+  return !result.ok && result.error.kind === "invalid_settings";
 }
 
 export function nextFeedback(
@@ -86,15 +95,35 @@ export function nextFeedback(
     return {
       thresholdError:
         change.field === "thresholds" ? false : feedback.thresholdError,
+      exclusionLimit:
+        change.field === "excluded" ? false : feedback.exclusionLimit,
       unsaved: feedback.unsaved.filter((other) => other !== control),
     };
   }
-  if (result.error.kind === "invalid_settings" && change.field === "thresholds") {
+  if (rejected(result) && change.field === "thresholds") {
     return { ...feedback, thresholdError: true };
+  }
+  if (rejected(result) && change.field === "excluded") {
+    return { ...feedback, exclusionLimit: true };
   }
   return {
     ...feedback,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
+  };
+}
+
+/** Which messages to announce again: setting an alert to the text it already
+ * shows is not a change a screen reader announces. */
+export function reannounced(
+  before: Feedback,
+  change: SettingsChange,
+  result: SaveSettingsResult,
+): { threshold: boolean; exclusionLimit: boolean } {
+  return {
+    threshold:
+      before.thresholdError && change.field === "thresholds" && rejected(result),
+    exclusionLimit:
+      before.exclusionLimit && change.field === "excluded" && rejected(result),
   };
 }
 
@@ -136,6 +165,10 @@ export function exclusionRows(
 
 export function enteredDays(valueAsNumber: number): number | null {
   return Number.isNaN(valueAsNumber) ? null : valueAsNumber;
+}
+
+export function exclusionLimitMessage(limits: SettingsLimits): string {
+  return `At most ${limits.maxExclusions} apps can be excluded.`;
 }
 
 export function thresholdMessage(limits: SettingsLimits): string {

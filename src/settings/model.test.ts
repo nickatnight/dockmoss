@@ -11,6 +11,8 @@ import type {
 import {
   NO_FEEDBACK,
   createSettingsSaver,
+  exclusionLimitMessage,
+  reannounced,
   enteredDays,
   exclusionRows,
   nextFeedback,
@@ -335,7 +337,7 @@ describe("nextFeedback", () => {
   it("shows the threshold message for rejected thresholds, and no save notice", () => {
     const feedback = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
 
-    expect(feedback).toEqual({ thresholdError: true, unsaved: [] });
+    expect(feedback).toEqual({ thresholdError: true, exclusionLimit: false, unsaved: [] });
   });
 
   it("clears the threshold message on a valid threshold save", () => {
@@ -356,7 +358,11 @@ describe("nextFeedback", () => {
   ])("shows the save notice after %s, leaving the threshold message alone", (_kind, result) => {
     const feedback = nextFeedback(NO_FEEDBACK, fuzz1, result);
 
-    expect(feedback).toEqual({ thresholdError: false, unsaved: ["thresholds"] });
+    expect(feedback).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["thresholds"],
+    });
   });
 
   it("keeps the save notice until the control that failed saves, not another one", () => {
@@ -368,6 +374,49 @@ describe("nextFeedback", () => {
     expect(retried.unsaved).toEqual([]);
   });
 
+  it.each([
+    ["settings_not_saved", notSaved],
+    ["ipc_failed", ipcFailed],
+  ])("keeps a threshold message already shown when a save fails with %s", (_kind, result) => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+    expect(nextFeedback(shown, intensity, result)).toEqual({
+      thresholdError: true,
+      exclusionLimit: false,
+      unsaved: ["intensityPercent"],
+    });
+  });
+
+  it("keeps another control's save notice when thresholds are rejected", () => {
+    const failed = nextFeedback(NO_FEEDBACK, intensity, notSaved);
+
+    expect(nextFeedback(failed, fuzz1, invalid)).toEqual({
+      thresholdError: true,
+      exclusionLimit: false,
+      unsaved: ["intensityPercent"],
+    });
+  });
+
+  it("states the exclusion limit, not the threshold message or 'try again', when an exclusion is refused", () => {
+    expect(nextFeedback(NO_FEEDBACK, exclude("com.a"), invalid)).toEqual({
+      thresholdError: false,
+      exclusionLimit: true,
+      unsaved: [],
+    });
+  });
+
+  it("clears the exclusion limit once an exclusion saves", () => {
+    const refused = nextFeedback(NO_FEEDBACK, exclude("com.a"), invalid);
+    const unexcluded = {
+      field: "excluded",
+      bundleId: id("com.b"),
+      excluded: false,
+    } as const;
+
+    expect(nextFeedback(refused, unexcluded, ok).exclusionLimit).toBe(false);
+    expect(nextFeedback(refused, intensity, ok).exclusionLimit).toBe(true);
+  });
+
   it("tracks each excluded app on its own", () => {
     const failed = nextFeedback(NO_FEEDBACK, exclude("com.a"), notSaved);
     const otherSaved = nextFeedback(failed, exclude("com.b"), ok);
@@ -375,5 +424,51 @@ describe("nextFeedback", () => {
 
     expect(otherSaved.unsaved).toEqual(["excluded:com.a"]);
     expect(retried.unsaved).toEqual([]);
+  });
+});
+
+describe("reannounced", () => {
+  const invalid: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "invalid_settings", message: "bad" },
+  };
+  const ok: SaveSettingsResult = { ok: true, settings: saved };
+  const fuzz1 = {
+    field: "thresholds",
+    thresholds: { fuzz: 1, patchy: 10, overgrown: 30 },
+  } as const;
+  const exclude = {
+    field: "excluded",
+    bundleId: id("com.a"),
+    excluded: true,
+  } as const;
+  const intensity = { field: "intensityPercent", percent: 40 } as const;
+  const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+  it("re-announces a repeated threshold rejection", () => {
+    expect(reannounced(shown, fuzz1, invalid).threshold).toBe(true);
+  });
+
+  it("does not re-announce a first rejection, which is announced as it appears", () => {
+    expect(reannounced(NO_FEEDBACK, fuzz1, invalid).threshold).toBe(false);
+  });
+
+  it("does not re-announce the threshold message when another field saves", () => {
+    expect(reannounced(shown, intensity, ok).threshold).toBe(false);
+  });
+
+  it("re-announces a repeated exclusion refusal", () => {
+    const refused = nextFeedback(NO_FEEDBACK, exclude, invalid);
+
+    expect(reannounced(refused, exclude, invalid).exclusionLimit).toBe(true);
+    expect(reannounced(NO_FEEDBACK, exclude, invalid).exclusionLimit).toBe(false);
+  });
+});
+
+describe("exclusionLimitMessage", () => {
+  it("states the cap Rust sent", () => {
+    expect(
+      exclusionLimitMessage({ minFuzzDays: 2, maxOvergrownDays: 3650, maxExclusions: 256 }),
+    ).toBe("At most 256 apps can be excluded.");
   });
 });

@@ -284,11 +284,11 @@ fn what_the_webview_sends_back_parses_to_the_same_settings() {
 }
 
 #[test]
-fn an_empty_object_loads_defaults_silently() {
-    let loaded = super::load(&Map::new());
+fn an_empty_object_is_a_file_without_version_1() {
+    let loaded = decode_file(Some(b"{}"));
 
     assert_eq!(loaded.settings, Settings::default());
-    assert_eq!(loaded.problems, []);
+    assert_eq!(loaded.problems, [LoadProblem::UnknownVersion]);
 }
 
 #[test]

@@ -311,9 +311,6 @@ pub fn decode_file(bytes: Option<&[u8]>) -> Loaded {
 }
 
 pub fn load(stored: &Map<String, Value>) -> Loaded {
-    if stored.is_empty() {
-        return Loaded::default();
-    }
     if stored.get(VERSION_KEY).and_then(Value::as_u64) != Some(VERSION) {
         return Loaded {
             settings: Settings::default(),

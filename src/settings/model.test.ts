@@ -741,19 +741,31 @@ describe("createLoginToggle", () => {
     expect(await second).toEqual({ result: notChanged, shown: true });
   });
 
-  it("keeps running changes after a change throws", async () => {
+  it("gives a change that throws an ipc_failed result, and the box what macOS kept", async () => {
+    const gone = new Error("bridge gone");
+    const toggle = createLoginToggle(() => Promise.reject(gone));
+
+    expect(await toggle(true)).toEqual({
+      result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
+      shown: false,
+    });
+  });
+
+  it("keeps running changes after a change throws, and an overtaken throw leaves the box alone", async () => {
+    const gone = new Error("bridge gone");
     const wanted: boolean[] = [];
     const toggle = createLoginToggle((change) => {
       wanted.push(change);
-      return wanted.length === 1
-        ? Promise.reject(new Error("bridge gone"))
-        : Promise.resolve(ok(change));
+      return wanted.length === 1 ? Promise.reject(gone) : Promise.resolve(ok(change));
     });
 
     const first = toggle(true);
     const second = toggle(false);
 
-    await expect(first).rejects.toThrow("bridge gone");
+    expect(await first).toEqual({
+      result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
+      shown: null,
+    });
     expect(await second).toEqual({ result: ok(false), shown: false });
     expect(wanted).toEqual([true, false]);
   });

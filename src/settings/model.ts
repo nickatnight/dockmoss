@@ -249,7 +249,8 @@ export interface LoginChangeDone {
 }
 
 /** Runs launch at login changes one at a time, in order. Only the latest
- * change's result sets the box; every result still reports. */
+ * change's result sets the box; every result still reports. A `set` that
+ * throws gives an `ipc_failed` result. */
 export function createLoginToggle(
   set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
 ): (wanted: boolean) => Promise<LoginChangeDone> {
@@ -259,7 +260,12 @@ export function createLoginToggle(
     latest += 1;
     const thisChange = latest;
     const done = previous.then(async () => {
-      const result = await set(wanted);
+      const result = await set(wanted).catch(
+        (cause: unknown): LaunchAtLoginResult => ({
+          ok: false,
+          error: { kind: "ipc_failed", cause },
+        }),
+      );
       return {
         result,
         shown: thisChange === latest ? launchAtLoginShown(wanted, result) : null,

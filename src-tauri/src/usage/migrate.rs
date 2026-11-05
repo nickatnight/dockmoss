@@ -91,7 +91,10 @@ pub struct MoveReport {
 impl MoveReport {
     /// The file is still in the old folder and a later start may move it, so
     /// nothing may write a new one in its place this session: the new one
-    /// would be kept, and the old one never read again.
+    /// would be kept, and the old one never read again. Only the launch log
+    /// and the settings are asked about. A `.corrupt` or `.dropped` copy left
+    /// behind is not guarded on purpose: a newer copy may be written in the
+    /// new folder, and the old one then stays in the old folder.
     fn left_behind(&self, name: &str) -> bool {
         self.failed.contains(&name)
     }

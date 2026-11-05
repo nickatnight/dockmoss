@@ -187,9 +187,14 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     let log = usage::load_or_set_aside(&path, Timestamp::now());
     let entries = log.len();
     let first_run = log.baseline_at().is_none();
-    let applied = Settings::default().applied(fast_forward_override());
-    let fast_forward = applied.fast_forward;
-    let inbox = launch_log_writer::spawn(path.clone(), log, applied)?;
+    let saved = app
+        .state::<Mutex<Settings>>()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let fast_forward_override = fast_forward_override();
+    let fast_forward = saved.applied(fast_forward_override).fast_forward;
+    let inbox = launch_log_writer::spawn(path.clone(), log, &saved, fast_forward_override)?;
     let own_bundle_id = app.config().identifier.clone();
     let now = Timestamp::now();
     let mut running = 0_usize;
@@ -323,6 +328,7 @@ mod launch_log_writer {
     use tauri::ipc::Channel;
 
     use crate::bundle_id::BundleId;
+    use crate::growth::FastForward;
     use crate::macos;
     use crate::settings::Settings;
     use crate::usage::{
@@ -339,6 +345,8 @@ mod launch_log_writer {
         DockApps(Vec<DockApp>),
         ListDockApps(Sender<DistinctDockApps>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
+        /// Settings just saved, to apply from now on.
+        Settings(Settings),
         Flush(Sender<()>),
     }
 
@@ -353,7 +361,8 @@ mod launch_log_writer {
     pub fn spawn(
         path: PathBuf,
         log: LaunchLog,
-        settings: Settings,
+        saved: &Settings,
+        fast_forward_override: Option<FastForward>,
     ) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
         let writer = Writer {
@@ -361,7 +370,8 @@ mod launch_log_writer {
             state: UsageState::new(log),
             schedule: SaveSchedule::default(),
             seed_read: None,
-            settings,
+            settings: saved.applied(fast_forward_override),
+            fast_forward_override,
             watcher: None,
             last_sent: None,
             next_recompute: Instant::now(),
@@ -379,6 +389,7 @@ mod launch_log_writer {
         seed_read: Option<JoinHandle<Readings>>,
         /// The settings growth applies, fast-forward override included.
         settings: Settings,
+        fast_forward_override: Option<FastForward>,
         watcher: Option<Channel<Vec<AppGrowth>>>,
         last_sent: Option<Vec<AppGrowth>>,
         next_recompute: Instant,
@@ -444,6 +455,14 @@ mod launch_log_writer {
                     self.watcher = Some(channel);
                     self.last_sent = None;
                     tracing::debug!("growth watcher subscribed");
+                    self.recompute();
+                }
+                WriterMessage::Settings(saved) => {
+                    self.settings = saved.applied(self.fast_forward_override);
+                    tracing::debug!(
+                        fast_forward = self.settings.fast_forward.factor(),
+                        "settings applied to growth"
+                    );
                     self.recompute();
                 }
                 WriterMessage::Flush(ack) => {

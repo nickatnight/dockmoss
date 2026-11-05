@@ -651,6 +651,7 @@ describe("launchAtLoginShown", () => {
   it.each([
     ["turned on", true, { ok: true, enabled: true }, true],
     ["turned off", false, { ok: true, enabled: false }, false],
+    ["on, but macOS reports off", true, { ok: true, enabled: false }, false],
     [
       "on refused",
       true,

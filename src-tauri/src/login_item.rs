@@ -1,3 +1,5 @@
+use std::path::Path;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginItemStatus {
     NotRegistered,
@@ -25,6 +27,14 @@ pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<bool, NotChanged>
     } else {
         Err(NotChanged)
     }
+}
+
+/// `tauri dev` runs a bare binary, which must never become a login item:
+/// only a path ending in `.app` is an app bundle.
+pub fn is_app_bundle(bundle_path: &Path) -> bool {
+    bundle_path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
 }
 
 #[cfg(test)]

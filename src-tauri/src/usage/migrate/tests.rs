@@ -442,3 +442,88 @@ fn the_old_folder_is_the_sibling_named_by_the_old_identifier() {
         "a new folder with the old name has nothing to move from"
     );
 }
+
+#[test]
+fn a_new_folder_that_is_a_link_gets_nothing_and_the_old_data_stays() {
+    let folders = folders();
+    write(&folders.old, "launch_log.json", "log");
+    let elsewhere = folders.old.parent().expect("root").join("elsewhere");
+    fs::create_dir(&elsewhere).expect("link target");
+    symlink(&elsewhere, &folders.new).expect("symlink");
+
+    let report = move_old_data(&folders.old, &folders.new);
+
+    assert_eq!(
+        report,
+        MoveReport {
+            failed: vec!["launch_log.json"],
+            old_folder: OldFolder::Left,
+            ..MoveReport::default()
+        }
+    );
+    assert!(report.left_behind("launch_log.json"));
+    assert_eq!(read(&folders.old, "launch_log.json"), "log");
+    assert!(!elsewhere.join("launch_log.json").exists());
+}
+
+#[test]
+fn only_a_start_that_did_or_found_something_reports_at_info() {
+    let cases = [
+        ("no old folder", MoveReport::default(), false),
+        (
+            "a second start after a .tmp was left",
+            MoveReport {
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            false,
+        ),
+        (
+            "the empty old folder removed",
+            MoveReport {
+                old_folder: OldFolder::Removed,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+        (
+            "moved",
+            MoveReport {
+                moved: 1,
+                old_folder: OldFolder::Removed,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+        (
+            "kept",
+            MoveReport {
+                kept: 1,
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+        (
+            "failed",
+            MoveReport {
+                failed: vec!["launch_log.json"],
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+        (
+            "skipped",
+            MoveReport {
+                skipped: 1,
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+    ];
+    for (case, report, expected) in cases {
+        assert_eq!(report.worth_reporting(), expected, "{case}");
+    }
+}

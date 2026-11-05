@@ -755,13 +755,28 @@ fn intensity_scales_overgrowth_and_keeps_the_stage() {
 
 #[test]
 fn intensity_100_sends_exactly_the_unscaled_overgrowth() {
-    let unscaled = frame(&three_apps(), &Settings::default());
+    let safari = id("com.apple.Safari");
+    let unscaled = crate::growth::growth(
+        now(),
+        Some(ago(days(6))),
+        crate::growth::jitter(&safari),
+        &Thresholds::default(),
+        FastForward::X1,
+    )
+    .overgrowth()
+    .get();
     let settings = Settings {
         intensity: intensity(100),
         ..Settings::default()
     };
 
-    assert_eq!(frame(&three_apps(), &settings), unscaled);
+    let got = frame(&three_apps(), &settings);
+
+    assert!(
+        unscaled > 0.0 && unscaled < 1.0,
+        "control: Safari is mid-curve"
+    );
+    assert_eq!(got[1].1.to_bits(), unscaled.to_bits());
 }
 
 #[test]

@@ -91,26 +91,25 @@ impl MoveReport {
         self.failed.contains(&name)
     }
 
+    /// `info` when this start moved, found or removed something; a start
+    /// with nothing left to do logs only at `debug`.
+    pub fn worth_reporting(&self) -> bool {
+        self.moved + self.kept + self.skipped + self.failed.len() > 0
+            || self.old_folder == OldFolder::Removed
+    }
+
     pub fn log(&self) {
-        let failed = self.failed.len();
-        let Self {
-            moved,
-            kept,
-            skipped,
-            old_folder,
-            ..
-        } = *self;
-        if moved + kept + skipped + failed > 0 || old_folder == OldFolder::Removed {
+        if self.worth_reporting() {
             tracing::info!(
-                moved,
-                kept,
-                skipped,
-                failed,
-                ?old_folder,
+                moved = self.moved,
+                kept = self.kept,
+                skipped = self.skipped,
+                failed = self.failed.len(),
+                old_folder = ?self.old_folder,
                 "data from the old app folder moved"
             );
         } else {
-            tracing::debug!(?old_folder, "no data in the old app folder to move");
+            tracing::debug!(old_folder = ?self.old_folder, "no data in the old app folder to move");
         }
     }
 }

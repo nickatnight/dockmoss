@@ -1,4 +1,6 @@
-use super::{LoginItemStatus, NotChanged, outcome};
+use std::path::Path;
+
+use super::{LoginItemStatus, NotChanged, is_app_bundle, outcome};
 
 #[test]
 fn only_an_enabled_item_opens_at_login() {
@@ -53,8 +55,29 @@ fn a_change_succeeds_only_when_macos_ends_in_the_state_asked_for() {
             LoginItemStatus::Enabled,
             Err(NotChanged),
         ),
+        (
+            "off, waiting for approval",
+            false,
+            LoginItemStatus::RequiresApproval,
+            Ok(false),
+        ),
     ];
     for (case, wanted, after, expected) in cases {
         assert_eq!(outcome(wanted, after), expected, "{case}");
+    }
+}
+
+#[test]
+fn only_a_path_ending_in_app_is_an_app_bundle() {
+    let cases = [
+        ("/Applications/DockMoss.app", true),
+        ("/Applications/DockMoss.APP", true),
+        ("/Users/someone/repo/src-tauri/target/debug", false),
+        ("/Applications/DockMoss.app/Contents/MacOS", false),
+        ("/Users/someone/notes.app.txt", false),
+        ("", false),
+    ];
+    for (path, expected) in cases {
+        assert_eq!(is_app_bundle(Path::new(path)), expected, "{path}");
     }
 }

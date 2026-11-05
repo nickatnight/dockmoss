@@ -1,7 +1,7 @@
 use objc2_foundation::{NSBundle, NSError};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
-use crate::login_item::LoginItemStatus;
+use crate::login_item::{LoginItemStatus, is_app_bundle};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoginItemError {
@@ -53,7 +53,8 @@ pub fn status() -> LoginItemStatus {
     reason = "the ServiceManagement bindings mark every SMAppService method unsafe"
 )]
 pub fn set(open_at_login: bool) -> Result<(), LoginItemError> {
-    if !in_app_bundle() {
+    let bundle_path = NSBundle::mainBundle().bundlePath().to_string();
+    if !is_app_bundle(std::path::Path::new(&bundle_path)) {
         return Err(LoginItemError::NotAnAppBundle);
     }
     let service = {
@@ -70,11 +71,4 @@ pub fn set(open_at_login: bool) -> Result<(), LoginItemError> {
         unsafe { service.unregisterAndReturnError() }
     };
     result.map_err(|error| LoginItemError::Refused(RedactedNsError::new(&error)))
-}
-
-fn in_app_bundle() -> bool {
-    let path = NSBundle::mainBundle().bundlePath().to_string();
-    std::path::Path::new(&path)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
 }

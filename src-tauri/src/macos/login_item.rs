@@ -1,4 +1,4 @@
-use objc2_foundation::NSBundle;
+use objc2_foundation::{NSBundle, NSError};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 use crate::login_item::LoginItemStatus;
@@ -7,8 +7,26 @@ use crate::login_item::LoginItemStatus;
 pub enum LoginItemError {
     #[error("this copy of DockMoss is not an app bundle")]
     NotAnAppBundle,
-    #[error("ServiceManagement refused the change ({domain} error {code})")]
-    Refused { domain: String, code: isize },
+    #[error("ServiceManagement refused the change ({0})")]
+    Refused(RedactedNsError),
+}
+
+/// An `NSError` cut down to its domain and code. Its description can name a
+/// path, which holds the user's name, so it is never kept or logged.
+#[derive(Debug, thiserror::Error)]
+#[error("{domain} error {code}")]
+pub struct RedactedNsError {
+    domain: String,
+    code: isize,
+}
+
+impl RedactedNsError {
+    fn new(error: &NSError) -> Self {
+        Self {
+            domain: error.domain().to_string(),
+            code: error.code(),
+        }
+    }
 }
 
 #[expect(
@@ -48,10 +66,7 @@ pub fn set(open_at_login: bool) -> Result<(), LoginItemError> {
         // SAFETY: as above.
         unsafe { service.unregisterAndReturnError() }
     };
-    result.map_err(|error| LoginItemError::Refused {
-        domain: error.domain().to_string(),
-        code: error.code(),
-    })
+    result.map_err(|error| LoginItemError::Refused(RedactedNsError::new(&error)))
 }
 
 fn in_app_bundle() -> bool {

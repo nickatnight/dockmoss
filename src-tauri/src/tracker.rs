@@ -305,29 +305,55 @@ impl Activity {
 
     /// Waits, through `wait_until`, for the next Dock read, and returns the
     /// instant it became due: `read_due`, or sooner if the pointer rests in
-    /// the band and moves. While it rests there, the pointer alone is checked
-    /// every `REST_POINTER_CHECK_INTERVAL`, with no Dock read.
+    /// the band and moves, or if the Dock reports a hover change during a
+    /// wait longer than a `Fast` interval. While the pointer rests in the
+    /// band, it alone is checked every `REST_POINTER_CHECK_INTERVAL`, with no
+    /// Dock read.
+    ///
+    /// The Dock posts a hover change when the pointer enters, crosses or
+    /// leaves an item, about 5 a second during a sweep and never per
+    /// animation frame. So it only starts reading; `Fast` reads still follow
+    /// the motion. Between `Fast` reads it changes nothing, since the next
+    /// read is at most one interval away.
     pub fn wait_for_read(
         &self,
         read_due: Instant,
         now: Instant,
-        mut wait_until: impl FnMut(Instant),
+        mut wait_until: impl FnMut(Instant) -> Woken,
         mut cursor: impl FnMut() -> Option<ScreenPoint>,
     ) -> Instant {
+        let hover_cuts = read_due.saturating_duration_since(now) > PollRate::Fast.interval();
+        let mut wait = |until: Instant| loop {
+            match wait_until(until) {
+                Woken::Due => return None,
+                Woken::DockHover(at) if hover_cuts => return Some(at),
+                Woken::DockHover(_) => {}
+            }
+        };
         let mut checked = now;
         while self.resting
             && let Some(check) = checked.checked_add(REST_POINTER_CHECK_INTERVAL)
             && check < read_due
         {
-            wait_until(check);
+            if let Some(hover) = wait(check) {
+                return hover;
+            }
             if cursor() != self.last_cursor {
                 return check;
             }
             checked = check;
         }
-        wait_until(read_due);
-        read_due
+        wait(read_due).unwrap_or(read_due)
     }
+}
+
+/// Why a wait for the next Dock read ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Woken {
+    /// The instant waited for came.
+    Due,
+    /// The Dock reported, at this instant, that its hovered item changed.
+    DockHover(Instant),
 }
 
 /// When the tick after one due at `previous` is due: one interval later, so
@@ -350,7 +376,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        Activity, PollRate, Tick, TickLog, Tracker, Visibility, awaits_reveal, changed,
+        Activity, PollRate, Tick, TickLog, Tracker, Visibility, Woken, awaits_reveal, changed,
         dock_bounds, next_deadline, poll_rate,
     };
     use crate::bundle_id::BundleId;
@@ -1214,16 +1240,38 @@ mod tests {
         read_due_ms: u64,
         pointer: &[Option<ScreenPoint>],
     ) -> (u64, Vec<u64>) {
+        wait_for_read_with_hovers(activity, start, now_ms, read_due_ms, pointer, &[])
+    }
+
+    /// Runs `wait_for_read` on a simulated clock. `hovers_ms` are the
+    /// instants the Dock reports a hover change; a wait whose deadline is at
+    /// or after the next one ends there.
+    fn wait_for_read_with_hovers(
+        activity: &Activity,
+        start: Instant,
+        now_ms: u64,
+        read_due_ms: u64,
+        pointer: &[Option<ScreenPoint>],
+        hovers_ms: &[u64],
+    ) -> (u64, Vec<u64>) {
         let at = |millis: u64| start.checked_add(ms(millis)).expect("in range");
         let since_start = |instant: Instant| {
             u64::try_from(instant.duration_since(start).as_millis()).expect("in range")
         };
         let clock = std::cell::Cell::new(at(now_ms));
+        let mut hovers = hovers_ms.iter().map(|&hover| at(hover)).peekable();
         let mut checks = Vec::new();
         let read = activity.wait_for_read(
             at(read_due_ms),
             at(now_ms),
-            |until| clock.set(until),
+            |until| {
+                if let Some(hover) = hovers.next_if(|&hover| hover <= until) {
+                    clock.set(hover.max(clock.get()));
+                    return Woken::DockHover(clock.get());
+                }
+                clock.set(until);
+                Woken::Due
+            },
             || {
                 let pointer = pointer
                     .get(checks.len())
@@ -1372,6 +1420,96 @@ mod tests {
 
         assert!(read - 300 <= 100, "read {read} ms");
         assert_eq!(rate, PollRate::Fast);
+    }
+
+    struct HoverCase {
+        case: &'static str,
+        proximity_rate: PollRate,
+        cursor: Option<ScreenPoint>,
+        read_due_ms: u64,
+        hovers_ms: Vec<u64>,
+        expected_read_ms: u64,
+    }
+
+    #[test]
+    fn a_dock_hover_change_makes_a_slow_read_due_at_once_and_leaves_fast_reads_alone() {
+        const NOW_MS: u64 = 300;
+        let start = Instant::now();
+        let far = Some(point(720.0, 300.0));
+        let in_band = Some(point(720.0, 850.0));
+        let cases = [
+            HoverCase {
+                case: "slow, pointer away from the Dock: read at the hover",
+                proximity_rate: PollRate::Slow,
+                cursor: far,
+                read_due_ms: 800,
+                hovers_ms: vec![420],
+                expected_read_ms: 420,
+            },
+            HoverCase {
+                case: "slow, pointer resting in the band: read at the hover, before the next check",
+                proximity_rate: PollRate::Fast,
+                cursor: in_band,
+                read_due_ms: 800,
+                hovers_ms: vec![350],
+                expected_read_ms: 350,
+            },
+            HoverCase {
+                case: "slow: the first of a pair of hovers makes the read due",
+                proximity_rate: PollRate::Slow,
+                cursor: far,
+                read_due_ms: 800,
+                hovers_ms: vec![420, 422],
+                expected_read_ms: 420,
+            },
+            HoverCase {
+                case: "slow, no hover: the Slow read",
+                proximity_rate: PollRate::Slow,
+                cursor: far,
+                read_due_ms: 800,
+                hovers_ms: vec![],
+                expected_read_ms: 800,
+            },
+            HoverCase {
+                case: "fast: a hover between reads waits for the Fast read",
+                proximity_rate: PollRate::Slow,
+                cursor: far,
+                read_due_ms: 316,
+                hovers_ms: vec![305, 306],
+                expected_read_ms: 316,
+            },
+        ];
+
+        for HoverCase {
+            case,
+            proximity_rate,
+            cursor,
+            read_due_ms,
+            hovers_ms,
+            expected_read_ms,
+        } in cases
+        {
+            let mut activity = Activity::default();
+            activity.rate(proximity_rate, false, cursor, false, start);
+            activity.rate(
+                proximity_rate,
+                false,
+                cursor,
+                false,
+                start.checked_add(ms(NOW_MS)).expect("in range"),
+            );
+
+            let (read, _) = wait_for_read_with_hovers(
+                &activity,
+                start,
+                NOW_MS,
+                read_due_ms,
+                &[cursor],
+                &hovers_ms,
+            );
+
+            assert_eq!(read, expected_read_ms, "{case}");
+        }
     }
 
     #[test]

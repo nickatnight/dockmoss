@@ -172,14 +172,17 @@ fn keep_child(read: Result<RawDockChild, DockError>) -> Result<Option<RawDockChi
 }
 
 fn find_dock() -> Result<CFRetained<AXUIElement>, DockError> {
-    let pid =
-        NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
-            .iter()
-            .find(|app| is_system_dock(app))
-            .map(|dock| dock.processIdentifier())
-            .ok_or(DockError::NotRunning)?;
+    let pid = system_dock_pid().ok_or(DockError::NotRunning)?;
     tracing::debug!(pid, "dock process found");
     Ok(application(pid))
+}
+
+/// Run inside an autorelease pool.
+pub(super) fn system_dock_pid() -> Option<i32> {
+    NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
+        .iter()
+        .find(|app| is_system_dock(app))
+        .map(|dock| dock.processIdentifier())
 }
 
 /// The running system Dock, not another process that claims its bundle ID.
@@ -192,7 +195,7 @@ fn is_system_dock(app: &NSRunningApplication) -> bool {
 }
 
 #[expect(unsafe_code, reason = "AXUIElementCreateApplication is a C function")]
-fn application(pid: i32) -> CFRetained<AXUIElement> {
+pub(super) fn application(pid: i32) -> CFRetained<AXUIElement> {
     // SAFETY: AXUIElementCreateApplication accepts any pid and only builds a
     // new element for it (no IPC happens until an attribute is read). The
     // binding wraps the +1 result in `CFRetained`; it returns null only when

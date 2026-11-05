@@ -672,6 +672,25 @@ fn refresh_tray_on_main_thread(app: &AppHandle) {
     }
 }
 
+/// Passes each Dock hover change to the tracker, which reads at once when it
+/// was waiting longer than a `Fast` interval.
+fn spawn_dock_observer(
+    app: AppHandle,
+    tracker: mpsc::Sender<TrackerMessage>,
+) -> std::io::Result<()> {
+    macos::dock_observer::spawn(
+        move || {
+            app.try_state::<TrustState>()
+                .is_some_and(|trust| trust.current().is_trusted())
+        },
+        move || {
+            if tracker.send(TrackerMessage::DockHoverChanged).is_err() {
+                tracing::debug!("dock hover change not passed on: the dock tracker stopped");
+            }
+        },
+    )
+}
+
 mod dock_tracker {
     use std::sync::mpsc::{Receiver, RecvTimeoutError};
     use std::time::{Duration, Instant};
@@ -683,7 +702,7 @@ mod dock_tracker {
     use crate::dock::{self, DockItem};
     use crate::geometry::Display;
     use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
-    use crate::tracker::{self, Activity, PollRate, Tick, TickLog, Tracker, Visibility};
+    use crate::tracker::{self, Activity, PollRate, Tick, TickLog, Tracker, Visibility, Woken};
     use crate::trust::TrustState;
     use crate::usage::DockApp;
     use crate::{OVERLAY_LABEL, macos, primary_display};
@@ -694,6 +713,11 @@ mod dock_tracker {
         display: Display,
         overlay: Visibility,
     ) -> std::io::Result<()> {
+        if let Some(inbox) = app.try_state::<TrackerInbox>() {
+            super::spawn_dock_observer(app.clone(), inbox.0.clone())?;
+        } else {
+            tracing::warn!("no tracker inbox; dock hover changes not observed");
+        }
         std::thread::Builder::new()
             .name("dock-tracker".into())
             .spawn(move || track_dock(&app, &messages, display, overlay))?;
@@ -752,22 +776,23 @@ mod dock_tracker {
                         &mut tracker,
                         &mut watcher,
                         &mut screen_changed,
-                    );
+                    )
                 },
                 macos::cursor::location,
             );
         }
     }
 
-    /// Returns only at `deadline`, so a burst of screen notifications (one per
-    /// frame while the Dock slides in) adds no Dock reads.
+    /// Returns at `deadline`, so a burst of screen notifications (one per
+    /// frame while the Dock slides in) adds no Dock reads, or at once on a
+    /// Dock hover change, which `Activity::wait_for_read` may act on.
     fn drain_inbox_until(
         deadline: Instant,
         messages: &Receiver<TrackerMessage>,
         tracker: &mut Tracker,
         watcher: &mut Option<Channel<Vec<DockItem>>>,
         screen_changed: &mut bool,
-    ) {
+    ) -> Woken {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match messages.recv_timeout(left) {
@@ -777,10 +802,11 @@ mod dock_tracker {
                 }
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
-                Err(RecvTimeoutError::Timeout) => return,
+                Ok(TrackerMessage::DockHoverChanged) => return Woken::DockHover(Instant::now()),
+                Err(RecvTimeoutError::Timeout) => return Woken::Due,
                 Err(RecvTimeoutError::Disconnected) => {
                     std::thread::sleep(left);
-                    return;
+                    return Woken::Due;
                 }
             }
         }
@@ -921,7 +947,7 @@ mod dock_tracker {
         use crate::commands::TrackerMessage;
         use crate::dock::RawDockChild;
         use crate::geometry::{Display, ScreenRect};
-        use crate::tracker::{Tracker, Visibility};
+        use crate::tracker::{Tracker, Visibility, Woken};
 
         const PRIMARY_2X: Display = Display {
             physical_x: 0,
@@ -974,6 +1000,37 @@ mod dock_tracker {
             );
             assert!(screen_changed);
             assert!(messages.try_recv().is_err(), "every message was taken");
+        }
+
+        #[test]
+        fn a_dock_hover_change_ends_the_wait_at_once_after_taking_earlier_messages() {
+            let (inbox, messages) = mpsc::channel();
+            inbox
+                .send(TrackerMessage::ScreenParametersChanged)
+                .expect("the receiver is alive");
+            inbox
+                .send(TrackerMessage::DockHoverChanged)
+                .expect("the receiver is alive");
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            let mut watcher = None;
+            let mut screen_changed = false;
+
+            let started = Instant::now();
+            let woken = drain_inbox_until(
+                started + Duration::from_secs(5),
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+            );
+
+            assert!(matches!(woken, Woken::DockHover(at) if at >= started));
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "returned after {:?}",
+                started.elapsed()
+            );
+            assert!(screen_changed);
         }
 
         #[test]

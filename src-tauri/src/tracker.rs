@@ -310,11 +310,12 @@ impl Activity {
         mut wait_until: impl FnMut(Instant) -> Woken,
         mut cursor: impl FnMut() -> Option<ScreenPoint>,
     ) -> Instant {
-        let hover_cuts = read_due.saturating_duration_since(now) > PollRate::Fast.interval();
+        let longer_than_a_fast_interval =
+            read_due.saturating_duration_since(now) > PollRate::Fast.interval();
         let mut wait = |until: Instant| loop {
             match wait_until(until) {
                 Woken::Due => return None,
-                Woken::DockHover(at) if hover_cuts => return Some(at),
+                Woken::DockHover(at) if longer_than_a_fast_interval => return Some(at),
                 Woken::DockHover(_) => {}
             }
         };

@@ -5,8 +5,13 @@ use super::read_within;
 const BOUND: Duration = Duration::from_millis(100);
 
 #[test]
-fn a_read_that_answers_in_time_gives_its_answer() {
-    assert_eq!(read_within(BOUND, || 42), Some(42));
+fn a_read_that_answers_inside_the_bound_gives_its_answer() {
+    let read = read_within(BOUND, || {
+        std::thread::sleep(BOUND / 4);
+        42
+    });
+
+    assert_eq!(read, Some(42));
 }
 
 #[test]

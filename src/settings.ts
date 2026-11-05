@@ -20,6 +20,7 @@ import {
   type DayField,
   type ExclusionRow,
   type Feedback,
+  type LoginChangeDone,
   type Outcome,
   type PageChange,
   type SettingsChange,
@@ -265,15 +266,22 @@ async function start(): Promise<void> {
   const toggleLogin = createLoginToggle(setLaunchAtLogin);
   page.launchAtLogin.addEventListener("change", () => {
     const wanted = page.launchAtLogin.checked;
-    void toggleLogin(wanted).then(({ result, shown }) => {
-      if (!result.ok) {
-        console.error("launch at login not changed", result.error);
-      }
-      if (shown !== null) {
-        page.launchAtLogin.checked = shown;
-      }
-      report({ field: "launchAtLogin", enabled: wanted }, result);
-    });
+    void toggleLogin(wanted)
+      .catch(
+        (error: unknown): LoginChangeDone => ({
+          result: { ok: false, error: { kind: "ipc_failed", cause: error } },
+          shown: null,
+        }),
+      )
+      .then(({ result, shown }) => {
+        if (!result.ok) {
+          console.error("launch at login not changed", result.error);
+        }
+        if (shown !== null) {
+          page.launchAtLogin.checked = shown;
+        }
+        report({ field: "launchAtLogin", enabled: wanted }, result);
+      });
   });
 
   for (const input of dayInputs) {

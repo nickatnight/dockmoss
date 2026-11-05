@@ -8,7 +8,86 @@
   </head>
   <body>
     <main>
-      <h1>Settings</h1>
+      <p id="save-error" class="notice" role="alert" hidden></p>
+
+      <fieldset id="stages" class="group" disabled>
+        <legend>Growth stages</legend>
+        <p id="stages-hint" class="hint">
+          Days without use before each stage begins.
+        </p>
+        <div class="days">
+          <label class="day">
+            <span>Fuzz</span>
+            <input
+              id="fuzz"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              aria-describedby="stages-hint stages-message"
+            />
+          </label>
+          <label class="day">
+            <span>Patchy</span>
+            <input
+              id="patchy"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              aria-describedby="stages-hint stages-message"
+            />
+          </label>
+          <label class="day">
+            <span>Overgrown</span>
+            <input
+              id="overgrown"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              aria-describedby="stages-hint stages-message"
+            />
+          </label>
+        </div>
+        <p id="stages-message" class="field-error" aria-live="polite"></p>
+      </fieldset>
+
+      <fieldset id="intensity-group" class="group" disabled>
+        <legend>Intensity</legend>
+        <p id="intensity-hint" class="hint">How strongly moss is drawn.</p>
+        <div class="slider">
+          <input
+            id="intensity"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            aria-label="Intensity"
+            aria-describedby="intensity-hint"
+          />
+          <output id="intensity-value" for="intensity"></output>
+        </div>
+      </fieldset>
+
+      <fieldset
+        id="fast-forward"
+        class="group"
+        aria-describedby="fast-forward-hint"
+        disabled
+      >
+        <legend>Fast-forward</legend>
+        <p id="fast-forward-hint" class="hint">
+          Speeds up time since last use, to preview growth.
+        </p>
+        <div class="speeds">
+          <label><input type="radio" name="fast-forward" value="1" /> 1×</label>
+          <label><input type="radio" name="fast-forward" value="10" /> 10×</label>
+          <label
+            ><input type="radio" name="fast-forward" value="100" /> 100×</label
+          >
+          <label
+            ><input type="radio" name="fast-forward" value="1000" /> 1000×</label
+          >
+        </div>
+      </fieldset>
     </main>
   </body>
 </html>

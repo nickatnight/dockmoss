@@ -154,25 +154,22 @@ impl Settings {
     fn to_map(&self) -> Map<String, Value> {
         let thresholds = &self.thresholds;
         let excluded: Vec<&str> = self.excluded.0.iter().map(BundleId::as_str).collect();
-        let mut map = Map::new();
-        map.insert(
-            Field::Thresholds.key().to_owned(),
-            json!({
-                "fuzz": thresholds.fuzz(),
-                "patchy": thresholds.patchy(),
-                "overgrown": thresholds.overgrown(),
-            }),
-        );
-        map.insert(
-            Field::Intensity.key().to_owned(),
-            self.intensity.percent().into(),
-        );
-        map.insert(Field::Excluded.key().to_owned(), excluded.into());
-        map.insert(
-            Field::FastForward.key().to_owned(),
-            self.fast_forward.factor().into(),
-        );
-        map
+        [
+            (
+                Field::Thresholds,
+                json!({
+                    "fuzz": thresholds.fuzz(),
+                    "patchy": thresholds.patchy(),
+                    "overgrown": thresholds.overgrown(),
+                }),
+            ),
+            (Field::Intensity, self.intensity.percent().into()),
+            (Field::Excluded, excluded.into()),
+            (Field::FastForward, self.fast_forward.factor().into()),
+        ]
+        .into_iter()
+        .map(|(field, value)| (field.key().to_owned(), value))
+        .collect()
     }
 }
 

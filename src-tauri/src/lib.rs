@@ -131,10 +131,15 @@ pub fn run() {
         reason = "startup invariant: the runtime builds with the context built into the binary"
     )]
     let app = built.expect("tauri runtime builds with the bundled context");
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
-            flush_launch_log(app);
+    app.run(|app, event| match event {
+        RunEvent::Exit => flush_launch_log(app),
+        // A Finder double-click, Spotlight or `open` on the running copy
+        // starts no second process: macOS activates this one and reopens it.
+        RunEvent::Reopen { .. } => {
+            tracing::info!("dockmoss reopened; opening settings");
+            show_settings_window(app);
         }
+        _ => {}
     });
 }
 

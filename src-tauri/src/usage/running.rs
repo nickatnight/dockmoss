@@ -19,11 +19,18 @@ pub struct AppEvent {
     pub app: RunningApp,
 }
 
-pub fn tracked_bundle_id(app: RunningApp) -> Option<BundleId> {
+/// The ID to record for an app event, or `None` for an app that cannot have
+/// a Dock icon, has no usable ID, or is another copy of this app (a second
+/// launch is a regular app for the moment before it exits).
+pub fn tracked_bundle_id(app: RunningApp, own_bundle_id: &str) -> Option<BundleId> {
     if !app.can_have_dock_icon {
         return None;
     }
-    BundleId::new(app.bundle_id?)
+    let bundle_id = app.bundle_id?;
+    if bundle_id == own_bundle_id {
+        return None;
+    }
+    BundleId::new(bundle_id)
 }
 
 #[cfg(test)]

@@ -138,11 +138,12 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     let first_run = log.baseline_at().is_none();
     let fast_forward = fast_forward();
     let inbox = launch_log_writer::spawn(path.clone(), log, fast_forward)?;
+    let own_bundle_id = app.config().identifier.clone();
     let now = Timestamp::now();
     let mut running = 0_usize;
     for bundle_id in macos::workspace::running_apps(mtm)
         .into_iter()
-        .filter_map(usage::tracked_bundle_id)
+        .filter_map(|running| usage::tracked_bundle_id(running, &own_bundle_id))
     {
         tracing::debug!(bundle_id = bundle_id.as_str(), "running at startup");
         let used = WriterMessage::Used {
@@ -157,7 +158,10 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
         running += 1;
     }
     let events = inbox.clone();
-    macos::workspace::on_app_events(move |event| record_app_event(&events, event), mtm);
+    macos::workspace::on_app_events(
+        move |event| record_app_event(&events, event, &own_bundle_id),
+        mtm,
+    );
     app.manage(LaunchLogInbox(inbox));
     tracing::info!(
         path = %path.display(),
@@ -210,9 +214,13 @@ fn fast_forward() -> FastForward {
     FastForward::X1
 }
 
-fn record_app_event(inbox: &mpsc::Sender<WriterMessage>, event: usage::AppEvent) {
+fn record_app_event(
+    inbox: &mpsc::Sender<WriterMessage>,
+    event: usage::AppEvent,
+    own_bundle_id: &str,
+) {
     let kind = event.kind;
-    let Some(bundle_id) = usage::tracked_bundle_id(event.app) else {
+    let Some(bundle_id) = usage::tracked_bundle_id(event.app, own_bundle_id) else {
         return;
     };
     tracing::debug!(bundle_id = bundle_id.as_str(), ?kind, "app used");

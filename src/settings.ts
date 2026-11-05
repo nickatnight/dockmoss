@@ -127,18 +127,31 @@ function showIntensity(): void {
   page.intensity.setAttribute("aria-valuetext", percent);
 }
 
+/** Each alert's pending refill, so a newer text cancels an older one. */
+const refills = new Map<HTMLElement, number>();
+
 /** Sets an alert's text. `again` empties it for a frame first, because
  * setting the text it already shows is not a change a screen reader
- * announces. */
+ * announces. A later call cancels a refill still waiting for its frame, so
+ * it cannot put back text that is no longer true. */
 function setAlert(element: HTMLElement, text: string, again: boolean): void {
+  const pending = refills.get(element);
+  if (pending !== undefined) {
+    cancelAnimationFrame(pending);
+    refills.delete(element);
+  }
   if (!again) {
     element.textContent = text;
     return;
   }
   element.textContent = "";
-  requestAnimationFrame(() => {
-    element.textContent = text;
-  });
+  refills.set(
+    element,
+    requestAnimationFrame(() => {
+      refills.delete(element);
+      element.textContent = text;
+    }),
+  );
 }
 
 interface Messages {

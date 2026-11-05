@@ -14,3 +14,7 @@ pub fn activate_app(Pid(pid): Pid, _mtm: MainThreadMarker) -> bool {
     NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
         .is_some_and(|app| app.activateWithOptions(NSApplicationActivationOptions::empty()))
 }
+
+pub fn is_active(_mtm: MainThreadMarker) -> bool {
+    NSRunningApplication::currentApplication().isActive()
+}

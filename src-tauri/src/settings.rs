@@ -6,9 +6,12 @@ use serde_json::{Map, Value, json};
 
 use crate::bundle_id::BundleId;
 use crate::growth::{self, FastForward, GrowthError, Thresholds};
-use crate::usage::{DistinctDockApps, DockApp};
+use crate::usage::{self, DistinctDockApps, DockApp};
 
 pub const MAX_EXCLUSIONS: usize = 256;
+/// More than three times the largest file a save writes (256 exclusions of
+/// 255 bytes each).
+pub const MAX_FILE_BYTES: u64 = 256 * 1024;
 /// Longer lists are refused before their entries are read; duplicates make
 /// some room above the cap.
 const MAX_EXCLUDED_ENTRIES: usize = 4 * MAX_EXCLUSIONS;
@@ -124,6 +127,8 @@ impl SettingsError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoadProblem {
+    #[error("the settings file was not read ({0}); every setting uses its default")]
+    Unreadable(String),
     #[error("the settings file is not a JSON object; every setting uses its default")]
     Undecodable,
     #[error("the settings file is not version {VERSION}; every setting uses its default")]
@@ -277,6 +282,18 @@ where
     write(next.encode_file().as_bytes()).map_err(NotSaved::new)?;
     *current = next;
     Ok(())
+}
+
+/// Never fails and never writes: a missing file, one that cannot be read or
+/// decoded, and every bad field fall back to defaults until the next save.
+pub fn load_file(path: &Path) -> Loaded {
+    match usage::read_capped(path, MAX_FILE_BYTES) {
+        Ok(text) => decode_file(text.as_deref().map(str::as_bytes)),
+        Err(error) => Loaded {
+            settings: Settings::default(),
+            problems: vec![LoadProblem::Unreadable(error.to_string())],
+        },
+    }
 }
 
 /// `None` when there is no file yet.

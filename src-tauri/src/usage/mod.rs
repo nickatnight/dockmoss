@@ -13,7 +13,7 @@ pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
 pub use schedule::{SaveSchedule, recompute_interval};
 pub use spotlight::parse_mdls;
 pub use state::{AppGrowth, Change, DistinctDockApps, DockApp, DockUpdate, UsageState};
-pub use store::{load_or_set_aside, save, write_atomically};
+pub use store::{load_or_set_aside, read_capped, save, write_atomically};
 
 #[derive(Debug, thiserror::Error)]
 pub enum UsageError {

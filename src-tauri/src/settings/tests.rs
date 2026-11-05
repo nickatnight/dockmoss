@@ -3,8 +3,8 @@ use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 
 use super::{
-    DockAppName, Exclusions, Field, Intensity, LIMITS, LoadProblem, MAX_EXCLUSIONS, Settings,
-    SettingsError, SettingsView, commit, decode_file,
+    DockAppName, Exclusions, Field, Intensity, LIMITS, LoadProblem, MAX_EXCLUSIONS, MAX_FILE_BYTES,
+    Settings, SettingsError, SettingsView, commit, decode_file, load_file,
 };
 use crate::bundle_id::BundleId;
 use crate::growth::{FastForward, GrowthError, Thresholds};
@@ -584,5 +584,71 @@ fn an_excluded_list_over_four_times_the_cap_is_refused_even_when_it_dedupes() {
     assert_eq!(
         super::load(&stored_with("excluded", copies.into())).problems,
         [LoadProblem::Invalid(SettingsError::TooManyExclusions)]
+    );
+}
+
+fn padded_to(bytes: usize) -> Vec<u8> {
+    let mut text = customised().encode_file().into_bytes();
+    text.resize(bytes, b' ');
+    text
+}
+
+#[test]
+fn a_file_at_the_size_cap_loads() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.json");
+    let cap = usize::try_from(MAX_FILE_BYTES).expect("cap fits usize");
+    std::fs::write(&path, padded_to(cap)).expect("write");
+
+    let loaded = load_file(&path);
+
+    assert_eq!(loaded.settings, customised());
+    assert_eq!(loaded.problems, []);
+}
+
+#[test]
+fn a_file_over_the_size_cap_loads_defaults_with_one_problem_and_stays() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.json");
+    let cap = usize::try_from(MAX_FILE_BYTES).expect("cap fits usize");
+    std::fs::write(&path, padded_to(cap + 1)).expect("write");
+
+    let loaded = load_file(&path);
+
+    assert_eq!(loaded.settings, Settings::default());
+    assert!(
+        matches!(loaded.problems.as_slice(), [LoadProblem::Unreadable(_)]),
+        "{:?}",
+        loaded.problems
+    );
+    assert_eq!(
+        std::fs::metadata(&path).expect("file").len(),
+        MAX_FILE_BYTES + 1
+    );
+}
+
+#[test]
+fn a_missing_file_on_disk_loads_defaults_silently() {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    let loaded = load_file(&dir.path().join("settings.json"));
+
+    assert_eq!(loaded.settings, Settings::default());
+    assert_eq!(loaded.problems, []);
+}
+
+#[test]
+fn an_unreadable_file_is_one_problem_not_two() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.json");
+    std::fs::create_dir(&path).expect("a directory where the file should be");
+
+    let loaded = load_file(&path);
+
+    assert_eq!(loaded.settings, Settings::default());
+    assert!(
+        matches!(loaded.problems.as_slice(), [LoadProblem::Unreadable(_)]),
+        "{:?}",
+        loaded.problems
     );
 }

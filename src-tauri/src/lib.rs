@@ -14,8 +14,6 @@ mod usage;
 
 pub use error::Error;
 
-use std::fs;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
@@ -171,8 +169,6 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-/// Never fails, and never writes: a missing file, one that cannot be read or
-/// decoded, and every bad field fall back to defaults until the next save.
 fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
     let path = match app.path().app_data_dir() {
         Ok(dir) => dir.join(SETTINGS_FILE),
@@ -181,15 +177,7 @@ fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
             return (Settings::default(), None);
         }
     };
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(error) if error.kind() == ErrorKind::NotFound => None,
-        Err(error) => {
-            tracing::warn!(%error, "settings file not read; using defaults until the next save");
-            Some(Vec::new())
-        }
-    };
-    let loaded = settings::decode_file(bytes.as_deref());
+    let loaded = settings::load_file(&path);
     for problem in &loaded.problems {
         tracing::warn!(%problem, "stored setting not loaded");
     }
@@ -910,12 +898,30 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
             .on_navigation(is_app_url)
             .build()?;
     let app = app.clone();
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::Destroyed) {
-            return_focus(&app);
-        }
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(false) => follow_focus_away(&app),
+        WindowEvent::Destroyed => return_focus(&app),
+        _ => {}
     });
     Ok(window)
+}
+
+/// Once the user moves to another app, that app (not the one active when
+/// Settings opened) is where the keyboard goes back if they return and close.
+fn follow_focus_away(app: &AppHandle) {
+    let Some(mtm) = macos::MainThreadMarker::new() else {
+        return;
+    };
+    if macos::app::is_active(mtm) {
+        return;
+    }
+    let now_active = macos::app::active_other_app(mtm);
+    let return_to = app.state::<ReturnFocusTo>();
+    *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = now_active;
+    tracing::debug!(
+        recorded = now_active.is_some(),
+        "settings window left for another app"
+    );
 }
 
 #[derive(Default)]
@@ -932,8 +938,9 @@ fn return_focus(app: &AppHandle) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .take();
-    let returned = pid.is_some_and(|pid| macos::app::activate_app(pid, mtm));
-    tracing::debug!(returned, "settings window closed");
+    let active = macos::app::is_active(mtm);
+    let returned = active && pid.is_some_and(|pid| macos::app::activate_app(pid, mtm));
+    tracing::debug!(active, returned, "settings window closed");
 }
 
 fn is_app_url(url: &Url) -> bool {

@@ -5,8 +5,6 @@ use tauri::{AppHandle, Wry};
 use crate::macos;
 use crate::trust::Trust;
 
-/// Look the tray up with `app.tray_by_id(TRAY_ID)` on the main thread. Its
-/// handle is not thread-safe, so no other thread keeps one.
 pub const TRAY_ID: &str = "main";
 
 const QUIT_ID: &str = "quit";

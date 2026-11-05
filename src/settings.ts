@@ -82,7 +82,6 @@ function show(view: SettingsView): void {
   }
 }
 
-/** Dock names and bundle IDs go into the DOM as text only. */
 function exclusionItem(
   row: ExclusionRow,
   dockKnown: boolean,
@@ -97,7 +96,6 @@ function exclusionItem(
   name.textContent = row.label;
   const label = document.createElement("label");
   label.append(checkbox, name);
-  // Before the first Dock read, "not in the Dock" would be a guess.
   if (!row.inDock && dockKnown) {
     const note = document.createElement("span");
     note.className = "note";
@@ -129,7 +127,6 @@ function showSaveError(message: string | null): void {
   page.saveError.hidden = message === null;
 }
 
-/** An empty or partial entry reads as NaN, which Rust rejects. */
 function enteredThresholds(): SettingsChange {
   return {
     field: "thresholds",
@@ -163,8 +160,6 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
 
-  // Saves run one at a time, each built from the settings the one before it
-  // stored, so two quick changes cannot undo each other.
   let saving = Promise.resolve();
   const commit = (change: SettingsChange): void => {
     saving = saving.then(async () => {

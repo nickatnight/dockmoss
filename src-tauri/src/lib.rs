@@ -167,14 +167,10 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-/// The settings store, opened once with auto-save off: settings are written
-/// only by `save_settings`. The plugin also saves every open store at exit.
 fn settings_store(app: &AppHandle) -> Result<Arc<Store<Wry>>, tauri_plugin_store::Error> {
     app.store_builder(SETTINGS_FILE).disable_auto_save().build()
 }
 
-/// Never fails: a missing file, one that does not decode and every bad field
-/// fall back to defaults.
 fn load_settings(app: &AppHandle) -> Settings {
     let store = match settings_store(app) {
         Ok(store) => store,
@@ -203,8 +199,8 @@ fn load_settings(app: &AppHandle) -> Settings {
     loaded.settings
 }
 
-/// Writes every setting to the store and saves it. On failure the store's
-/// cache goes back to `saved`, because the plugin saves open stores at exit.
+/// On failure the store's cache goes back to `saved`, because the plugin
+/// saves open stores at exit.
 pub(crate) fn store_settings(
     app: &AppHandle,
     settings: &Settings,
@@ -317,7 +313,6 @@ mod launch_log_writer {
             kind: AppEventKind,
         },
         DockApps(Vec<DockApp>),
-        /// Replies with the latest Dock list, one entry per bundle ID.
         ListDockApps(Sender<Vec<DockApp>>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
         Flush(Sender<()>),
@@ -903,8 +898,6 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
     Ok(window)
 }
 
-/// Opens the settings window, or brings the open one to the front. Runs on
-/// the main thread (tray menu events arrive there).
 pub(crate) fn show_settings_window(app: &AppHandle) {
     let Some(mtm) = macos::MainThreadMarker::new() else {
         tracing::warn!("settings requested off the main thread; window not shown");
@@ -955,12 +948,9 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     Ok(window)
 }
 
-/// The app that was active when Settings… was chosen.
 #[derive(Default)]
 struct ReturnFocusTo(Mutex<Option<i32>>);
 
-/// The overlay never takes focus, so once Settings closes the keyboard goes
-/// back to the app the user was in, instead of staying with this app and no window.
 fn return_focus(app: &AppHandle) {
     let Some(mtm) = macos::MainThreadMarker::new() else {
         tracing::warn!("settings window closed off the main thread; focus not returned");
@@ -976,8 +966,6 @@ fn return_focus(app: &AppHandle) {
     tracing::debug!(returned, "settings window closed");
 }
 
-/// Both windows load only the app's own pages: the bundled `tauri:` origin,
-/// and the Vite server on localhost in debug builds.
 fn is_app_url(url: &Url) -> bool {
     url.scheme() == "tauri" || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
 }

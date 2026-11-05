@@ -17,8 +17,6 @@ pub enum Error {
     UsageStopped,
     #[error(transparent)]
     InvalidSettings(#[from] crate::settings::SettingsError),
-    /// The store write failed; the cause is logged, not sent, because it can
-    /// name a path in the user's home folder.
     #[error("settings could not be saved")]
     SettingsNotSaved,
 }

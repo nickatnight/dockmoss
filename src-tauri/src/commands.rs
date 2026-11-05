@@ -12,7 +12,6 @@ use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
 use crate::settings::{Settings, SettingsView};
 use crate::usage::{AppGrowth, DockApp};
 
-/// How long `get_settings` waits for the usage thread's Dock list.
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub enum TrackerMessage {
@@ -54,8 +53,6 @@ pub async fn watch_growth(on_growth: Channel<Vec<AppGrowth>>, app: AppHandle) ->
     Ok(())
 }
 
-/// The saved settings, their limits and the Dock's apps by name. The Dock
-/// list is empty until the Dock has been read, or when usage tracking is off.
 #[tauri::command]
 pub async fn get_settings(
     app: AppHandle,
@@ -94,9 +91,6 @@ async fn dock_apps(app: &AppHandle) -> Vec<DockApp> {
     }
 }
 
-/// Validates and stores the whole settings value, then returns what was
-/// stored. Nothing changes, on disk or in memory, unless every field is valid
-/// and the write succeeds.
 #[tauri::command]
 pub async fn save_settings(
     settings: Map<String, Value>,
@@ -106,8 +100,6 @@ pub async fn save_settings(
     let settings = Settings::parse(&settings).inspect_err(|error| {
         tracing::info!(field = error.field().key(), %error, "settings not saved: invalid");
     })?;
-    // Held through the write, so two saves cannot interleave and the file and
-    // the managed copy always match.
     let mut saved = state.lock().unwrap_or_else(PoisonError::into_inner);
     if let Err(error) = crate::store_settings(&app, &settings, &saved) {
         tracing::warn!(%error, "settings not saved: the store write failed");

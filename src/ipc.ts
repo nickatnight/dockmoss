@@ -33,7 +33,6 @@ export type ErrorKind =
   | "invalid_settings"
   | "settings_not_saved";
 
-/** Mirrors `growth::Thresholds`: whole days, Fuzz < Patchy < Overgrown. */
 export interface Thresholds {
   fuzz: number;
   patchy: number;
@@ -42,31 +41,24 @@ export interface Thresholds {
 
 export type FastForward = 1 | 10 | 100 | 1000;
 
-/** Mirrors `settings::Settings` in its webview shape. */
 export interface Settings {
   thresholds: Thresholds;
-  /** Whole percent, 0 to 100. */
   intensityPercent: number;
-  /** Sorted. */
   excluded: BundleId[];
   fastForward: FastForward;
 }
 
-/** Mirrors `settings::Limits`, the bounds Rust enforces. */
 export interface SettingsLimits {
   minFuzzDays: number;
   maxOvergrownDays: number;
   maxExclusions: number;
 }
 
-/** A Dock app by name; the path stays in Rust. */
 export interface DockAppName {
   bundleId: BundleId;
   name: string;
 }
 
-/** Mirrors `settings::SettingsView`. `dockApps` is in Dock order, and empty
- * until DockMoss has read the Dock. */
 export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
@@ -107,13 +99,10 @@ export function watchGrowth(
   return invoke<void>("watch_growth", { onGrowth: channel });
 }
 
-/** The saved settings, their limits and the Dock's apps. */
 export function getSettings(): Promise<SettingsView> {
   return invoke<SettingsView>("get_settings");
 }
 
-/** Saves every setting or none. Rejects with `invalid_settings` when a field
- * fails its check, and `settings_not_saved` when the write fails. */
 export function saveSettings(settings: Settings): Promise<Settings> {
   return invoke<Settings>("save_settings", { settings });
 }

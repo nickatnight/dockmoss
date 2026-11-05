@@ -17,7 +17,6 @@ fn object(value: Value) -> Map<String, Value> {
     }
 }
 
-/// A valid webview settings value, with `field` replaced by `value`.
 fn webview_with(field: &str, value: Value) -> Map<String, Value> {
     let mut map = object(json!({
         "thresholds": { "fuzz": 5, "patchy": 10, "overgrown": 30 },
@@ -29,8 +28,6 @@ fn webview_with(field: &str, value: Value) -> Map<String, Value> {
     map
 }
 
-/// A stored file with every field valid and away from its default, with
-/// `field` replaced by `value`.
 fn stored_with(field: &str, value: Value) -> Map<String, Value> {
     let mut map = object(json!({
         "version": 1,

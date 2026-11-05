@@ -1,9 +1,5 @@
 import { defineConfig, type Plugin } from "vite";
 
-/**
- * Fails the build when `src/debug.ts` is in the module graph at all, so a
- * static import is caught even when nothing of it reaches the bundle's text.
- */
 function noDebugModuleInBuild(): Plugin {
   return {
     name: "dockmoss:no-debug-module-in-build",

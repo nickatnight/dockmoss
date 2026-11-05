@@ -175,7 +175,6 @@ impl UsageState {
             .collect()
     }
 
-    /// The latest Dock list, one entry per bundle ID (the first), in Dock order.
     pub fn distinct_dock_apps(&self) -> Vec<DockApp> {
         let mut seen = BTreeSet::new();
         self.dock

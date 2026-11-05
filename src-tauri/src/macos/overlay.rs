@@ -38,6 +38,10 @@ pub fn pin_above_dock(
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
 
+    // Closing Settings with no app to hand focus back to hides the app; the
+    // moss must stay.
+    ns_window.setCanHide(false);
+
     let overlay = ns_window.level();
     ensure_raised(dock, overlay)?;
     Ok(PinnedLevels { dock, overlay })

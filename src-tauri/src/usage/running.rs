@@ -19,11 +19,15 @@ pub struct AppEvent {
     pub app: RunningApp,
 }
 
-pub fn tracked_bundle_id(app: RunningApp) -> Option<BundleId> {
+pub fn tracked_bundle_id(app: RunningApp, own_bundle_id: &str) -> Option<BundleId> {
     if !app.can_have_dock_icon {
         return None;
     }
-    BundleId::new(app.bundle_id?)
+    let bundle_id = app.bundle_id?;
+    if bundle_id == own_bundle_id {
+        return None;
+    }
+    BundleId::new(bundle_id)
 }
 
 #[cfg(test)]

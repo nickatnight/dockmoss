@@ -1,6 +1,8 @@
 use super::{RunningApp, tracked_bundle_id};
 use crate::bundle_id::BundleId;
 
+const OWN: &str = "com.dockmoss.app";
+
 #[test]
 fn only_regular_apps_with_a_bundle_id_are_tracked() {
     let cases = [
@@ -12,6 +14,18 @@ fn only_regular_apps_with_a_bundle_id_are_tracked() {
         ),
         ("regular without an ID", None, true, None),
         ("regular with an empty ID", Some(""), true, None),
+        (
+            "an ID that extends DockMoss's",
+            Some("com.dockmoss.app.helper"),
+            true,
+            BundleId::new("com.dockmoss.app.helper"),
+        ),
+        (
+            "an ID that DockMoss's extends",
+            Some("com.dockmoss"),
+            true,
+            BundleId::new("com.dockmoss"),
+        ),
         (
             "an agent or helper with an ID",
             Some("com.apple.Spotlight"),
@@ -25,6 +39,16 @@ fn only_regular_apps_with_a_bundle_id_are_tracked() {
             can_have_dock_icon,
         };
 
-        assert_eq!(tracked_bundle_id(app), expected, "{case}");
+        assert_eq!(tracked_bundle_id(app, OWN), expected, "{case}");
     }
+}
+
+#[test]
+fn another_dockmoss_process_is_not_tracked() {
+    let second_launch = RunningApp {
+        bundle_id: Some(OWN.to_owned()),
+        can_have_dock_icon: true,
+    };
+
+    assert_eq!(tracked_bundle_id(second_launch, OWN), None);
 }

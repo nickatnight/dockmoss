@@ -44,12 +44,14 @@ The factor multiplies the time since each app was last used. `1`, `10`, `100` an
 
 Choose Settings… from the moss tile in the menu bar. The window opens in front of the app you were in, with the keyboard in it. Choosing Settings… again while it is open brings it back to the front.
 
+Launching DockMoss again while it runs does the same: a double-click in Finder, Spotlight, `open`, or `open -n` opens Settings, or brings it to the front if it is already open. Only one copy of DockMoss runs at a time; a second copy hands over to the running one and exits before it touches your launch log or settings.
+
 - **Growth stages:** the days without use before Fuzz, Patchy and Overgrown begin (5, 10 and 30 by default). Each is a whole number from 2 to 3650, and each stage must be longer than the one before. A value that breaks the rule turns its field red with a message under the fields, and is not saved. The other settings still save.
 - **Intensity:** how strongly moss is drawn, 0% to 100% (100% by default).
 - **Fast-forward:** 1×, 10×, 100× or 1000× (1× by default). It multiplies the time since each app was last used, to preview growth.
 - **Excluded apps:** one checkbox per Dock app, by name, in Dock order. An excluded app that is no longer in the Dock stays in the list by bundle ID, marked "Not in the Dock", so it can be cleared. Without the Accessibility grant, the list says it fills in once DockMoss can read the Dock. At most 256 apps can be excluded.
 
-There is no Save button. A change is saved as soon as you make it: a number when you leave the field or press Return, the slider when you let go, a checkbox or speed when you click it. If a save fails, a notice at the top says so, and the control keeps your value until it saves. Close the window with its close button or ⌘W. If you were in another app when you opened it, the keyboard goes back to that app. The window follows the system's light or dark appearance, and every control works from the keyboard.
+There is no Save button. A change is saved as soon as you make it: a number when you leave the field or press Return, the slider when you let go, a checkbox or speed when you click it. If a save fails, a notice at the top says so, and the control keeps your value until it saves. Close the window with its close button or ⌘W. The keyboard goes back to the last app you were in (a regular app, not a launcher such as Spotlight). If that app has quit, DockMoss steps back and macOS brings the next app forward. The window follows the system's light or dark appearance, and every control works from the keyboard.
 
 **Saved, not yet applied.** Your settings are saved and kept across restarts, but the moss does not use them yet: changing a stage, the intensity, the speed or an exclusion changes nothing on the Dock. The next slice applies them.
 
@@ -71,6 +73,8 @@ pnpm tauri dev
 
 `pnpm tauri dev` starts Vite on port 5110, then builds and runs the app. Quit it from the moss tile in the menu bar.
 
+Quit any other DockMoss before you start it: an installed copy, a debug bundle, or another `tauri dev`. They all share the bundle identifier, so the dev copy would exit at once (and `tauri dev` with it), and the running copy would open its Settings instead.
+
 `tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dockmoss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
 
 ## Accessibility access
@@ -85,7 +89,7 @@ While it runs, the app re-checks every 5 s without prompting and rebuilds the tr
 
 ## Launch log
 
-DockMoss records the last time each app was used in `~/Library/Application Support/com.dockmoss.app/launch_log.json`. An app counts as used when it launches, becomes frontmost or quits, and every app already running when DockMoss starts counts as used at that moment. Only regular apps with a bundle ID are recorded (the apps that can have a Dock icon), so agents, background helpers and DockMoss itself are left out. The rule is in SUMMARY.md, "Last-used data", rule 1.
+DockMoss records the last time each app was used in `~/Library/Application Support/com.dockmoss.app/launch_log.json`. An app counts as used when it launches, becomes frontmost or quits, and every app already running when DockMoss starts counts as used at that moment. Only regular apps with a bundle ID are recorded (the apps that can have a Dock icon), so agents, background helpers and DockMoss itself (any copy of it, including a second launch that is about to exit) are left out. The rule is in SUMMARY.md, "Last-used data", rule 1.
 
 - **Format.** Version 1 JSON with four fields, each map sorted by bundle ID, and every time an RFC 3339 UTC string:
 
@@ -142,6 +146,8 @@ src-tauri/src/
   bundle_id.rs      # BundleId newtype
   settings.rs       # the four settings, their checks, settings.json load and save
   navigation.rs     # which URLs the windows may load
+  focus.rs          # pure: which app Settings hands the keyboard back to, and whether
+                    #   DockMoss hides when it closes
   tray.rs           # menu-bar icon: Settings…, Quit, and the Accessibility grant item
   trust.rs          # Trust (trusted or not) and the shared latest reading
   growth/           # pure: last-used sources, jitter and the curve -> overgrowth and stage
@@ -154,7 +160,8 @@ src-tauri/src/
     spotlight.rs    #   mdls output parsing, the migration-batch check, SpotlightSeed
     state.rs        #   UsageState: first run, first-seen apps, running set, growth
   macos/            # all objc2 / AppKit / AX code and every unsafe block
-    app.rs          # which app is active, and activating one (settings focus hand-back)
+    app.rs          # the front app, the app at a pid, and activating one (settings
+                    #   focus hand-back)
     overlay.rs      # raises the overlay NSWindow above the Dock, on every Space
     ax.rs           # Accessibility trust check (AXIsProcessTrustedWithOptions)
     dock.rs         # reads the Dock's item list through Accessibility

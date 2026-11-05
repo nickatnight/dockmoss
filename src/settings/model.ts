@@ -113,11 +113,11 @@ export function nextFeedback(
   if (rejected(result) && change.field === "excluded") {
     return { ...feedback, exclusionLimit: true };
   }
-  const checked =
+  const thresholdsPassedRules =
     change.field === "thresholds" && result.error.kind === "settings_not_saved";
   return {
     ...feedback,
-    thresholdError: checked ? false : feedback.thresholdError,
+    thresholdError: thresholdsPassedRules ? false : feedback.thresholdError,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
   };
 }

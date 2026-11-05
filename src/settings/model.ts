@@ -2,7 +2,9 @@ import type {
   BundleId,
   DockAppName,
   EnteredThresholds,
+  ErrorKind,
   FastForward,
+  LaunchAtLoginResult,
   SaveSettingsResult,
   Settings,
   SettingsInput,
@@ -14,6 +16,14 @@ export type SettingsChange =
   | { field: "intensityPercent"; percent: number }
   | { field: "fastForward"; speed: FastForward }
   | { field: "excluded"; bundleId: BundleId; excluded: boolean };
+
+export type PageChange =
+  | SettingsChange
+  | { field: "launchAtLogin"; enabled: boolean };
+
+export type Outcome =
+  | { ok: true }
+  | { ok: false; error: { kind: ErrorKind | "ipc_failed" } };
 
 export function nextSettings(
   saved: Settings,
@@ -75,20 +85,20 @@ export const NO_FEEDBACK: Feedback = {
   unsaved: [],
 };
 
-function changedControl(change: SettingsChange): string {
+function changedControl(change: PageChange): string {
   return change.field === "excluded"
     ? `excluded:${change.bundleId}`
     : change.field;
 }
 
-function rejected(result: SaveSettingsResult): boolean {
+function rejected(result: Outcome): boolean {
   return !result.ok && result.error.kind === "invalid_settings";
 }
 
 export function nextFeedback(
   feedback: Feedback,
-  change: SettingsChange,
-  result: SaveSettingsResult,
+  change: PageChange,
+  result: Outcome,
 ): Feedback {
   const control = changedControl(change);
   if (result.ok) {
@@ -106,8 +116,11 @@ export function nextFeedback(
   if (rejected(result) && change.field === "excluded") {
     return { ...feedback, exclusionLimit: true };
   }
+  const thresholdsPassedRules =
+    change.field === "thresholds" && result.error.kind === "settings_not_saved";
   return {
     ...feedback,
+    thresholdError: !thresholdsPassedRules && feedback.thresholdError,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
   };
 }
@@ -116,8 +129,8 @@ export function nextFeedback(
  * shows is not a change a screen reader announces. */
 export function reannounced(
   before: Feedback,
-  change: SettingsChange,
-  result: SaveSettingsResult,
+  change: PageChange,
+  result: Outcome,
 ): { threshold: boolean; exclusionLimit: boolean; saveNotice: boolean } {
   const rejectedInPlace =
     rejected(result) &&
@@ -129,6 +142,13 @@ export function reannounced(
     exclusionLimit:
       before.exclusionLimit && change.field === "excluded" && rejected(result),
   };
+}
+
+export function launchAtLoginShown(
+  wanted: boolean,
+  result: LaunchAtLoginResult,
+): boolean {
+  return result.ok ? result.enabled : !wanted;
 }
 
 export interface ExclusionRow {
@@ -205,4 +225,53 @@ const FAST_FORWARD_SPEEDS: readonly FastForward[] = [1, 10, 100, 1000];
 
 export function toFastForward(value: string): FastForward | null {
   return FAST_FORWARD_SPEEDS.find((speed) => String(speed) === value) ?? null;
+}
+
+export function launchAtLoginBox(status: boolean | null): {
+  checked: boolean;
+  disabled: boolean;
+  note: string | null;
+} {
+  return {
+    checked: status === true,
+    disabled: status === null,
+    note:
+      status === null
+        ? "macOS did not say whether this is on. To ask again, close and reopen Settings."
+        : null,
+  };
+}
+
+export interface LoginChangeDone {
+  result: LaunchAtLoginResult;
+  /** What the box shows now, or null when a later change has overtaken this one. */
+  shown: boolean | null;
+}
+
+/** Runs launch at login changes one at a time, in order. Only the latest
+ * change's result sets the box; every result still reports. A `set` that
+ * throws gives an `ipc_failed` result. */
+export function createLoginToggle(
+  set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
+): (wanted: boolean) => Promise<LoginChangeDone> {
+  let previous: Promise<unknown> = Promise.resolve();
+  let latest = 0;
+  return (wanted) => {
+    latest += 1;
+    const thisChange = latest;
+    const done = previous.then(async () => {
+      const result = await set(wanted).catch(
+        (cause: unknown): LaunchAtLoginResult => ({
+          ok: false,
+          error: { kind: "ipc_failed", cause },
+        }),
+      );
+      return {
+        result,
+        shown: thisChange === latest ? launchAtLoginShown(wanted, result) : null,
+      };
+    });
+    previous = done.catch(() => undefined);
+    return done;
+  };
 }

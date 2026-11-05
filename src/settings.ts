@@ -1,11 +1,18 @@
-import { getSettings, saveSettings, type SettingsView } from "./ipc";
+import {
+  getSettings,
+  saveSettings,
+  setLaunchAtLogin,
+  type SettingsView,
+} from "./ipc";
 import {
   NO_FEEDBACK,
+  createLoginToggle,
   createSettingsSaver,
   enteredDays,
   exclusionLimitMessage,
   exclusionRows,
   invalidDays,
+  launchAtLoginBox,
   nextFeedback,
   reannounced,
   thresholdMessage,
@@ -13,6 +20,8 @@ import {
   type DayField,
   type ExclusionRow,
   type Feedback,
+  type Outcome,
+  type PageChange,
   type SettingsChange,
 } from "./settings/model";
 
@@ -29,6 +38,8 @@ function byId<T extends HTMLElement>(
 
 const page = {
   saveError: byId("save-error", HTMLParagraphElement),
+  launchAtLogin: byId("launch-at-login", HTMLInputElement),
+  launchAtLoginNote: byId("launch-at-login-note", HTMLParagraphElement),
   groups: [
     byId("stages", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
@@ -108,6 +119,13 @@ function exclusionItem(
   }
   const item = document.createElement("li");
   item.append(label);
+  // Focus scrolls the list only as far as the box; this brings in the whole
+  // row, which holds the focus ring.
+  checkbox.addEventListener("focus", () => {
+    if (checkbox.matches(":focus-visible")) {
+      item.scrollIntoView({ block: "nearest" });
+    }
+  });
   return item;
 }
 
@@ -117,18 +135,31 @@ function showIntensity(): void {
   page.intensity.setAttribute("aria-valuetext", percent);
 }
 
+/** Each alert's pending refill: a newer text cancels it, so it cannot put
+ * back text that is no longer true. */
+const refills = new Map<HTMLElement, number>();
+
 /** Sets an alert's text. `again` empties it for a frame first, because
  * setting the text it already shows is not a change a screen reader
  * announces. */
 function setAlert(element: HTMLElement, text: string, again: boolean): void {
+  const pending = refills.get(element);
+  if (pending !== undefined) {
+    cancelAnimationFrame(pending);
+    refills.delete(element);
+  }
   if (!again) {
     element.textContent = text;
     return;
   }
   element.textContent = "";
-  requestAnimationFrame(() => {
-    element.textContent = text;
-  });
+  refills.set(
+    element,
+    requestAnimationFrame(() => {
+      refills.delete(element);
+      element.textContent = text;
+    }),
+  );
 }
 
 interface Messages {
@@ -190,6 +221,11 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
   page.intensity.disabled = false;
+  const loginBox = launchAtLoginBox(view.launchAtLogin);
+  page.launchAtLogin.checked = loginBox.checked;
+  page.launchAtLogin.disabled = loginBox.disabled;
+  page.launchAtLoginNote.textContent = loginBox.note;
+  page.launchAtLoginNote.hidden = loginBox.note === null;
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const messages = {
@@ -198,6 +234,11 @@ async function start(): Promise<void> {
   };
   let feedback = NO_FEEDBACK;
   let wrongDays: DayField[] = [];
+  const report = (change: PageChange, result: Outcome): void => {
+    const again = reannounced(feedback, change, result);
+    feedback = nextFeedback(feedback, change, result);
+    showFeedback(feedback, messages, again, wrongDays);
+  };
   /** `undo` puts the control back when Rust refuses the value outright, as
    * for an exclusion past the cap, which no retry can store. */
   const commit = (change: SettingsChange, undo?: () => void): void => {
@@ -211,17 +252,29 @@ async function start(): Promise<void> {
         if (!result.ok) {
           console.error("settings not saved", result.error);
         }
-        const again = reannounced(feedback, change, result);
-        feedback = nextFeedback(feedback, change, result);
         if (change.field === "thresholds") {
           wrongDays = invalidDays(change.thresholds, view.limits);
         }
-        showFeedback(feedback, messages, again, wrongDays);
+        report(change, result);
         if (!result.ok && result.error.kind === "invalid_settings") {
           undo?.();
         }
       });
   };
+
+  const toggleLogin = createLoginToggle(setLaunchAtLogin);
+  page.launchAtLogin.addEventListener("change", () => {
+    const wanted = page.launchAtLogin.checked;
+    void toggleLogin(wanted).then(({ result, shown }) => {
+      if (!result.ok) {
+        console.error("launch at login not changed", result.error);
+      }
+      if (shown !== null) {
+        page.launchAtLogin.checked = shown;
+      }
+      report({ field: "launchAtLogin", enabled: wanted }, result);
+    });
+  });
 
   for (const input of dayInputs) {
     input.addEventListener("change", () => commit(enteredThresholds()));

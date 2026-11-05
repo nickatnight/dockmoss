@@ -5,7 +5,7 @@ use serde::{Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
 use crate::bundle_id::BundleId;
-use crate::growth::{self, FastForward, GrowthError, Thresholds};
+use crate::growth::{self, FastForward, GrowthError, Overgrowth, Thresholds};
 use crate::usage::{self, DistinctDockApps, DockApp};
 
 pub const MAX_EXCLUSIONS: usize = 256;
@@ -47,6 +47,10 @@ impl Intensity {
     pub fn percent(self) -> u8 {
         self.0
     }
+
+    pub fn scale(self, overgrowth: Overgrowth) -> Overgrowth {
+        Overgrowth::new(overgrowth.get() * (f32::from(self.0) / 100.0))
+    }
 }
 
 impl Default for Intensity {
@@ -69,6 +73,10 @@ impl Exclusions {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn contains(&self, bundle_id: &BundleId) -> bool {
+        self.0.contains(bundle_id)
     }
 }
 
@@ -155,6 +163,16 @@ impl Settings {
         })
     }
 
+    /// The settings growth applies: these, with `fast_forward_override` (the
+    /// debug-only `DOCKMOSS_FAST_FORWARD`) in place of the saved speed.
+    #[must_use]
+    pub fn applied(&self, fast_forward_override: Option<FastForward>) -> Self {
+        Self {
+            fast_forward: fast_forward_override.unwrap_or(self.fast_forward),
+            ..self.clone()
+        }
+    }
+
     pub fn log(&self, message: &'static str) {
         let thresholds = self.thresholds;
         tracing::info!(
@@ -220,10 +238,15 @@ pub struct SettingsView {
     settings: Settings,
     limits: Limits,
     dock_apps: Option<Vec<DockAppName>>,
+    launch_at_login: Option<bool>,
 }
 
 impl SettingsView {
-    pub fn new(settings: Settings, dock: Option<&DistinctDockApps>) -> Self {
+    pub fn new(
+        settings: Settings,
+        dock: Option<&DistinctDockApps>,
+        launch_at_login: Option<bool>,
+    ) -> Self {
         let dock_apps = dock
             .map(|dock| dock.iter().map(DockAppName::new).collect::<Vec<_>>())
             .filter(|names| !names.is_empty());
@@ -231,6 +254,7 @@ impl SettingsView {
             settings,
             limits: LIMITS,
             dock_apps,
+            launch_at_login,
         }
     }
 }

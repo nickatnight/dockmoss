@@ -1,3 +1,4 @@
+mod bounded;
 mod bundle_id;
 mod commands;
 mod dock;
@@ -5,6 +6,7 @@ mod error;
 mod focus;
 mod geometry;
 mod growth;
+mod login_item;
 mod macos;
 mod navigation;
 mod settings;
@@ -15,7 +17,7 @@ mod usage;
 
 pub use error::Error;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
@@ -33,12 +35,11 @@ use launch_log_writer::{LaunchLogInbox, WriterMessage};
 use settings::Settings;
 use tracker::Visibility;
 use trust::TrustState;
+use usage::{LAUNCH_LOG_FILE, SETTINGS_FILE};
 
 const OVERLAY_LABEL: &str = "overlay";
 const SETTINGS_LABEL: &str = "settings";
 const SETTINGS_HEIGHT: f64 = 760.0;
-const LAUNCH_LOG_FILE: &str = "launch_log.json";
-const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
@@ -59,6 +60,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             on_second_launch(app);
         }))
+        .plugin(private_log_dir())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(LevelFilter::Info)
@@ -69,13 +71,18 @@ pub fn run() {
             commands::watch_dock,
             commands::watch_growth,
             commands::get_settings,
-            commands::save_settings
+            commands::save_settings,
+            commands::set_launch_at_login
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if let Some(error) = app.try_state::<LogDirNotPrivate>() {
+                tracing::warn!(kind = %error.0, "log folder not made private");
+            }
             app.manage(LastOtherApp::default());
-            let (settings, settings_path) = load_settings(app.handle());
-            app.manage(Mutex::new(settings));
+            let data_dir = moved_app_data_dir(app.handle());
+            let (settings, settings_path) = load_settings(data_dir.as_ref());
+            app.manage(Mutex::new(settings.clone()));
             if let Some(path) = settings_path {
                 app.manage(SettingsPath(path));
             }
@@ -96,8 +103,17 @@ pub fn run() {
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
             track_last_other_app(app.handle(), mtm);
-            if let Err(error) = start_launch_log(app.handle(), mtm) {
-                tracing::warn!(%error, "usage tracking not started; running without growth");
+            let launch_log = data_dir
+                .as_ref()
+                .and_then(|data_dir| data_dir.file(LAUNCH_LOG_FILE));
+            if let Some(path) = launch_log {
+                if let Err(error) = start_launch_log(app.handle(), mtm, &path, &settings) {
+                    tracing::warn!(%error, "usage tracking not started; running without growth");
+                }
+            } else {
+                tracing::warn!(
+                    "usage tracking not started: the launch log is unknown or still in the old app folder"
+                );
             }
             let levels = macos::overlay::pin_above_dock(&overlay, mtm).map_err(Error::from)?;
             tracing::info!(
@@ -144,6 +160,26 @@ pub fn run() {
     });
 }
 
+/// The log plugin's setup creates the log folder and opens the file, so this
+/// runs before it (plugins set up in the order they are registered).
+fn private_log_dir() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("private-log-dir")
+        .setup(|app, _api| {
+            let made = app
+                .path()
+                .app_log_dir()
+                .map_err(|error| std::io::Error::other(error.to_string()))
+                .and_then(|dir| usage::private_dir(&dir));
+            if let Err(error) = made {
+                app.manage(LogDirNotPrivate(error.kind()));
+            }
+            Ok(())
+        })
+        .build()
+}
+
+struct LogDirNotPrivate(std::io::ErrorKind);
+
 /// The plugin calls this on a tokio task. Main-thread tasks run only once the
 /// event loop runs, which is after `setup()` has managed the state Settings
 /// needs.
@@ -155,13 +191,18 @@ fn on_second_launch(app: &AppHandle) {
     }
 }
 
-fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
-    let path = app.path().app_data_dir()?.join(LAUNCH_LOG_FILE);
-    let log = usage::load_or_set_aside(&path, Timestamp::now());
+fn start_launch_log(
+    app: &AppHandle,
+    mtm: macos::MainThreadMarker,
+    path: &Path,
+    saved: &Settings,
+) -> tauri::Result<()> {
+    let log = usage::load_or_set_aside(path, Timestamp::now());
     let entries = log.len();
     let first_run = log.baseline_at().is_none();
-    let fast_forward = fast_forward();
-    let inbox = launch_log_writer::spawn(path.clone(), log, fast_forward)?;
+    let fast_forward_override = fast_forward_override();
+    let fast_forward = saved.applied(fast_forward_override).fast_forward;
+    let inbox = launch_log_writer::spawn(path.to_path_buf(), log, saved, fast_forward_override)?;
     let own_bundle_id = app.config().identifier.clone();
     let now = Timestamp::now();
     let mut running = 0_usize;
@@ -198,13 +239,44 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
-    let path = match app.path().app_data_dir() {
-        Ok(dir) => dir.join(SETTINGS_FILE),
+/// The app data folder once the old folder's files are in it. Only
+/// `moved_app_data_dir` makes one, so nothing that reads app data can run
+/// before the move.
+struct DataDir {
+    dir: PathBuf,
+    moved: usage::MoveReport,
+}
+
+impl DataDir {
+    fn file(&self, name: &str) -> Option<PathBuf> {
+        self.moved.file_in(&self.dir, name)
+    }
+}
+
+fn moved_app_data_dir(app: &AppHandle) -> Option<DataDir> {
+    let new_dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
         Err(error) => {
-            tracing::warn!(%error, "settings path unknown; using defaults, saving off");
-            return (Settings::default(), None);
+            tracing::warn!(%error, "app data folder unknown; old data not moved");
+            return None;
         }
+    };
+    let moved = usage::old_data_dir(&new_dir)
+        .map(|old_dir| usage::move_old_data(&old_dir, &new_dir))
+        .unwrap_or_default();
+    moved.log();
+    Some(DataDir {
+        dir: new_dir,
+        moved,
+    })
+}
+
+fn load_settings(data_dir: Option<&DataDir>) -> (Settings, Option<PathBuf>) {
+    let Some(path) = data_dir.and_then(|data_dir| data_dir.file(SETTINGS_FILE)) else {
+        tracing::warn!(
+            "settings file unknown or still in the old app folder; using defaults, saving off"
+        );
+        return (Settings::default(), None);
     };
     let loaded = settings::load_file(&path);
     for problem in &loaded.problems {
@@ -215,27 +287,22 @@ fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
 }
 
 #[cfg(debug_assertions)]
-fn fast_forward() -> FastForward {
+fn fast_forward_override() -> Option<FastForward> {
     const VARIABLE: &str = "DOCKMOSS_FAST_FORWARD";
-    let Some(value) = std::env::var_os(VARIABLE) else {
-        return FastForward::X1;
-    };
-    let parsed = value
-        .to_str()
-        .and_then(|text| text.trim().parse::<u32>().ok())
-        .and_then(FastForward::from_factor);
+    let value = std::env::var_os(VARIABLE)?;
+    let parsed = value.to_str().and_then(FastForward::parse);
     if parsed.is_none() {
         tracing::warn!(
             value = %value.to_string_lossy(),
-            "{VARIABLE} is not 1, 10, 100 or 1000; using 1x"
+            "{VARIABLE} is not 1, 10, 100 or 1000; using the saved fast-forward"
         );
     }
-    parsed.unwrap_or_default()
+    parsed
 }
 
 #[cfg(not(debug_assertions))]
-fn fast_forward() -> FastForward {
-    FastForward::X1
+fn fast_forward_override() -> Option<FastForward> {
+    None
 }
 
 fn record_app_event(
@@ -283,8 +350,9 @@ mod launch_log_writer {
     use tauri::ipc::Channel;
 
     use crate::bundle_id::BundleId;
-    use crate::growth::{FastForward, Thresholds};
+    use crate::growth::FastForward;
     use crate::macos;
+    use crate::settings::Settings;
     use crate::usage::{
         self, AppEventKind, AppGrowth, Change, DistinctDockApps, DockApp, DockUpdate, LaunchLog,
         SaveSchedule, UsageState,
@@ -299,6 +367,7 @@ mod launch_log_writer {
         DockApps(Vec<DockApp>),
         ListDockApps(Sender<DistinctDockApps>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
+        Settings(Settings),
         Flush(Sender<()>),
     }
 
@@ -313,7 +382,8 @@ mod launch_log_writer {
     pub fn spawn(
         path: PathBuf,
         log: LaunchLog,
-        fast_forward: FastForward,
+        saved: &Settings,
+        fast_forward_override: Option<FastForward>,
     ) -> std::io::Result<Sender<WriterMessage>> {
         let (inbox, messages) = mpsc::channel();
         let writer = Writer {
@@ -321,8 +391,8 @@ mod launch_log_writer {
             state: UsageState::new(log),
             schedule: SaveSchedule::default(),
             seed_read: None,
-            fast_forward,
-            thresholds: Thresholds::default(),
+            applied: saved.applied(fast_forward_override),
+            fast_forward_override,
             watcher: None,
             last_sent: None,
             next_recompute: Instant::now(),
@@ -338,8 +408,8 @@ mod launch_log_writer {
         state: UsageState,
         schedule: SaveSchedule,
         seed_read: Option<JoinHandle<Readings>>,
-        fast_forward: FastForward,
-        thresholds: Thresholds,
+        applied: Settings,
+        fast_forward_override: Option<FastForward>,
         watcher: Option<Channel<Vec<AppGrowth>>>,
         last_sent: Option<Vec<AppGrowth>>,
         next_recompute: Instant,
@@ -405,6 +475,14 @@ mod launch_log_writer {
                     self.watcher = Some(channel);
                     self.last_sent = None;
                     tracing::debug!("growth watcher subscribed");
+                    self.recompute();
+                }
+                WriterMessage::Settings(saved) => {
+                    self.applied = saved.applied(self.fast_forward_override);
+                    tracing::debug!(
+                        fast_forward = self.applied.fast_forward.factor(),
+                        "settings applied to growth"
+                    );
                     self.recompute();
                 }
                 WriterMessage::Flush(ack) => {
@@ -476,11 +554,9 @@ mod launch_log_writer {
         fn recompute(&mut self) {
             let now = Instant::now();
             self.next_recompute = now
-                .checked_add(usage::recompute_interval(self.fast_forward))
+                .checked_add(usage::recompute_interval(self.applied.fast_forward))
                 .unwrap_or(now);
-            let frame = self
-                .state
-                .growth(Timestamp::now(), &self.thresholds, self.fast_forward);
+            let frame = self.state.growth(Timestamp::now(), &self.applied);
             if self.last_sent.as_ref() == Some(&frame) {
                 tracing::debug!(apps = frame.len(), "growth recomputed; unchanged");
                 return;

@@ -4,7 +4,7 @@ A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened i
 
 ## Status
 
-MVP slice 12 of 13 (the settings window). The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Settings… and Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Settings… and Quit DockMoss.
+MVP slice 13 of 13: settings apply live, launch at login, and the release bundle. Checkpoint D's last manual checks, running the release build from `/Applications` and measuring idle CPU with the Dock visible, are still open. The app starts with no Dock icon and puts a moss-tile glyph in the menu bar. At launch it checks whether it has the Accessibility grant. If not, macOS shows its own Accessibility dialog once, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list in System Settings, above Settings… and Quit DockMoss. A background thread re-checks every 5 s and removes the item once access is granted, or puts it back if access is revoked. With the grant, the menu has Settings… and Quit DockMoss.
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden) and moving, or the Dock moved in the last 250 ms, and at 2 Hz otherwise;
@@ -14,7 +14,7 @@ A transparent, click-through window covers the main display one level above the 
 
 The overlay draws moss on every Dock app whose overgrowth is above 0, all in one instanced WebGL draw. Overgrowth 0 draws nothing. At the Overgrown stage an icon also gets one to three small mushrooms or flowers, placed from its bundle ID and the same on every run. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower half of the icon in the middle, higher at the sides, so the top half of the app's glyph stays visible. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes, except during a shrivel. Each icon gets its own moss pattern and a shade between olive and blue-green, the same on every run; two Dock items for one app get the same overgrowth and a pattern each. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
 
-When you open an app whose icon has moss, the moss shrivels over 600 ms: it turns brown, sinks to the icon's bottom edge, and any mushrooms or flowers shrink with it, then the icon is clean. It plays once, on the icon's tile as it moves, and several icons can shrivel at once. Any drop of a mossy icon to clean plays it; today only use does that. An icon that leaves the Dock, a Dock that hides, a webview reload, or moss growing back ends a shrivel at once. While a shrivel runs, the renderer runs a frame loop at 30 frames a second, and stops it once the icon is clean. With `VITE_DOCKMOSS_OVERGROWTH` set, nothing shrivels, because the override pins every icon's overgrowth.
+When you open an app whose icon has moss, the moss shrivels over 600 ms: it turns brown, sinks to the icon's bottom edge, and any mushrooms or flowers shrink with it, then the icon is clean. It plays once, on the icon's tile as it moves, and several icons can shrivel at once. Any drop of a mossy icon to clean plays it: opening the app, or a settings change that clears the icon (an exclusion, intensity 0, or higher thresholds). An icon that leaves the Dock, a Dock that hides, a webview reload, or moss growing back ends a shrivel at once. While a shrivel runs, the renderer runs a frame loop at 30 frames a second, and stops it once the icon is clean. With `VITE_DOCKMOSS_OVERGROWTH` set, nothing shrivels, because the override pins every icon's overgrowth.
 
 The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay window itself is still in the Accessibility tree, as an empty web area.
 
@@ -28,7 +28,7 @@ To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number f
 VITE_DOCKMOSS_OVERGROWTH=0.6 pnpm tauri dev
 ```
 
-Growth comes from DockMoss's own launch log, a Spotlight seed taken once at the first run, and a first-seen time for apps with neither (see "Launch log" below; the rules are in SUMMARY.md, "Last-used data" and "Growth curve"). The usage thread recomputes it after every launch, activation, quit and Dock change, and every 5 minutes, and sends it to the overlay over the `watch_growth` channel only when it changes. A running app is always clean.
+Growth comes from DockMoss's own launch log, a Spotlight seed taken once at the first run, and a first-seen time for apps with neither (see "Launch log" below; the rules are in SUMMARY.md, "Last-used data" and "Growth curve"). It follows your settings (see "Settings"). The usage thread recomputes it after every launch, activation, quit, Dock change and settings change, and every 5 minutes at 1× (5 minutes divided by the fast-forward factor otherwise, at most once a second), and sends it to the overlay over the `watch_growth` channel only when it changes. A running app is always clean.
 
 ### Fast-forward (debug builds)
 
@@ -38,7 +38,7 @@ To watch moss grow without waiting days, start a debug build with a speed factor
 DOCKMOSS_FAST_FORWARD=1000 pnpm tauri dev
 ```
 
-The factor multiplies the time since each app was last used. `1`, `10`, `100` and `1000` are accepted; any other value logs a warning and runs at 1x. At 1000x an app quit at time t reaches Fuzz about 6 to 9 minutes later, depending on its jitter, and growth is recomputed every second. Release builds ignore the variable. The settings window has a fast-forward setting too; it is saved but not applied yet (see "Settings"), and the variable does not read or change it.
+The factor multiplies the time since each app was last used. `1`, `10`, `100` and `1000` are accepted; any other value logs a warning, and the saved fast-forward applies. At 1000x an app quit at time t reaches Fuzz about 6 to 9 minutes later, depending on its jitter, and growth is recomputed every second. Release builds ignore the variable. The settings window has a fast-forward setting too, which applies in every build. When the variable is set to a valid value it wins over the setting, and it never reads or changes it.
 
 ## Settings
 
@@ -46,16 +46,17 @@ Choose Settings… from the moss tile in the menu bar. The window opens in front
 
 Launching DockMoss again while it runs does the same: a double-click in Finder, Spotlight, `open`, or `open -n` opens Settings, or brings it to the front if it is already open. Only one copy of DockMoss runs at a time; a second copy hands over to the running one and exits before it touches your launch log or settings.
 
+- **Launch at login:** opens DockMoss when you log in to your Mac. Turning it on adds DockMoss to System Settings → General → Login Items → Open at Login, with no other permission prompt. macOS keeps this setting, not DockMoss: the box shows what macOS reports, so turning it off in System Settings shows as off the next time Settings opens. Only an app bundle can be a login item, so under `pnpm tauri dev` a change fails with the notice below. If macOS does not answer within half a second when Settings opens, the box stays disabled and says so; close and reopen Settings to ask again.
 - **Growth stages:** the days without use before Fuzz, Patchy and Overgrown begin (5, 10 and 30 by default). Each is a whole number from 2 to 3650, and each stage must be longer than the one before. A value that breaks the rule turns its field red with a message under the fields, and is not saved. The other settings still save.
-- **Intensity:** how strongly moss is drawn, 0% to 100% (100% by default).
-- **Fast-forward:** 1×, 10×, 100× or 1000× (1× by default). It multiplies the time since each app was last used, to preview growth.
-- **Excluded apps:** one checkbox per Dock app, by name, in Dock order. An excluded app that is no longer in the Dock stays in the list by bundle ID, marked "Not in the Dock", so it can be cleared. Without the Accessibility grant, the list says it fills in once DockMoss can read the Dock. At most 256 apps can be excluded.
+- **Intensity:** how strongly moss is drawn, 0% to 100% (100% by default). It scales how much of each icon the moss covers. An overgrown app keeps its mushrooms or flowers at any intensity above 0%, and at 0% no icon has moss.
+- **Fast-forward:** 1×, 10×, 100× or 1000× (1× by default). It multiplies the time since each app was last used, to preview growth. Use 1× for normal use.
+- **Excluded apps:** one checkbox per Dock app, by name, in Dock order. An excluded app never has moss. An excluded app that is no longer in the Dock stays in the list by bundle ID, marked "Not in the Dock", so it can be cleared. Without the Accessibility grant, the list says it fills in once DockMoss can read the Dock. At most 256 apps can be excluded.
 
 There is no Save button. A change is saved as soon as you make it: a number when you leave the field or press Return, the slider when you let go, a checkbox or speed when you click it. If a save fails, a notice at the top says so, and the control keeps your value until it saves. Close the window with its close button or ⌘W. The keyboard goes back to the last app you were in (a regular app, not a launcher such as Spotlight). If that app has quit, DockMoss steps back and macOS brings the next app forward. The window follows the system's light or dark appearance, and every control works from the keyboard.
 
-**Saved, not yet applied.** Your settings are saved and kept across restarts, but the moss does not use them yet: changing a stage, the intensity, the speed or an exclusion changes nothing on the Dock. The next slice applies them.
+**Changes apply at once.** A saved change reaches the moss on the Dock within a second, with no restart. A change that clears a mossy icon shrivels it, as opening the app would.
 
-Settings are stored in `~/Library/Application Support/com.dockmoss.app/settings.json` (mode 0600). DockMoss writes it only when you change a setting, the same way as the launch log: a temp file beside it, then a rename. It never writes it at startup or quit. If the file is missing, larger than 256 KiB, unreadable or not a settings file, DockMoss uses the defaults and leaves the file alone until your next change. A single bad value falls back to its default and the rest load. The log notes each case with a warning. To reset every setting, quit DockMoss and delete the file.
+Settings are stored in `~/Library/Application Support/app.dockmoss.DockMoss/settings.json` (mode 0600). Launch at login is not in this file. DockMoss writes it only when you change a setting, the same way as the launch log: a temp file beside it, then a rename. It never writes it at startup or quit. If the file is missing, larger than 256 KiB, unreadable or not a settings file, DockMoss uses the defaults and leaves the file alone until your next change. A single bad value falls back to its default and the rest load. The log notes each case with a warning. To reset every setting, quit DockMoss and delete the file.
 
 ## Requirements
 
@@ -75,6 +76,8 @@ pnpm tauri dev
 
 Quit any other DockMoss before you start it: an installed copy, a debug bundle, or another `tauri dev`. They all share the bundle identifier, so the dev copy would exit at once (and `tauri dev` with it), and the running copy would open its Settings instead.
 
+`pnpm tauri build` builds an unsigned release `src-tauri/target/release/bundle/macos/DockMoss.app` and nothing else (no DMG). Signing and notarization are milestone 7.
+
 `tauri dev` loads the page straight from Vite, so the Content Security Policy in `tauri.conf.json` is not applied there. To run with the real CSP and bundled assets, build with `pnpm tauri build --debug --no-bundle` and run `src-tauri/target/debug/dockmoss`. That debug build has the Web Inspector enabled, so use it only on your own machine and never hand it to anyone.
 
 ## Accessibility access
@@ -84,12 +87,13 @@ DockMoss needs the Accessibility grant to read the Dock. macOS gives the grant t
 - `pnpm tauri dev` uses the grant of the terminal you start it from. If your terminal is in System Settings → Privacy & Security → Accessibility, DockMoss runs trusted and the tray shows Settings… and Quit DockMoss.
 - An app bundle launched from Finder or with `open` is its own responsible process. Build one with `pnpm tauri build --debug --bundles app` and run `open src-tauri/target/debug/bundle/macos/DockMoss.app`. Without a grant, macOS shows its Accessibility dialog once at launch, and the tray menu offers Grant Accessibility Access…, which opens the Accessibility list. macOS 27 titles that list "Device Control and Data Access".
 - Local bundles are ad-hoc signed, so each rebuild has a new signature and macOS treats it as a different app: a grant does not carry over. Signing with a stable identity is milestone 7.
+- The bundle identifier changed from `com.dockmoss.app` to `app.dockmoss.DockMoss` in job 014, so a new build is a new entry in the Accessibility list. Old "DockMoss" entries can be removed there.
 
-While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. If access is revoked while the app runs, the Dock tracker notices on its next read, stops reading the Dock, and re-checks trust at most every 500 ms (without prompting) until access returns. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/com.dockmoss.app/DockMoss.log`. `tauri dev` also prints them to the terminal.
+While it runs, the app re-checks every 5 s without prompting and rebuilds the tray menu when the result changes, so a grant or revoke needs no restart. If access is revoked while the app runs, the Dock tracker notices on its next read, stops reading the Dock, and re-checks trust at most every 500 ms (without prompting) until access returns. It logs `accessibility trust checked` at startup and `accessibility trust changed` on each change, to `~/Library/Logs/app.dockmoss.DockMoss/DockMoss.log`. DockMoss makes that folder private (mode 0700) before the first line is written. `tauri dev` also prints them to the terminal.
 
 ## Launch log
 
-DockMoss records the last time each app was used in `~/Library/Application Support/com.dockmoss.app/launch_log.json`. An app counts as used when it launches, becomes frontmost or quits, and every app already running when DockMoss starts counts as used at that moment. Only regular apps with a bundle ID are recorded (the apps that can have a Dock icon), so agents, background helpers and DockMoss itself (any copy of it, including a second launch that is about to exit) are left out. The rule is in SUMMARY.md, "Last-used data", rule 1.
+DockMoss records the last time each app was used in `~/Library/Application Support/app.dockmoss.DockMoss/launch_log.json`. An app counts as used when it launches, becomes frontmost or quits, and every app already running when DockMoss starts counts as used at that moment. Only regular apps with a bundle ID are recorded (the apps that can have a Dock icon), so agents, background helpers and DockMoss itself (any copy of it, including a second launch that is about to exit) are left out. The rule is in SUMMARY.md, "Last-used data", rule 1.
 
 - **Format.** Version 1 JSON with four fields, each map sorted by bundle ID, and every time an RFC 3339 UTC string:
 
@@ -112,6 +116,16 @@ DockMoss records the last time each app was used in `~/Library/Application Suppo
 
 To start over, quit DockMoss and delete the file. The next start runs the first run again. `launch_log.json.corrupt` and `launch_log.json.dropped` are only kept for recovery by hand and can be deleted too.
 
+## Moving from `com.dockmoss.app`
+
+Builds before job 014 used the bundle identifier `com.dockmoss.app`. On its first start, a build with `app.dockmoss.DockMoss` moves `launch_log.json`, `settings.json`, `launch_log.json.corrupt` and `launch_log.json.dropped` from `~/Library/Application Support/com.dockmoss.app/` into `~/Library/Application Support/app.dockmoss.DockMoss/`, so your usage history and settings carry over. It does this before it reads either file.
+
+- Each file moves on its own, and only if it is a regular file and the new folder has no file of that name. No file is overwritten or merged, and no other file moves. The old folder is removed once it is empty. Later starts find nothing to move.
+- If a file cannot be moved, it stays in the old folder and the log names it (never its path). For that session DockMoss runs without it: with the launch log left behind it records no use and draws no moss, and with the settings left behind it uses the defaults and cannot save a change. The next start tries the move again. On a volume without hard links, such as some network home folders, the move cannot succeed.
+- If the log warns `old data file moved; its old copy was not removed`, the file in the old folder is a stale copy, and the old folder can be deleted by hand.
+- Logs now go to `~/Library/Logs/app.dockmoss.DockMoss/`. The old `~/Library/Logs/com.dockmoss.app/` folder is left as it was, and you may delete it.
+- Quit any DockMoss built with the old identifier before the first start of a new build. The two use different single-instance locks, so both could run and draw two overlays.
+
 ## Commands
 
 | Command | What it runs |
@@ -131,11 +145,13 @@ src-tauri/src/
   main.rs, lib.rs   # entry point; Tauri builder, plugins, setup(); lib.rs also holds
                     #   mod dock_tracker, the thread that reads, decides and sends, and
                     #   mod launch_log_writer, the usage thread that owns and saves the
-                    #   launch log, runs the first-run Spotlight read and sends growth
+                    #   launch log, runs the first-run Spotlight read and sends growth;
+                    #   setup() moves the old app data first and a small plugin makes the
+                    #   log folder 0700
   error.rs          # crate Error, serialized as { kind, message }
   commands.rs       # Tauri commands: watch_dock and watch_growth hand the overlay's
-                    #   Channels to the tracker and to the usage thread; get_settings
-                    #   and save_settings serve the settings window
+                    #   Channels to the tracker and to the usage thread; get_settings,
+                    #   save_settings and set_launch_at_login serve the settings window
   tracker.rs        # pure: per read, what to send, log and show; the poll rate and
                     #   Activity (60 Hz only while something moves, the 10 Hz rest
                     #   check, the reveal wait) and the absolute read deadlines
@@ -144,7 +160,10 @@ src-tauri/src/
   dock.rs           # pure: raw Dock children to DockItems (apps only), and ReadGate,
                     #   which stops AX reads while trust is revoked
   bundle_id.rs      # BundleId newtype
-  settings.rs       # the four settings, their checks, settings.json load and save
+  settings.rs       # the four settings, their checks, settings.json load and save, and
+                    #   the settings growth applies (with the debug fast-forward override)
+  login_item.rs     # pure: whether a login-item change worked, and the .app-only rule
+  bounded.rs        # a read on its own thread with a deadline (the login status)
   navigation.rs     # which URLs the windows may load
   focus.rs          # pure: which app Settings hands the keyboard back to, and whether
                     #   DockMoss hides when it closes
@@ -159,6 +178,8 @@ src-tauri/src/
     running.rs      #   which running apps are recorded
     spotlight.rs    #   mdls output parsing, the migration-batch check, SpotlightSeed
     state.rs        #   UsageState: first run, first-seen apps, running set, growth
+                    #   under the settings (thresholds, speed, exclusions, intensity)
+    migrate.rs      #   the one-time move out of the com.dockmoss.app folder
   macos/            # all objc2 / AppKit / AX code and every unsafe block
     app.rs          # the front app, the app at a pid, and activating one (settings
                     #   focus hand-back)
@@ -170,9 +191,11 @@ src-tauri/src/
     workspace.rs    # running apps, app launch/activate/quit notifications, and
                     #   opening the Accessibility list in System Settings
     spotlight.rs    # runs /usr/bin/mdls for one app, 2 s timeout
+    login_item.rs   # launch at login through SMAppService.mainApp
 src-tauri/capabilities/
   overlay.json      # overlay window may listen for events and call watch_dock and watch_growth
-  settings.json     # settings window may call get_settings and save_settings, and close
+  settings.json     # settings window may call get_settings, save_settings and
+                    #   set_launch_at_login, and close
 src-tauri/icons/
   source/           # SVG masters for the app icon and the tray glyph
 overlay.html        # Vite entry for the overlay window
@@ -190,7 +213,8 @@ src/                # webview frontend: overlay.ts (one subscription per channel
                     #   index.ts (DOM wiring), moss.vert.glsl, moss.frag.glsl
   settings.ts, settings.css  # the settings form
   settings/model.ts # pure: next settings, the one-at-a-time saver, feedback rules,
-                    #   exclusion rows (model.test.ts)
+                    #   exclusion rows, the launch at login box and its one-at-a-time
+                    #   toggle (model.test.ts)
 ```
 
 ## Icons

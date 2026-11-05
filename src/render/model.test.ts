@@ -157,6 +157,20 @@ describe("mossyIcons", () => {
     expect(mossyIcons(items, [], 1)).toMatchObject([{ overgrowth: 1, overgrown: true }]);
   });
 
+  it("keeps an overgrown app's sprites when intensity scales its overgrowth below 1", () => {
+    const items = [item("ru.keepcoder.Telegram", 280)];
+
+    expect(mossyIcons(items, [growth("ru.keepcoder.Telegram", 0.3, "overgrown")], null)).toMatchObject([
+      { overgrowth: quantize(0.3), overgrown: true },
+    ]);
+  });
+
+  it("draws nothing for an overgrown app sent at overgrowth 0, as intensity 0 sends it", () => {
+    const items = [item("ru.keepcoder.Telegram", 280)];
+
+    expect(mossyIcons(items, [growth("ru.keepcoder.Telegram", 0, "overgrown")], null)).toEqual([]);
+  });
+
   it("draws nothing under an override of 0", () => {
     const items = [item("com.hnc.Discord", 160)];
 
@@ -726,6 +740,16 @@ describe("shrivelsAfter", () => {
   it("starts none on the first scene after a load, reload or context restore", () => {
     expect(shrivelling([], [chess], cleanChess)).toEqual([]);
     expect([...shrivelsAfter(none, "unknown", [chess], cleanChess, []).values()]).toEqual([]);
+  });
+
+  it("starts one for a drawn item sent at overgrowth 0 that keeps its stage, as intensity 0 sends it", () => {
+    const drawn = mossyIcons([chess, discord], overgrownChess, null);
+    const intensityZero = [growth("com.apple.Chess", 0, "overgrown"), growth("com.hnc.Discord", 0)];
+
+    expect(shrivelling(drawn, [chess, discord], intensityZero)).toEqual([
+      { icon: drawn[0], startMs: null },
+      { icon: drawn[1], startMs: null },
+    ]);
   });
 
   it("starts none when overgrowth drops but stays above 0", () => {

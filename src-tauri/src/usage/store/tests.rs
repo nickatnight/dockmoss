@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
 
-use super::{MAX_FILE_BYTES, load_or_set_aside, save};
+use super::{MAX_FILE_BYTES, load_or_set_aside, private_dir, save};
 use crate::bundle_id::BundleId;
 use crate::usage::LaunchLog;
+use crate::usage::migrate::{LAUNCH_LOG_FILE, MOVED_FILES};
 
 fn at(text: &str) -> Timestamp {
     text.parse().expect("test timestamps are valid RFC 3339")
@@ -242,6 +243,38 @@ fn a_file_with_a_dropped_entry_is_copied_byte_for_byte_to_dropped() {
 }
 
 #[test]
+fn every_copy_set_aside_beside_the_log_is_one_the_move_carries() {
+    for (case, text) in [("corrupt", "not json"), ("dropped entry", ONE_BAD_ENTRY)] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(LAUNCH_LOG_FILE);
+        fs::write(&path, text).expect("write file");
+
+        load_or_set_aside(&path, at(NOW));
+
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .expect("list the folder")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert!(
+            names.iter().any(|name| name != LAUNCH_LOG_FILE),
+            "{case}: a copy was set aside: {names:?}"
+        );
+        for name in &names {
+            assert!(
+                MOVED_FILES.contains(&name.as_str()),
+                "{case}: {name} is not moved"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_clean_file_leaves_no_dropped_copy() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = log_path(&dir);
@@ -286,4 +319,45 @@ fn a_failed_dropped_copy_still_loads_the_log() {
         log.last_launched(&id("com.apple.Safari")),
         Some(at("2026-11-02T09:14:03Z"))
     );
+}
+
+fn dir_mode(path: &Path) -> u32 {
+    fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+}
+
+#[test]
+fn private_dir_creates_a_missing_folder_and_its_parents_0700() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("Logs/app.dockmoss.DockMoss");
+
+    private_dir(&path).expect("created");
+
+    assert_eq!(dir_mode(&path), 0o700);
+}
+
+#[test]
+fn private_dir_makes_an_existing_folder_0700() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("app.dockmoss.DockMoss");
+    fs::create_dir(&path).expect("folder");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    private_dir(&path).expect("made private");
+
+    assert_eq!(dir_mode(&path), 0o700);
+}
+
+#[test]
+fn private_dir_refuses_a_link_and_leaves_its_target_alone() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let target = dir.path().join("elsewhere");
+    fs::create_dir(&target).expect("target");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).expect("chmod");
+    let path = dir.path().join("app.dockmoss.DockMoss");
+    std::os::unix::fs::symlink(&target, &path).expect("symlink");
+
+    let refused = private_dir(&path);
+
+    assert!(refused.is_err());
+    assert_eq!(dir_mode(&target), 0o755);
 }

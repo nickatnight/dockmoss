@@ -1,7 +1,7 @@
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
@@ -11,6 +11,7 @@ use super::log::{DecodeError, Decoded, Dropped, LaunchLog, decode, encode};
 
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const FILE_MODE: u32 = 0o600;
+const DIR_MODE: u32 = 0o700;
 
 /// Why a file read through `read_capped` could not be used.
 #[derive(Debug, thiserror::Error)]
@@ -144,6 +145,26 @@ fn remove_stale(path: &Path) -> Result<(), UsageError> {
             Err(io_error("remove the stale file", path)(error))
         }
         _ => Ok(()),
+    }
+}
+
+/// Creates the folder at `path`, and any missing parent, with mode 0700, or
+/// sets an existing folder to 0700. A link or a file at `path` is an error,
+/// never followed.
+pub fn private_dir(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => {
+            if metadata.permissions().mode() & 0o777 != DIR_MODE {
+                fs::set_permissions(path, fs::Permissions::from_mode(DIR_MODE))?;
+            }
+            Ok(())
+        }
+        Ok(_) => Err(io::ErrorKind::NotADirectory.into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => DirBuilder::new()
+            .recursive(true)
+            .mode(DIR_MODE)
+            .create(path),
+        Err(error) => Err(error),
     }
 }
 

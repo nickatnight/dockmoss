@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -8,12 +8,16 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::Error;
+use crate::bounded;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
+use crate::login_item;
+use crate::macos;
 use crate::settings::{self, NotSaved, Settings, SettingsView};
 use crate::usage::{self, AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
+const LOGIN_STATUS_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
@@ -61,12 +65,39 @@ pub async fn get_settings(
     app: AppHandle,
     settings: State<'_, Mutex<Settings>>,
 ) -> Result<SettingsView, Error> {
+    let login = tauri::async_runtime::spawn(launch_at_login());
     let dock = dock_apps(&app).await;
+    let launch_at_login = login.await.unwrap_or_else(|error| {
+        tracing::warn!(%error, "launch at login status not read");
+        None
+    });
     let settings = settings
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    Ok(SettingsView::new(settings, dock.as_ref()))
+    Ok(SettingsView::new(settings, dock.as_ref(), launch_at_login))
+}
+
+/// `None` when `ServiceManagement` does not answer in time, so Settings opens
+/// anyway, with only the launch at login box left disabled.
+async fn launch_at_login() -> Option<bool> {
+    let waited = tauri::async_runtime::spawn_blocking(|| {
+        bounded::read_within(LOGIN_STATUS_TIMEOUT, || {
+            macos::login_item::status().opens_at_login()
+        })
+    })
+    .await;
+    match waited {
+        Ok(Some(opens_at_login)) => Some(opens_at_login),
+        Ok(None) => {
+            tracing::warn!("launch at login status not read in time");
+            None
+        }
+        Err(error) => {
+            tracing::warn!(%error, "launch at login status not read");
+            None
+        }
+    }
 }
 
 async fn dock_apps(app: &AppHandle) -> Option<DistinctDockApps> {
@@ -117,5 +148,42 @@ fn save_settings_blocking(app: &AppHandle, value: &Map<String, Value>) -> Result
     })
     .inspect_err(|error| tracing::warn!(%error, "settings not saved"))?;
     saved.log("settings saved");
+    apply_to_growth(app, &saved);
     Ok(saved.clone())
+}
+
+/// Takes the guard, so a send can only happen under the settings lock: the
+/// usage thread then applies saves in the order they were written.
+fn apply_to_growth(app: &AppHandle, saved: &MutexGuard<'_, Settings>) {
+    let Some(inbox) = app.try_state::<LaunchLogInbox>() else {
+        tracing::debug!("settings saved; usage tracking is off, so nothing to apply");
+        return;
+    };
+    if inbox
+        .0
+        .send(WriterMessage::Settings(Settings::clone(saved)))
+        .is_err()
+    {
+        tracing::warn!("saved settings not applied: the usage thread stopped");
+    }
+}
+
+/// Turns launch at login on or off and returns whether the app now opens at
+/// login, as macOS reports it after the change. `login_item_not_changed` when
+/// macOS did not end in the state asked for.
+#[tauri::command]
+pub async fn set_launch_at_login(enabled: bool) -> Result<bool, Error> {
+    tauri::async_runtime::spawn_blocking(move || set_launch_at_login_blocking(enabled)).await?
+}
+
+fn set_launch_at_login_blocking(wanted: bool) -> Result<bool, Error> {
+    if let Err(error) = macos::login_item::set(wanted) {
+        tracing::warn!(%error, wanted, "launch at login change refused");
+    }
+    let after = macos::login_item::status();
+    let now = login_item::outcome(wanted, after).inspect_err(|_| {
+        tracing::warn!(wanted, ?after, "launch at login not changed");
+    })?;
+    tracing::info!(launch_at_login = now, "launch at login set");
+    Ok(now)
 }

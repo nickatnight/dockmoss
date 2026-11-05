@@ -2,6 +2,7 @@ use std::io;
 use std::path::PathBuf;
 
 mod log;
+mod migrate;
 mod running;
 mod schedule;
 mod spotlight;
@@ -9,11 +10,12 @@ mod state;
 mod store;
 
 pub use log::LaunchLog;
+pub use migrate::{LAUNCH_LOG_FILE, MoveReport, SETTINGS_FILE, move_old_data, old_data_dir};
 pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
 pub use schedule::{SaveSchedule, recompute_interval};
 pub use spotlight::parse_mdls;
 pub use state::{AppGrowth, Change, DistinctDockApps, DockApp, DockUpdate, UsageState};
-pub use store::{load_or_set_aside, read_capped, save, write_atomically};
+pub use store::{load_or_set_aside, private_dir, read_capped, save, write_atomically};
 
 #[derive(Debug, thiserror::Error)]
 pub enum UsageError {

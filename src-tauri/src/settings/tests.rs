@@ -7,7 +7,7 @@ use super::{
     Settings, SettingsError, SettingsView, commit, decode_file, load_file,
 };
 use crate::bundle_id::BundleId;
-use crate::growth::{FastForward, GrowthError, Thresholds};
+use crate::growth::{FastForward, GrowthError, Overgrowth, Thresholds};
 use crate::usage::{DistinctDockApps, DockApp};
 
 fn object(value: Value) -> Map<String, Value> {
@@ -433,7 +433,11 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
         dock_app("com.apple.Chess", "/System/Applications/Chess.app"),
     ];
 
-    let view = SettingsView::new(Settings::default(), Some(&DistinctDockApps::new(&dock)));
+    let view = SettingsView::new(
+        Settings::default(),
+        Some(&DistinctDockApps::new(&dock)),
+        Some(true),
+    );
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(
@@ -445,6 +449,7 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
                 { "bundleId": "com.apple.Safari", "name": "Safari" },
                 { "bundleId": "com.apple.Chess", "name": "Chess" },
             ],
+            "launchAtLogin": true,
         })
     );
     assert!(!json.to_string().contains("someone"), "{json}");
@@ -452,15 +457,24 @@ fn the_settings_view_holds_settings_limits_and_named_dock_apps_without_paths() {
 
 #[test]
 fn an_unknown_dock_list_is_sent_as_null() {
-    let view = SettingsView::new(Settings::default(), None);
+    let view = SettingsView::new(Settings::default(), None, None);
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(json["dockApps"], Value::Null);
+    assert_eq!(
+        json["launchAtLogin"],
+        Value::Null,
+        "an unknown login status is sent as null"
+    );
 }
 
 #[test]
 fn an_empty_dock_list_is_unknown_because_a_readable_dock_always_holds_finder() {
-    let view = SettingsView::new(Settings::default(), Some(&DistinctDockApps::new(&[])));
+    let view = SettingsView::new(
+        Settings::default(),
+        Some(&DistinctDockApps::new(&[])),
+        Some(false),
+    );
 
     let json = serde_json::to_value(&view).expect("SettingsView serializes");
     assert_eq!(json["dockApps"], Value::Null);
@@ -651,4 +665,70 @@ fn an_unreadable_file_is_one_problem_not_two() {
         "{:?}",
         loaded.problems
     );
+}
+
+#[test]
+fn applied_settings_take_the_override_speed_only_when_there_is_one() {
+    let saved = customised();
+    let cases = [
+        ("no override", None, FastForward::X100),
+        ("an override", Some(FastForward::X1000), FastForward::X1000),
+        (
+            "an override back to 1x",
+            Some(FastForward::X1),
+            FastForward::X1,
+        ),
+    ];
+    for (case, override_speed, expected) in cases {
+        let applied = saved.applied(override_speed);
+
+        assert_eq!(applied.fast_forward, expected, "{case}");
+        assert_eq!(
+            Settings {
+                fast_forward: saved.fast_forward,
+                ..applied
+            },
+            saved,
+            "{case}: every other setting is the saved one"
+        );
+    }
+}
+
+#[test]
+fn intensity_scales_overgrowth_by_its_percent() {
+    let cases = [
+        (100, 0.73, 0.73),
+        (100, 1.0, 1.0),
+        (50, 0.8, 0.4),
+        (30, 1.0, 0.3),
+        (0, 1.0, 0.0),
+        (0, 0.0, 0.0),
+    ];
+    for (percent, overgrowth, expected) in cases {
+        let scaled = Intensity::new(percent)
+            .expect("0 to 100")
+            .scale(Overgrowth::new(overgrowth));
+
+        assert!(
+            (scaled.get() - expected).abs() < 1e-6,
+            "{percent}% of {overgrowth}: {}",
+            scaled.get()
+        );
+    }
+    assert_eq!(
+        Intensity::new(100)
+            .expect("0 to 100")
+            .scale(Overgrowth::new(0.712_345_6))
+            .get(),
+        0.712_345_6,
+        "100% is exact"
+    );
+}
+
+#[test]
+fn exclusions_contain_only_their_bundle_ids() {
+    let excluded = customised().excluded;
+
+    assert!(excluded.contains(&BundleId::new("com.apple.Chess").expect("valid")));
+    assert!(!excluded.contains(&BundleId::new("com.apple.Chess2").expect("valid")));
 }

@@ -17,7 +17,6 @@
   cursor: default;
 }
 
-/* The window is the scroll boundary: only the app list scrolls. */
 html,
 body {
   height: 100%;
@@ -149,6 +148,34 @@ input[type="number"][aria-invalid="true"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* The box in the first column; its title and hint share the second, so the
+   hint lines up with the title whatever the box's width. */
+.check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.check > input {
+  margin: 0;
+}
+
+/* Only the title toggles the box, not the empty card beside it: the box
+   changes a system login item. */
+.check > label {
+  justify-self: start;
+}
+
+.check > p.hint {
+  grid-column: 2;
+  margin: 0;
+}
+
+.check > .hint + .hint {
+  margin-top: 4px;
+}
+
 .speeds {
   display: flex;
   gap: 20px;
@@ -244,7 +271,8 @@ input[type="range"]:focus-visible {
 }
 
 fieldset:disabled,
-.group:has(> .slider > input:disabled) {
+.group:has(> .slider > input:disabled),
+.check:has(> input:disabled) > :is(input, label) {
   opacity: 0.6;
 }
 

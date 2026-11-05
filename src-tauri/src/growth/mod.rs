@@ -111,6 +111,10 @@ impl FastForward {
         }
     }
 
+    pub fn parse(text: &str) -> Option<Self> {
+        text.trim().parse().ok().and_then(Self::from_factor)
+    }
+
     pub fn factor(self) -> u32 {
         match self {
             Self::X1 => 1,

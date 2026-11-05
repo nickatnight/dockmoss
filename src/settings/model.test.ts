@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   BundleId,
   DockAppName,
+  LaunchAtLoginResult,
   SaveSettingsResult,
   Settings,
   SettingsInput,
@@ -10,14 +11,17 @@ import type {
 } from "../ipc";
 import {
   NO_FEEDBACK,
+  createLoginToggle,
   createSettingsSaver,
-  exclusionLimitMessage,
-  invalidDays,
-  reannounced,
   enteredDays,
+  exclusionLimitMessage,
   exclusionRows,
+  invalidDays,
+  launchAtLoginBox,
+  launchAtLoginShown,
   nextFeedback,
   nextSettings,
+  reannounced,
   thresholdMessage,
   toFastForward,
 } from "./model";
@@ -388,6 +392,26 @@ describe("nextFeedback", () => {
     });
   });
 
+  it("clears the threshold message when a corrected entry passes the rules but is not written", () => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+    const fuzz3 = {
+      field: "thresholds",
+      thresholds: { fuzz: 3, patchy: 10, overgrown: 30 },
+    } as const;
+
+    expect(nextFeedback(shown, fuzz3, notSaved)).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["thresholds"],
+    });
+  });
+
+  it("keeps the threshold message when a threshold save gets no reply, since the entry was not checked", () => {
+    const shown = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
+
+    expect(nextFeedback(shown, fuzz1, ipcFailed).thresholdError).toBe(true);
+  });
+
   it("keeps another control's save notice when thresholds are rejected", () => {
     const failed = nextFeedback(NO_FEEDBACK, intensity, notSaved);
 
@@ -416,6 +440,31 @@ describe("nextFeedback", () => {
 
     expect(nextFeedback(refused, unexcluded, ok).exclusionLimit).toBe(false);
     expect(nextFeedback(refused, intensity, ok).exclusionLimit).toBe(true);
+  });
+
+  it("keeps the threshold message and another control's save notice when an exclusion is refused", () => {
+    const shown = nextFeedback(nextFeedback(NO_FEEDBACK, intensity, notSaved), fuzz1, invalid);
+
+    expect(nextFeedback(shown, exclude("com.a"), invalid)).toEqual({
+      thresholdError: true,
+      exclusionLimit: true,
+      unsaved: ["intensityPercent"],
+    });
+  });
+
+  it("keeps the exclusion limit when another save fails or thresholds are rejected", () => {
+    const refused = nextFeedback(NO_FEEDBACK, exclude("com.a"), invalid);
+
+    expect(nextFeedback(refused, intensity, notSaved).exclusionLimit).toBe(true);
+    expect(nextFeedback(refused, fuzz1, invalid).exclusionLimit).toBe(true);
+  });
+
+  it("shows the save notice when Rust rejects a field that has no message of its own", () => {
+    expect(nextFeedback(NO_FEEDBACK, speed, invalid)).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["fastForward"],
+    });
   });
 
   it("tracks each excluded app on its own", () => {
@@ -470,6 +519,35 @@ describe("reannounced", () => {
     expect(reannounced(failed, exclude, ok).saveNotice).toBe(false);
   });
 
+  it("re-announces only the message the failed field owns", () => {
+    const notSaved: SaveSettingsResult = {
+      ok: false,
+      error: { kind: "settings_not_saved", message: "settings could not be saved" },
+    };
+    const all = nextFeedback(nextFeedback(shown, exclude, invalid), intensity, notSaved);
+
+    expect(reannounced(all, fuzz1, invalid)).toEqual({
+      threshold: true,
+      exclusionLimit: false,
+      saveNotice: false,
+    });
+    expect(reannounced(all, exclude, invalid)).toEqual({
+      threshold: false,
+      exclusionLimit: true,
+      saveNotice: false,
+    });
+    expect(reannounced(all, fuzz1, notSaved)).toEqual({
+      threshold: false,
+      exclusionLimit: false,
+      saveNotice: true,
+    });
+    expect(reannounced(all, exclude, notSaved)).toEqual({
+      threshold: false,
+      exclusionLimit: false,
+      saveNotice: true,
+    });
+  });
+
   it("re-announces a repeated exclusion refusal", () => {
     const refused = nextFeedback(NO_FEEDBACK, exclude, invalid);
 
@@ -483,6 +561,12 @@ describe("exclusionLimitMessage", () => {
     expect(
       exclusionLimitMessage({ minFuzzDays: 2, maxOvergrownDays: 3650, maxExclusions: 256 }),
     ).toBe("At most 256 apps can be excluded.");
+  });
+
+  it("follows the cap rather than restating it", () => {
+    expect(
+      exclusionLimitMessage({ minFuzzDays: 2, maxOvergrownDays: 3650, maxExclusions: 300 }),
+    ).toBe("At most 300 apps can be excluded.");
   });
 });
 
@@ -498,6 +582,17 @@ describe("invalidDays", () => {
     ["a fractional patchy", { fuzz: 5, patchy: 10.5, overgrown: 30 }, ["patchy"]],
     ["patchy above overgrown", { fuzz: 5, patchy: 40, overgrown: 30 }, ["overgrown"]],
     ["two wrong at once", { fuzz: 1, patchy: 10, overgrown: 4000 }, ["fuzz", "overgrown"]],
+    ["fuzz at the minimum, patchy equal to it", { fuzz: 2, patchy: 2, overgrown: 30 }, ["patchy"]],
+    [
+      "overgrown at the maximum, equal to patchy",
+      { fuzz: 5, patchy: 3650, overgrown: 3650 },
+      ["overgrown"],
+    ],
+    [
+      "fuzz above the maximum, the rest in order",
+      { fuzz: 4000, patchy: 10, overgrown: 30 },
+      ["fuzz"],
+    ],
   ] as const)("marks only the wrong field: %s", (_case, thresholds, expected) => {
     expect(invalidDays(thresholds, limits)).toEqual(expected);
   });
@@ -508,5 +603,203 @@ describe("invalidDays", () => {
       "patchy",
       "overgrown",
     ]);
+  });
+});
+
+describe("launch at login feedback", () => {
+  const turnOn = { field: "launchAtLogin", enabled: true } as const;
+  const intensity = { field: "intensityPercent", percent: 40 } as const;
+  const notChanged: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "login_item_not_changed", message: "launch at login was not changed" },
+  };
+  const ipcFailed: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "ipc_failed", cause: "gone" },
+  };
+  const turnedOn: LaunchAtLoginResult = { ok: true, enabled: true };
+  const notSaved: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "settings_not_saved", message: "settings could not be saved" },
+  };
+
+  it.each([
+    ["login_item_not_changed", notChanged],
+    ["ipc_failed", ipcFailed],
+  ])("shows the save notice after %s, and no field message", (_kind, result) => {
+    expect(nextFeedback(NO_FEEDBACK, turnOn, result)).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["launchAtLogin"],
+    });
+  });
+
+  it("clears its own notice once a change goes through, and no other control's", () => {
+    const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
+    const bothFailed = nextFeedback(failed, intensity, notSaved);
+
+    expect(nextFeedback(bothFailed, turnOn, turnedOn).unsaved).toEqual(["intensityPercent"]);
+  });
+
+  it("re-announces the save notice when it fails again while the notice shows", () => {
+    const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
+
+    expect(reannounced(failed, turnOn, notChanged).saveNotice).toBe(true);
+    expect(reannounced(NO_FEEDBACK, turnOn, notChanged).saveNotice).toBe(false);
+  });
+});
+
+describe("launchAtLoginShown", () => {
+  it.each([
+    ["turned on", true, { ok: true, enabled: true }, true],
+    ["turned off", false, { ok: true, enabled: false }, false],
+    ["on, but macOS reports off", true, { ok: true, enabled: false }, false],
+    [
+      "on refused",
+      true,
+      { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
+      false,
+    ],
+    [
+      "off refused",
+      false,
+      { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
+      true,
+    ],
+    ["on, no reply", true, { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, false],
+  ] as const)("%s: the box shows what macOS ends in", (_case, wanted, result, expected) => {
+    expect(launchAtLoginShown(wanted, result)).toBe(expected);
+  });
+});
+
+describe("createLoginToggle", () => {
+  const ok = (enabled: boolean): LaunchAtLoginResult => ({ ok: true, enabled });
+  const notChanged: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "login_item_not_changed", message: "launch at login was not changed" },
+  };
+  function fakeSet() {
+    const calls: { wanted: boolean; reply: (result: LaunchAtLoginResult) => void }[] = [];
+    const set = (wanted: boolean) =>
+      new Promise<LaunchAtLoginResult>((reply) => calls.push({ wanted, reply }));
+    return { calls, set };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("sets the box from a lone change's result", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const done = toggle(true);
+    await settle();
+    calls[0]?.reply(ok(true));
+
+    expect(await done).toEqual({ result: ok(true), shown: true });
+  });
+
+  it("runs a second change only after the first has answered", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    void toggle(true);
+    void toggle(false);
+    await settle();
+    expect(calls.map(({ wanted }) => wanted)).toEqual([true]);
+
+    calls[0]?.reply(ok(true));
+    await settle();
+    expect(calls.map(({ wanted }) => wanted)).toEqual([true, false]);
+  });
+
+  it("leaves the box alone for a result a later change has overtaken, and the last result sets it", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const first = toggle(true);
+    const second = toggle(false);
+    await settle();
+    calls[0]?.reply(ok(true));
+    await settle();
+    calls[1]?.reply(ok(false));
+
+    expect(await first).toEqual({ result: ok(true), shown: null });
+    expect(await second).toEqual({ result: ok(false), shown: false });
+  });
+
+  it("lets the last result set the box even when it fails", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const first = toggle(true);
+    const second = toggle(false);
+    await settle();
+    calls[0]?.reply(ok(true));
+    await settle();
+    calls[1]?.reply(notChanged);
+
+    expect((await first).shown).toBeNull();
+    expect(await second).toEqual({ result: notChanged, shown: true });
+  });
+
+  it("gives a change that throws an ipc_failed result, and the box what macOS kept", async () => {
+    const gone = new Error("bridge gone");
+    const toggle = createLoginToggle(() => Promise.reject(gone));
+
+    expect(await toggle(true)).toEqual({
+      result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
+      shown: false,
+    });
+  });
+
+  it("keeps running changes after a change throws, and an overtaken throw leaves the box alone", async () => {
+    const gone = new Error("bridge gone");
+    const wanted: boolean[] = [];
+    const toggle = createLoginToggle((change) => {
+      wanted.push(change);
+      return wanted.length === 1 ? Promise.reject(gone) : Promise.resolve(ok(change));
+    });
+
+    const first = toggle(true);
+    const second = toggle(false);
+
+    expect(await first).toEqual({
+      result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
+      shown: null,
+    });
+    expect(await second).toEqual({ result: ok(false), shown: false });
+    expect(wanted).toEqual([true, false]);
+  });
+
+  it("sets the box again for a change made after the last one answered", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const first = toggle(true);
+    await settle();
+    calls[0]?.reply(ok(true));
+    expect((await first).shown).toBe(true);
+
+    const second = toggle(false);
+    await settle();
+    calls[1]?.reply(ok(false));
+    expect((await second).shown).toBe(false);
+  });
+});
+
+describe("launchAtLoginBox", () => {
+  it.each([
+    ["on", true, { checked: true, disabled: false, note: null }],
+    ["off", false, { checked: false, disabled: false, note: null }],
+    [
+      "unknown: macOS did not answer in time, and the note says why",
+      null,
+      {
+        checked: false,
+        disabled: true,
+        note: "macOS did not say whether this is on. To ask again, close and reopen Settings.",
+      },
+    ],
+  ] as const)("%s", (_case, status, expected) => {
+    expect(launchAtLoginBox(status)).toEqual(expected);
   });
 });

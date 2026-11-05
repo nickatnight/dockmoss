@@ -19,6 +19,8 @@ pub enum Error {
     InvalidSettings(#[from] crate::settings::SettingsError),
     #[error("settings could not be saved")]
     SettingsNotSaved(#[from] crate::settings::NotSaved),
+    #[error(transparent)]
+    LoginItemNotChanged(#[from] crate::login_item::NotChanged),
 }
 
 impl Error {
@@ -32,6 +34,7 @@ impl Error {
             Self::UsageStopped => "usage_stopped",
             Self::InvalidSettings(_) => "invalid_settings",
             Self::SettingsNotSaved(_) => "settings_not_saved",
+            Self::LoginItemNotChanged(_) => "login_item_not_changed",
         }
     }
 }

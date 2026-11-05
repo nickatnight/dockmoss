@@ -1,7 +1,7 @@
 use super::{RunningApp, tracked_bundle_id};
 use crate::bundle_id::BundleId;
 
-const OWN: &str = "com.dockmoss.app";
+const OWN: &str = "app.dockmoss.DockMoss";
 
 #[test]
 fn only_regular_apps_with_a_bundle_id_are_tracked() {
@@ -16,15 +16,21 @@ fn only_regular_apps_with_a_bundle_id_are_tracked() {
         ("regular with an empty ID", Some(""), true, None),
         (
             "an ID that extends DockMoss's",
-            Some("com.dockmoss.app.helper"),
+            Some("app.dockmoss.DockMoss.helper"),
             true,
-            BundleId::new("com.dockmoss.app.helper"),
+            BundleId::new("app.dockmoss.DockMoss.helper"),
         ),
         (
             "an ID that DockMoss's extends",
-            Some("com.dockmoss"),
+            Some("app.dockmoss"),
             true,
-            BundleId::new("com.dockmoss"),
+            BundleId::new("app.dockmoss"),
+        ),
+        (
+            "the identifier DockMoss had before slice 13",
+            Some("com.dockmoss.app"),
+            true,
+            BundleId::new("com.dockmoss.app"),
         ),
         (
             "an agent or helper with an ID",

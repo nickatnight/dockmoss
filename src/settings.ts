@@ -5,10 +5,12 @@ import {
   enteredDays,
   exclusionLimitMessage,
   exclusionRows,
+  invalidDays,
   nextFeedback,
   reannounced,
   thresholdMessage,
   toFastForward,
+  type DayField,
   type ExclusionRow,
   type Feedback,
   type SettingsChange,
@@ -137,7 +139,8 @@ interface Messages {
 function showFeedback(
   feedback: Feedback,
   messages: Messages,
-  again: { threshold: boolean; exclusionLimit: boolean },
+  again: { threshold: boolean; exclusionLimit: boolean; saveNotice: boolean },
+  wrongDays: readonly DayField[],
 ): void {
   setAlert(
     page.stagesMessage,
@@ -149,23 +152,24 @@ function showFeedback(
     feedback.exclusionLimit ? messages.exclusionLimit : "",
     again.exclusionLimit,
   );
-  for (const input of dayInputs) {
-    if (feedback.thresholdError) {
-      input.setAttribute("aria-invalid", "true");
+  for (const field of ["fuzz", "patchy", "overgrown"] as const) {
+    if (feedback.thresholdError && wrongDays.includes(field)) {
+      page.days[field].setAttribute("aria-invalid", "true");
     } else {
-      input.removeAttribute("aria-invalid");
+      page.days[field].removeAttribute("aria-invalid");
     }
   }
   showSaveError(
     feedback.unsaved.length > 0
       ? "This change could not be saved. Try again."
       : null,
+    again.saveNotice,
   );
 }
 
-function showSaveError(message: string | null): void {
-  page.saveError.textContent = message ?? "";
+function showSaveError(message: string | null, again = false): void {
   page.saveError.hidden = message === null;
+  setAlert(page.saveError, message ?? "", again);
 }
 
 function enteredThresholds(): SettingsChange {
@@ -193,6 +197,7 @@ async function start(): Promise<void> {
     exclusionLimit: exclusionLimitMessage(view.limits),
   };
   let feedback = NO_FEEDBACK;
+  let wrongDays: DayField[] = [];
   /** `undo` puts the control back when Rust refuses the value outright, as
    * for an exclusion past the cap, which no retry can store. */
   const commit = (change: SettingsChange, undo?: () => void): void => {
@@ -208,7 +213,10 @@ async function start(): Promise<void> {
         }
         const again = reannounced(feedback, change, result);
         feedback = nextFeedback(feedback, change, result);
-        showFeedback(feedback, messages, again);
+        if (change.field === "thresholds") {
+          wrongDays = invalidDays(change.thresholds, view.limits);
+        }
+        showFeedback(feedback, messages, again, wrongDays);
         if (!result.ok && result.error.kind === "invalid_settings") {
           undo?.();
         }

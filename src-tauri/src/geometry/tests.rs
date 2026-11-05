@@ -195,3 +195,34 @@ fn infinite_rect_spanning_the_display_is_dropped() {
 
     assert_eq!(local, None);
 }
+
+#[test]
+fn the_settings_window_shrinks_to_fit_a_short_work_area() {
+    let cases = [
+        (
+            "a tall display keeps the preferred height",
+            Some(958.0),
+            760.0,
+        ),
+        (
+            "an 800 pt display under the menu bar and Dock",
+            Some(700.0),
+            652.0,
+        ),
+        (
+            "an unknown work area keeps the preferred height",
+            None,
+            760.0,
+        ),
+        (
+            "a tiny work area keeps a usable minimum",
+            Some(300.0),
+            400.0,
+        ),
+    ];
+
+    for (case, work_area_height, expected) in cases {
+        let height = super::settings_window_height(760.0, work_area_height);
+        assert!((height - expected).abs() < 1e-9, "{case}: {height}");
+    }
+}

@@ -99,10 +99,12 @@
         <legend>Excluded apps</legend>
         <div class="fill">
           <p id="excluded-hint" class="hint">These apps never grow moss.</p>
-          <p id="dock-unknown" class="hint" hidden>
-            The list fills in once DockMoss can read the Dock.
-          </p>
-          <ul id="excluded-apps" class="apps"></ul>
+          <div class="well">
+            <p id="dock-unknown" class="empty" hidden>
+              The list fills in once DockMoss can read the Dock.
+            </p>
+            <ul id="excluded-apps" class="apps"></ul>
+          </div>
           <p id="excluded-message" class="field-error" role="alert"></p>
         </div>
       </fieldset>

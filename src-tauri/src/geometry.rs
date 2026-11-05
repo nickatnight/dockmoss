@@ -77,5 +77,18 @@ pub fn to_overlay_local(rect: ScreenRect, display: Display) -> Option<LogicalRec
     })
 }
 
+/// The settings window's logical inner height: `preferred`, or less when
+/// the display's work area (menu bar and Dock excluded) is shorter, leaving
+/// room for the title bar and a margin.
+pub fn settings_window_height(preferred: f64, work_area_height: Option<f64>) -> f64 {
+    const TITLE_BAR_AND_MARGIN: f64 = 48.0;
+    const MIN_HEIGHT: f64 = 400.0;
+    work_area_height.map_or(preferred, |height| {
+        (height - TITLE_BAR_AND_MARGIN)
+            .min(preferred)
+            .max(MIN_HEIGHT)
+    })
+}
+
 #[cfg(test)]
 mod tests;

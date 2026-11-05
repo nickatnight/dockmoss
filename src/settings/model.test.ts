@@ -12,6 +12,7 @@ import {
   NO_FEEDBACK,
   createSettingsSaver,
   exclusionLimitMessage,
+  invalidDays,
   reannounced,
   enteredDays,
   exclusionRows,
@@ -457,6 +458,18 @@ describe("reannounced", () => {
     expect(reannounced(shown, intensity, ok).threshold).toBe(false);
   });
 
+  it("re-announces the save notice when another save fails while it shows", () => {
+    const notSaved: SaveSettingsResult = {
+      ok: false,
+      error: { kind: "settings_not_saved", message: "settings could not be saved" },
+    };
+    const failed = nextFeedback(NO_FEEDBACK, intensity, notSaved);
+
+    expect(reannounced(failed, exclude, notSaved).saveNotice).toBe(true);
+    expect(reannounced(NO_FEEDBACK, intensity, notSaved).saveNotice).toBe(false);
+    expect(reannounced(failed, exclude, ok).saveNotice).toBe(false);
+  });
+
   it("re-announces a repeated exclusion refusal", () => {
     const refused = nextFeedback(NO_FEEDBACK, exclude, invalid);
 
@@ -470,5 +483,30 @@ describe("exclusionLimitMessage", () => {
     expect(
       exclusionLimitMessage({ minFuzzDays: 2, maxOvergrownDays: 3650, maxExclusions: 256 }),
     ).toBe("At most 256 apps can be excluded.");
+  });
+});
+
+describe("invalidDays", () => {
+  const limits: SettingsLimits = { minFuzzDays: 2, maxOvergrownDays: 3650, maxExclusions: 256 };
+
+  it.each([
+    ["fuzz below the minimum", { fuzz: 1, patchy: 10, overgrown: 30 }, ["fuzz"]],
+    ["patchy equal to fuzz", { fuzz: 5, patchy: 5, overgrown: 30 }, ["patchy"]],
+    ["overgrown equal to patchy", { fuzz: 5, patchy: 30, overgrown: 30 }, ["overgrown"]],
+    ["overgrown above the maximum", { fuzz: 5, patchy: 10, overgrown: 3651 }, ["overgrown"]],
+    ["an empty fuzz", { fuzz: null, patchy: 10, overgrown: 30 }, ["fuzz"]],
+    ["a fractional patchy", { fuzz: 5, patchy: 10.5, overgrown: 30 }, ["patchy"]],
+    ["patchy above overgrown", { fuzz: 5, patchy: 40, overgrown: 30 }, ["overgrown"]],
+    ["two wrong at once", { fuzz: 1, patchy: 10, overgrown: 4000 }, ["fuzz", "overgrown"]],
+  ] as const)("marks only the wrong field: %s", (_case, thresholds, expected) => {
+    expect(invalidDays(thresholds, limits)).toEqual(expected);
+  });
+
+  it("marks all three when no single field breaks a rule", () => {
+    expect(invalidDays({ fuzz: 5, patchy: 10, overgrown: 30 }, limits)).toEqual([
+      "fuzz",
+      "patchy",
+      "overgrown",
+    ]);
   });
 });

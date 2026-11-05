@@ -118,8 +118,12 @@ export function reannounced(
   before: Feedback,
   change: SettingsChange,
   result: SaveSettingsResult,
-): { threshold: boolean; exclusionLimit: boolean } {
+): { threshold: boolean; exclusionLimit: boolean; saveNotice: boolean } {
+  const rejectedInPlace =
+    rejected(result) &&
+    (change.field === "thresholds" || change.field === "excluded");
   return {
+    saveNotice: before.unsaved.length > 0 && !result.ok && !rejectedInPlace,
     threshold:
       before.thresholdError && change.field === "thresholds" && rejected(result),
     exclusionLimit:
@@ -165,6 +169,28 @@ export function exclusionRows(
 
 export function enteredDays(valueAsNumber: number): number | null {
   return Number.isNaN(valueAsNumber) ? null : valueAsNumber;
+}
+
+export type DayField = "fuzz" | "patchy" | "overgrown";
+
+/** The day fields a rejected entry got wrong, so only those are marked;
+ * all three when no single field breaks a rule. */
+export function invalidDays(
+  days: EnteredThresholds,
+  limits: SettingsLimits,
+): DayField[] {
+  const usable = (value: number | null): value is number =>
+    value !== null &&
+    Number.isInteger(value) &&
+    value >= limits.minFuzzDays &&
+    value <= limits.maxOvergrownDays;
+  const after = (value: number | null, previous: number | null): boolean =>
+    usable(value) && (!usable(previous) || value > previous);
+  const wrong: DayField[] = [];
+  if (!usable(days.fuzz)) wrong.push("fuzz");
+  if (!after(days.patchy, days.fuzz)) wrong.push("patchy");
+  if (!after(days.overgrown, days.patchy)) wrong.push("overgrown");
+  return wrong.length > 0 ? wrong : ["fuzz", "patchy", "overgrown"];
 }
 
 export function exclusionLimitMessage(limits: SettingsLimits): string {

@@ -28,9 +28,11 @@ body {
   overflow: hidden;
 }
 
+/* main scrolls only when the window is clamped shorter than the form. */
 main {
   box-sizing: border-box;
   height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -59,10 +61,12 @@ main {
 
 /* A flex fieldset ignores the legend's float and draws it on the border, so
    this group positions its legend instead. */
+/* The group shrinks with the window down to its hint and an 88 px list;
+   below that, main scrolls. */
 .group-fill {
   position: relative;
-  flex: 0 1 auto;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 128px;
   display: flex;
   flex-direction: column;
   padding-top: 30px;
@@ -162,16 +166,27 @@ input[type="number"][aria-invalid="true"] {
 }
 
 /* The padding keeps the checkboxes' focus rings inside the scroll box. */
-.apps {
+.well {
+  box-sizing: border-box;
   flex: 1 1 auto;
   min-height: 88px;
-  margin: 0;
   padding: 4px 8px;
   overflow-y: auto;
-  list-style: none;
   border: 1px solid var(--control-border);
   border-radius: 6px;
   background: var(--control-ground);
+}
+
+.apps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.empty {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--muted);
 }
 
 .apps label {
@@ -228,7 +243,8 @@ input[type="range"]:focus-visible {
   color: var(--negative);
 }
 
-fieldset:disabled {
+fieldset:disabled,
+.group:has(> .slider > input:disabled) {
   opacity: 0.6;
 }
 

@@ -34,6 +34,7 @@ use trust::TrustState;
 
 const OVERLAY_LABEL: &str = "overlay";
 const SETTINGS_LABEL: &str = "settings";
+const SETTINGS_HEIGHT: f64 = 760.0;
 const LAUNCH_LOG_FILE: &str = "launch_log.json";
 const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
@@ -891,7 +892,7 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let window =
         WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App("settings.html".into()))
             .title("DockMoss Settings")
-            .inner_size(440.0, 760.0)
+            .inner_size(440.0, settings_window_height(app))
             .resizable(false)
             .maximizable(false)
             .center()
@@ -904,6 +905,16 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         _ => {}
     });
     Ok(window)
+}
+
+/// The primary display's work area is the one Settings opens centred on.
+fn settings_window_height(app: &AppHandle) -> f64 {
+    let work_area_height = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| f64::from(monitor.work_area().size.height) / monitor.scale_factor());
+    geometry::settings_window_height(SETTINGS_HEIGHT, work_area_height)
 }
 
 /// Once the user moves to another app, that app (not the one active when

@@ -1,4 +1,4 @@
-use super::{ActiveApp, OnSettingsClosed, Pid, is_return_target, on_settings_closed};
+use super::{ActiveApp, OnSettingsClosed, Pid, hides, is_return_target, on_settings_closed};
 
 const OWN_PID: Pid = Pid(100);
 const OWN_ID: &str = "com.dockmoss.app";
@@ -57,5 +57,29 @@ fn closing_settings_returns_focus_only_while_dockmoss_is_in_front() {
             expected,
             "{case}"
         );
+    }
+}
+
+#[test]
+fn dockmoss_hides_when_no_app_took_the_focus_back() {
+    let finder = Pid(200);
+    let cases = [
+        ("closed from behind", OnSettingsClosed::Leave, false, false),
+        (
+            "returned to the app",
+            OnSettingsClosed::ReturnTo(finder),
+            true,
+            false,
+        ),
+        (
+            "the app did not activate",
+            OnSettingsClosed::ReturnTo(finder),
+            false,
+            true,
+        ),
+        ("no app to return to", OnSettingsClosed::Hide, false, true),
+    ];
+    for (case, decision, activated, expected) in cases {
+        assert_eq!(hides(decision, activated), expected, "{case}");
     }
 }

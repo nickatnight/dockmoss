@@ -32,5 +32,15 @@ pub fn on_settings_closed(dockmoss_active: bool, return_to: Option<Pid>) -> OnSe
     }
 }
 
+/// Whether to hide once the decision has run: a target that would not
+/// activate (it quit) leaves this app in front, as no target does.
+pub fn hides(decision: OnSettingsClosed, activated: bool) -> bool {
+    match decision {
+        OnSettingsClosed::Leave => false,
+        OnSettingsClosed::ReturnTo(_) => !activated,
+        OnSettingsClosed::Hide => true,
+    }
+}
+
 #[cfg(test)]
 mod tests;

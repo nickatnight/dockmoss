@@ -973,15 +973,15 @@ fn return_focus(app: &AppHandle) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let decision = focus::on_settings_closed(macos::app::is_active(mtm), last);
-    let hide = match decision {
-        OnSettingsClosed::Leave => false,
-        OnSettingsClosed::ReturnTo(pid) => !macos::app::activate_app(pid, mtm),
-        OnSettingsClosed::Hide => true,
+    let activated = match decision {
+        OnSettingsClosed::ReturnTo(pid) => macos::app::activate_app(pid, mtm),
+        OnSettingsClosed::Leave | OnSettingsClosed::Hide => false,
     };
-    if hide && let Err(error) = app.hide() {
+    let hidden = focus::hides(decision, activated);
+    if hidden && let Err(error) = app.hide() {
         tracing::warn!(%error, "dockmoss not hidden after settings closed");
     }
-    tracing::debug!(?decision, hidden = hide, "settings window closed");
+    tracing::debug!(?decision, activated, hidden, "settings window closed");
 }
 
 fn is_app_url(url: &Url) -> bool {

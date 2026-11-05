@@ -22,7 +22,7 @@ export interface AppGrowth {
   stage: "clean" | "fuzz" | "patchy" | "overgrown";
 }
 
-// error/tests.rs fails when this list and Error::kind() disagree.
+// A test in error.rs fails when this list and Error::kind() disagree.
 export type ErrorKind =
   | "tauri"
   | "no_main_display"

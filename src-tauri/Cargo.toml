@@ -51,6 +51,7 @@ allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
 let_underscore_must_use = "deny"
 unused_result_ok = "deny"
+tests_outside_test_module = "deny"
 
 [profile.release]
 codegen-units = 1

@@ -13,7 +13,7 @@ Read alongside `CLAUDE.md`. This file does not get weakened to make a change pas
 - No `@ts-ignore` or `@ts-expect-error` anywhere under `src/` (enforced by a grep in `check:fast`). No `eslint-disable` without a reason comment.
 - Every `unsafe` block lives in `src-tauri/src/macos/` and has a `// SAFETY:` comment. `unsafe_code` is set to deny crate-wide, so each `macos/` item that needs `unsafe` opts in with `#[expect(unsafe_code, reason = "...")]`, and `clippy::undocumented_unsafe_blocks` is set to deny. No `unsafe_code` opt-in exists outside `src/macos/` (enforced by a grep in `check:fast`).
 - No `expect`, `unwrap` or slice indexing outside `#[cfg(test)]`. Release builds abort on panic, so no thread (`dock-tracker`, `launch-log`, the main thread) may panic. `clippy::unwrap_used`, `clippy::expect_used` and `clippy::indexing_slicing` are denied crate-wide in `Cargo.toml` `[lints]`, so new code is covered by default; `clippy.toml` allows `expect` and indexing in tests. The only exceptions are named startup invariants, each with `#[expect(clippy::expect_used, reason = "...")]` on the one statement: the `MainThreadMarker` in `setup()`, the Tauri runtime start in `run()`, and `build.rs`.
-- A `#[test]` fn sits only inside a `#[cfg(test)]` module (enforced by `clippy::tests_outside_test_module` set to deny), and that module is the last item of its parent (enforced by `clippy::items_after_test_module`, on by default).
+- Unit tests sit in one inline `#[cfg(test)] mod tests { ... }` per module, its last item. A grep in `check:fast` allows `#[cfg(test)]` only on the line directly above `mod tests {`, so a separate test file (`mod tests;`), a second test module and a `#[cfg(test)]` item outside the module all fail it. A `#[test]` fn outside a `#[cfg(test)]` module fails `clippy::tests_outside_test_module` (set to deny), and an item after the test module fails `clippy::items_after_test_module` (on by default).
 - No secrets in source.
 
 ## Enforced with numbers
@@ -35,7 +35,7 @@ Dropped: Lighthouse and axe. A desktop overlay has no URL to audit, and the sett
 Scripts in `package.json` mirror this file; if they drift, this file wins:
 
 ```json
-"check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
+"check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && ! grep -rn --include='*.rs' -A1 '#\\[cfg(test)\\]' src | grep -vE '#\\[cfg\\(test\\)\\]$|-[[:space:]]*mod tests \\{$|^--$' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
 "check:task": "pnpm check:fast && pnpm test && pnpm build && test -d dist && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
 "check": "pnpm check:fast",
 "coverage": "cd src-tauri && cargo llvm-cov --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)'"

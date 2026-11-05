@@ -5,6 +5,7 @@ mod error;
 mod geometry;
 mod growth;
 mod macos;
+mod navigation;
 mod settings;
 mod tracker;
 mod tray;
@@ -936,5 +937,5 @@ fn return_focus(app: &AppHandle) {
 }
 
 fn is_app_url(url: &Url) -> bool {
-    url.scheme() == "tauri" || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
+    navigation::is_app_origin(url.scheme(), url.host_str(), cfg!(debug_assertions))
 }

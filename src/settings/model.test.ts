@@ -243,6 +243,22 @@ describe("createSettingsSaver", () => {
     expect(calls[1]).toEqual({ ...saved, intensityPercent: 40, fastForward: 100 });
   });
 
+  it("builds the next save from Rust's reply, not from what was sent", async () => {
+    const { calls, save, settle } = manualSave();
+    const saver = createSettingsSaver(saved, save);
+
+    void saver.commit({ field: "intensityPercent", percent: 40 });
+    void saver.commit({ field: "fastForward", speed: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle({
+      ok: true,
+      settings: { ...saved, intensityPercent: 40, excluded: [] },
+    });
+
+    expect(calls[1]?.excluded).toEqual([]);
+    expect(calls[1]?.fastForward).toBe(100);
+  });
+
   it("builds from the last stored settings after a rejected save", async () => {
     const { calls, save, settle } = manualSave();
     const saver = createSettingsSaver(saved, save);

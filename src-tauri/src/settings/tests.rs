@@ -127,6 +127,7 @@ fn intensity_is_a_whole_percent() {
         (json!(0), true),
         (json!(100), true),
         (json!(101), false),
+        (json!(356), false),
         (json!(-1), false),
         (json!(50.5), false),
         (json!("50"), false),
@@ -161,6 +162,7 @@ fn fast_forward_is_one_of_the_four_speeds() {
         (json!(0), None),
         (json!(2), None),
         (json!(1001), None),
+        (json!(4_294_968_296_u64), None),
         (json!("10"), None),
     ];
 

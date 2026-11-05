@@ -1405,6 +1405,27 @@ mod tests {
         assert_eq!(rate, PollRate::Fast);
     }
 
+    /// An `Activity` whose pointer has stood still at `cursor` since `start`,
+    /// as of `now_ms`: the second `rate` call sees no move, so the rate is
+    /// `Slow` and, in the band, the pointer rests.
+    fn settled_activity(
+        proximity_rate: PollRate,
+        cursor: Option<ScreenPoint>,
+        start: Instant,
+        now_ms: u64,
+    ) -> Activity {
+        let mut activity = Activity::default();
+        activity.rate(proximity_rate, false, cursor, false, start);
+        activity.rate(
+            proximity_rate,
+            false,
+            cursor,
+            false,
+            start.checked_add(ms(now_ms)).expect("in range"),
+        );
+        activity
+    }
+
     struct HoverCase {
         case: &'static str,
         proximity_rate: PollRate,
@@ -1438,6 +1459,14 @@ mod tests {
                 expected_read_ms: 350,
             },
             HoverCase {
+                case: "slow, pointer resting in the band: a hover after one pointer check",
+                proximity_rate: PollRate::Fast,
+                cursor: in_band,
+                read_due_ms: 800,
+                hovers_ms: vec![450],
+                expected_read_ms: 450,
+            },
+            HoverCase {
                 case: "slow: the first of a pair of hovers makes the read due",
                 proximity_rate: PollRate::Slow,
                 cursor: far,
@@ -1454,7 +1483,7 @@ mod tests {
                 expected_read_ms: 800,
             },
             HoverCase {
-                case: "fast: a hover between reads waits for the Fast read",
+                case: "a wait no longer than one Fast interval: the hover changes nothing",
                 proximity_rate: PollRate::Slow,
                 cursor: far,
                 read_due_ms: 316,
@@ -1472,15 +1501,7 @@ mod tests {
             expected_read_ms,
         } in cases
         {
-            let mut activity = Activity::default();
-            activity.rate(proximity_rate, false, cursor, false, start);
-            activity.rate(
-                proximity_rate,
-                false,
-                cursor,
-                false,
-                start.checked_add(ms(NOW_MS)).expect("in range"),
-            );
+            let activity = settled_activity(proximity_rate, cursor, start, NOW_MS);
 
             let (read, _) = wait_for_read_with_hovers(
                 &activity,

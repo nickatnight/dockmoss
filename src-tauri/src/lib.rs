@@ -93,7 +93,7 @@ pub fn run() {
             spawn_trust_watcher(app.handle().clone())?;
             let display = primary_display(app.handle())?;
             let (inbox, messages) = mpsc::channel();
-            let screen_changes = inbox.clone();
+            let tracker_inbox = inbox.clone();
             app.manage(TrackerInbox(inbox));
             let overlay = build_overlay(app.handle(), display)?;
             #[expect(
@@ -127,10 +127,10 @@ pub fn run() {
             } else {
                 Visibility::Hidden
             };
-            dock_tracker::spawn(app.handle().clone(), messages, display, shown)?;
+            dock_tracker::spawn(app.handle(), messages, tracker_inbox.clone(), display, shown)?;
             macos::screen::on_screen_parameters_change(
                 move || {
-                    if screen_changes
+                    if tracker_inbox
                         .send(TrackerMessage::ScreenParametersChanged)
                         .is_err()
                     {
@@ -684,24 +684,27 @@ mod dock_tracker {
     use crate::geometry::Display;
     use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
     use crate::tracker::{self, Activity, PollRate, Tick, TickLog, Tracker, Visibility, Woken};
-    use crate::trust::TrustState;
+    use crate::trust::{Trust, TrustState};
     use crate::usage::DockApp;
     use crate::{OVERLAY_LABEL, macos, primary_display};
 
+    /// Starts the tracker, then the Dock hover observer that wakes it through
+    /// `inbox`. The observer is optional: without it, entry into a
+    /// magnification is found by polling alone.
     pub(super) fn spawn(
-        app: AppHandle,
+        app: &AppHandle,
         messages: Receiver<TrackerMessage>,
+        inbox: Sender<TrackerMessage>,
         display: Display,
         overlay: Visibility,
     ) -> std::io::Result<()> {
-        if let Some(inbox) = app.try_state::<TrackerInbox>() {
-            spawn_observer(app.clone(), inbox.0.clone())?;
-        } else {
-            tracing::warn!("no tracker inbox; dock hover changes not observed");
-        }
+        let tracked = app.clone();
         std::thread::Builder::new()
             .name("dock-tracker".into())
-            .spawn(move || track_dock(&app, &messages, display, overlay))?;
+            .spawn(move || track_dock(&tracked, &messages, display, overlay))?;
+        if let Err(error) = spawn_observer(app.clone(), inbox) {
+            tracing::warn!(%error, "dock hover observer not started; entry is polled");
+        }
         Ok(())
     }
 
@@ -709,7 +712,7 @@ mod dock_tracker {
         macos::dock_observer::spawn(
             move || {
                 app.try_state::<TrustState>()
-                    .is_some_and(|trust| trust.current().is_trusted())
+                    .map_or(Trust::Untrusted, |trust| trust.current())
             },
             move || {
                 if tracker.send(TrackerMessage::DockHoverChanged).is_err() {

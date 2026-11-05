@@ -14,45 +14,90 @@ use std::time::Duration;
 use objc2::rc::autoreleasepool;
 use objc2_application_services::{AXError, AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFRetained, CFRunLoop, CFRunLoopMode, CFRunLoopSource, CFString, kCFRunLoopDefaultMode,
+    CFRetained, CFRunLoop, CFRunLoopMode, CFRunLoopRunResult, CFRunLoopSource, CFString,
+    kCFRunLoopDefaultMode,
 };
 
+use crate::dock::{HoverObserverGate, HoverRegistration};
+use crate::trust::Trust;
+
+/// `kAXSelectedChildrenChangedNotification`. The SDK constant is a C static,
+/// and reading it would need one more `unsafe`.
 const HOVER_CHANGED: &str = "AXSelectedChildrenChanged";
 const RECHECK: Duration = Duration::from_secs(2);
 
+#[derive(Debug, thiserror::Error)]
+enum RegisterError {
+    #[error("AX error {}", .0.0)]
+    Ax(AXError),
+    #[error("AXObserverCreate succeeded but stored no observer")]
+    NullObserver,
+    #[error("the thread has no run loop")]
+    NoRunLoop,
+}
+
+impl RegisterError {
+    fn registration(&self) -> HoverRegistration {
+        match self {
+            Self::Ax(AXError::NotificationUnsupported) => HoverRegistration::Unsupported,
+            Self::Ax(_) | Self::NullObserver | Self::NoRunLoop => HoverRegistration::Failed,
+        }
+    }
+}
+
 pub fn spawn(
-    trusted: impl Fn() -> bool + Send + 'static,
+    trust: impl Fn() -> Trust + Send + 'static,
     on_hover: impl Fn() + Send + 'static,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("dock-observer".into())
-        .spawn(move || observe(&trusted, &on_hover))?;
+        .spawn(move || observe(&trust, &on_hover))?;
     Ok(())
 }
 
-fn observe(trusted: &dyn Fn() -> bool, on_hover: &dyn Fn()) {
+fn observe(trust: &dyn Fn() -> Trust, on_hover: &dyn Fn()) {
     let Some(mode) = default_mode() else {
         tracing::warn!("no default run loop mode; dock hover changes not observed");
         return;
     };
-    loop {
-        if trusted()
+    let mut gate = HoverObserverGate::default();
+    while !gate.gave_up() {
+        if gate.may_register(trust())
             && let Some(pid) = dock_pid()
         {
             match Registration::new(pid, &on_hover, mode) {
                 Ok(registration) => {
+                    gate.record(HoverRegistration::Registered);
                     tracing::debug!(pid, "dock hover observer registered");
-                    while trusted() && dock_pid() == Some(pid) {
-                        CFRunLoop::run_in_mode(Some(mode), RECHECK.as_secs_f64(), false);
-                    }
+                    run_while_registered(pid, mode, trust);
                     drop(registration);
                     tracing::debug!(pid, "dock hover observer released");
-                    continue;
                 }
-                Err(code) => tracing::debug!(pid, code, "dock hover observer not registered"),
+                Err(error) => {
+                    tracing::debug!(pid, %error, "dock hover observer not registered");
+                    gate.record(error.registration());
+                }
             }
         }
         std::thread::sleep(RECHECK);
+    }
+    tracing::info!("the Dock refuses hover notifications; entry into a magnification is polled");
+}
+
+/// Runs the observer's source until trust goes, the Dock's pid changes, or
+/// the run loop has nothing left to wait on. Without a source,
+/// `CFRunLoopRunInMode` returns at once, so that result ends the loop.
+fn run_while_registered(pid: i32, mode: &CFRunLoopMode, trust: &dyn Fn() -> Trust) {
+    while trust().is_trusted() && dock_pid() == Some(pid) {
+        let result = CFRunLoop::run_in_mode(Some(mode), RECHECK.as_secs_f64(), false);
+        if result == CFRunLoopRunResult::Finished || result == CFRunLoopRunResult::Stopped {
+            tracing::debug!(
+                pid,
+                result = result.0,
+                "dock hover observer's run loop ended"
+            );
+            return;
+        }
     }
 }
 
@@ -84,15 +129,15 @@ impl<'a> Registration<'a> {
         pid: i32,
         callback: &'a &'a dyn Fn(),
         mode: &'static CFRunLoopMode,
-    ) -> Result<Self, i32> {
+    ) -> Result<Self, RegisterError> {
         let mut raw: *mut AXObserver = ptr::null_mut();
         // SAFETY: `hover_changed` has the AXObserverCallback signature and
         // `raw` is a live, writable out-pointer for the duration of the call.
         let code = unsafe { AXObserver::create(pid, Some(hover_changed), NonNull::from(&mut raw)) };
         if code != AXError::Success {
-            return Err(code.0);
+            return Err(RegisterError::Ax(code));
         }
-        let raw = NonNull::new(raw).ok_or(AXError::Failure.0)?;
+        let raw = NonNull::new(raw).ok_or(RegisterError::NullObserver)?;
         // SAFETY: AXObserverCreate succeeded, and by the Create rule the
         // caller owns the +1 observer it stored, so `CFRetained` takes it over.
         let observer = unsafe { CFRetained::from_raw(raw) };
@@ -104,12 +149,12 @@ impl<'a> Registration<'a> {
         // before the registration is dropped, so no callback reads it later.
         let code = unsafe { observer.add_notification(&dock, &name, refcon) };
         if code != AXError::Success {
-            return Err(code.0);
+            return Err(RegisterError::Ax(code));
         }
         // SAFETY: `observer` is a live AXObserver; the binding retains the
         // source it returns.
         let source = unsafe { observer.run_loop_source() };
-        let run_loop = CFRunLoop::current().ok_or(AXError::Failure.0)?;
+        let run_loop = CFRunLoop::current().ok_or(RegisterError::NoRunLoop)?;
         run_loop.add_source(Some(&source), Some(mode));
         Ok(Self {
             run_loop,

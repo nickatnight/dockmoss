@@ -139,13 +139,53 @@ fn app_item(child: RawDockChild, display: Display) -> Option<DockItem> {
     })
 }
 
+/// How one registration of the Dock hover observer (`macos::dock_observer`)
+/// ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverRegistration {
+    Registered,
+    /// The Dock refuses the notification (`kAXErrorNotificationUnsupported`),
+    /// so no later attempt can succeed.
+    Unsupported,
+    /// Anything else, such as a Dock still starting: worth another attempt.
+    Failed,
+}
+
+/// Whether the hover observer may register with the Dock. Its thread waits
+/// between attempts; this decides whether an attempt is made at all.
+#[derive(Debug, Default)]
+pub struct HoverObserverGate {
+    refused: bool,
+}
+
+impl HoverObserverGate {
+    pub fn may_register(&self, trust: Trust) -> bool {
+        !self.refused && trust.is_trusted()
+    }
+
+    pub fn record(&mut self, registration: HoverRegistration) {
+        if registration == HoverRegistration::Unsupported {
+            self.refused = true;
+        }
+    }
+
+    /// The Dock refused the notification: the observer can stop, and entry
+    /// into a magnification is found by polling alone.
+    pub fn gave_up(&self) -> bool {
+        self.refused
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::{DockError, DockItem, RawDockChild, ReadGate, app_items};
+    use super::{
+        DockError, DockItem, HoverObserverGate, HoverRegistration, RawDockChild, ReadGate,
+        app_items,
+    };
     use crate::bundle_id::BundleId;
     use crate::geometry::{Display, LogicalRect, ScreenRect};
     use crate::trust::Trust;
@@ -659,6 +699,59 @@ mod tests {
 
         for (error, dock_wide) in cases {
             assert_eq!(error.is_dock_wide(), dock_wide, "{error}");
+        }
+    }
+
+    #[test]
+    fn the_hover_observer_registers_only_while_trusted_and_until_the_dock_refuses() {
+        let cases = [
+            ("untrusted", vec![], Trust::Untrusted, false, false),
+            ("trusted", vec![], Trust::Trusted, true, false),
+            (
+                "trusted, after a failure worth a retry",
+                vec![HoverRegistration::Failed],
+                Trust::Trusted,
+                true,
+                false,
+            ),
+            (
+                "trusted, after a registration that held",
+                vec![HoverRegistration::Registered],
+                Trust::Trusted,
+                true,
+                false,
+            ),
+            (
+                "trusted, after the Dock refused the notification",
+                vec![HoverRegistration::Unsupported],
+                Trust::Trusted,
+                false,
+                true,
+            ),
+            (
+                "a refusal is final, whatever follows",
+                vec![
+                    HoverRegistration::Unsupported,
+                    HoverRegistration::Registered,
+                ],
+                Trust::Trusted,
+                false,
+                true,
+            ),
+        ];
+
+        for (case, history, trust, may_register, gave_up) in cases {
+            let mut gate = HoverObserverGate::default();
+            for registration in history {
+                gate.record(registration);
+            }
+
+            assert_eq!(
+                gate.may_register(trust),
+                may_register,
+                "{case}: may register"
+            );
+            assert_eq!(gate.gave_up(), gave_up, "{case}: gave up");
         }
     }
 }

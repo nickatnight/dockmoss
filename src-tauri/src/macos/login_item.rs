@@ -5,11 +5,8 @@ use crate::login_item::LoginItemStatus;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoginItemError {
-    /// `tauri dev` runs a bare binary: registering it would make a login
-    /// item of the debug executable, so it is refused before the call.
     #[error("this copy of DockMoss is not an app bundle")]
     NotAnAppBundle,
-    /// The domain and code only: the description can name a path.
     #[error("ServiceManagement refused the change ({domain} error {code})")]
     Refused { domain: String, code: isize },
 }
@@ -30,9 +27,6 @@ pub fn status() -> LoginItemStatus {
     }
 }
 
-/// Registers or unregisters this app itself as a login item (System
-/// Settings > General > Login Items > Open at Login). Synchronous IPC, so it
-/// runs off the main thread.
 #[expect(
     unsafe_code,
     reason = "the ServiceManagement bindings mark every SMAppService method unsafe"

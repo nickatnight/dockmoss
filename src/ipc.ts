@@ -72,7 +72,6 @@ export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
   dockApps: DockAppName[] | null;
-  /** From macOS, not from the settings file. */
   launchAtLogin: boolean;
 }
 

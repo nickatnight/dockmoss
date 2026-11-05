@@ -1,6 +1,3 @@
-//! The one-time move of the user's data from the folder named by the
-//! identifier the app had before slice 13 to the current one.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -8,11 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::store::private_dir;
 
-/// The app data folder's name under the identifier the app had before.
 const OLD_IDENTIFIER: &str = "com.dockmoss.app";
 
-/// Each file moves on its own. Nothing else moves: a `.tmp` is half-written
-/// by definition, and any other name is not ours to carry.
 pub const MOVED_FILES: [&str; 4] = [
     "launch_log.json",
     "settings.json",
@@ -20,16 +14,13 @@ pub const MOVED_FILES: [&str; 4] = [
     "launch_log.json.dropped",
 ];
 
-/// What sits at a name, without following a link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Entry {
     Missing,
     File,
-    /// A link, a folder, or anything that could not be checked.
     Other,
 }
 
-/// What each of `MOVED_FILES` is in one folder.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Listing(BTreeMap<&'static str, Entry>);
 
@@ -58,15 +49,10 @@ fn entry_at(path: &Path) -> Entry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
     Move(&'static str),
-    /// The new folder already has this name, so the old file stays.
     KeepNew(&'static str),
-    /// Not a regular file in the old folder, so it stays.
     LeaveNotAFile(&'static str),
 }
 
-/// One step per name the old folder holds, in `MOVED_FILES` order. A file
-/// moves only into a name the new folder does not use: nothing is ever
-/// overwritten, merged or deleted.
 pub fn plan_move(old: &Listing, new: &Listing) -> Vec<Step> {
     MOVED_FILES
         .into_iter()
@@ -97,8 +83,6 @@ pub struct MoveReport {
 }
 
 impl MoveReport {
-    /// One line with counts and no paths: `info` when the start did or
-    /// found something, `debug` when there was nothing to move.
     pub fn log(&self) {
         let Self {
             moved,

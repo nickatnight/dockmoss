@@ -122,7 +122,6 @@ fn save_settings_blocking(app: &AppHandle, value: &Map<String, Value>) -> Result
     })
     .inspect_err(|error| tracing::warn!(%error, "settings not saved"))?;
     saved.log("settings saved");
-    // Sent under the lock, so the usage thread applies saves in save order.
     apply_to_growth(app, &saved);
     Ok(saved.clone())
 }

@@ -16,12 +16,10 @@ export type SettingsChange =
   | { field: "fastForward"; speed: FastForward }
   | { field: "excluded"; bundleId: BundleId; excluded: boolean };
 
-/** A change on the page: a setting, or launch at login, which macOS holds. */
 export type PageChange =
   | SettingsChange
   | { field: "launchAtLogin"; enabled: boolean };
 
-/** What the feedback rules read from a save or a launch at login change. */
 export type Outcome = { ok: true } | { ok: false; error: { kind: string } };
 
 export function nextSettings(
@@ -115,8 +113,6 @@ export function nextFeedback(
   if (rejected(result) && change.field === "excluded") {
     return { ...feedback, exclusionLimit: true };
   }
-  // Rust checks an entry before it writes, so a write failure means the
-  // thresholds passed the rules.
   const checked =
     change.field === "thresholds" && result.error.kind === "settings_not_saved";
   return {
@@ -145,8 +141,6 @@ export function reannounced(
   };
 }
 
-/** The launch at login box after a change: what macOS reports, or, when the
- * change did not go through, the state before it. */
 export function launchAtLoginShown(
   wanted: boolean,
   result: LaunchAtLoginResult,

@@ -152,9 +152,7 @@ pub fn run() {
 }
 
 /// The log plugin's setup creates the log folder and opens the file, so this
-/// runs before it (plugins set up in the order they are registered). The
-/// folder is 0700 before the first line is written, so a rotated file's mode
-/// no longer matters. No logger exists yet: `setup()` logs a failure.
+/// runs before it (plugins set up in the order they are registered).
 fn private_log_dir() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("private-log-dir")
         .setup(|app, _api| {
@@ -233,8 +231,6 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
     Ok(())
 }
 
-/// Runs before anything reads or writes app data, so the files are read
-/// where they will be written.
 fn move_old_app_data(app: &AppHandle) {
     let new_dir = match app.path().app_data_dir() {
         Ok(dir) => dir,
@@ -264,8 +260,6 @@ fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {
     (loaded.settings, Some(path))
 }
 
-/// Debug builds only: `DOCKMOSS_FAST_FORWARD`, when set to 1, 10, 100 or
-/// 1000, wins over the saved fast-forward. It never reads or writes settings.
 #[cfg(debug_assertions)]
 fn fast_forward_override() -> Option<FastForward> {
     const VARIABLE: &str = "DOCKMOSS_FAST_FORWARD";
@@ -347,7 +341,6 @@ mod launch_log_writer {
         DockApps(Vec<DockApp>),
         ListDockApps(Sender<DistinctDockApps>),
         WatchGrowth(Channel<Vec<AppGrowth>>),
-        /// Settings just saved, to apply from now on.
         Settings(Settings),
         Flush(Sender<()>),
     }
@@ -389,7 +382,6 @@ mod launch_log_writer {
         state: UsageState,
         schedule: SaveSchedule,
         seed_read: Option<JoinHandle<Readings>>,
-        /// The settings growth applies, fast-forward override included.
         settings: Settings,
         fast_forward_override: Option<FastForward>,
         watcher: Option<Channel<Vec<AppGrowth>>>,

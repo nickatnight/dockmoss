@@ -574,8 +574,6 @@ fn distinct_dock_apps_keep_the_first_entry_per_bundle_id_in_dock_order() {
     );
 }
 
-/// Finder first seen 40 days ago (Overgrown), Safari 6 days ago (Fuzz),
-/// Chess now (Clean).
 fn three_apps() -> UsageState {
     let mut log = baselined();
     log.set_first_seen(id("com.apple.finder"), ago(days(40)));
@@ -645,7 +643,6 @@ fn the_default_settings_draw_the_curve_unchanged() {
 #[test]
 fn thresholds_move_each_app_along_the_curve() {
     let cases = [
-        // Safari's 6 days plus 0.45 days of jitter.
         ("later stages", (8, 15, 40), Stage::Clean, Stage::Overgrown),
         (
             "earlier stages",
@@ -680,9 +677,7 @@ fn fast_forward_from_the_settings_speeds_up_growth() {
 
     let got = frame(&three_apps(), &settings);
 
-    // 6 days at 10x is 60 days: overgrown.
     assert_eq!(got[1].2, Stage::Overgrown);
-    // Chess was first seen at `now`, so nothing has elapsed to multiply.
     assert_eq!(got[2].2, Stage::Clean);
 }
 

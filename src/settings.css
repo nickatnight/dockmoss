@@ -17,8 +17,6 @@
   cursor: default;
 }
 
-/* The window never scrolls: the app list does, and main does when the
-   window is clamped shorter than the form. */
 html,
 body {
   height: 100%;
@@ -160,7 +158,6 @@ input[type="number"][aria-invalid="true"] {
   margin: 0;
 }
 
-/* Lines the hint up with the label text, past the checkbox and the gap. */
 .check-hint {
   margin: 2px 0 0 22px;
 }
@@ -212,8 +209,6 @@ input[type="number"][aria-invalid="true"] {
   padding: 4px 0;
 }
 
-/* Focus scrolls the whole row in, with its ring, not just the checkbox:
-   half the row's height left over around the box, plus the ring. */
 .apps input {
   margin: 0;
   scroll-margin-block: 10px;

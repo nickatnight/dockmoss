@@ -48,8 +48,6 @@ impl Intensity {
         self.0
     }
 
-    /// The overgrowth drawn: `overgrowth` times this percent. 100% returns
-    /// it unchanged, and 0% returns 0.
     pub fn scale(self, overgrowth: Overgrowth) -> Overgrowth {
         Overgrowth::new(overgrowth.get() * (f32::from(self.0) / 100.0))
     }
@@ -165,9 +163,6 @@ impl Settings {
         })
     }
 
-    /// The settings growth applies: these, with `fast_forward_override` in
-    /// place of the saved speed when there is one (debug builds'
-    /// `DOCKMOSS_FAST_FORWARD`).
     #[must_use]
     pub fn applied(&self, fast_forward_override: Option<FastForward>) -> Self {
         Self {
@@ -241,7 +236,6 @@ pub struct SettingsView {
     settings: Settings,
     limits: Limits,
     dock_apps: Option<Vec<DockAppName>>,
-    /// From macOS, not from the settings file.
     launch_at_login: bool,
 }
 

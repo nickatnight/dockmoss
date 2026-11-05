@@ -165,9 +165,7 @@ impl UsageState {
         })
     }
 
-    /// One entry per current Dock app, in Dock order, under the applied
-    /// settings: an excluded app is clean, and intensity scales the
-    /// overgrowth but not the stage.
+    /// One entry per current Dock app, in Dock order.
     pub fn growth(&self, now: Timestamp, settings: &Settings) -> Vec<AppGrowth> {
         self.dock
             .iter()

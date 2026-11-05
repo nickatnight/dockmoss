@@ -161,9 +161,15 @@ input[type="number"][aria-invalid="true"] {
   margin: 0;
 }
 
+/* Only the title toggles the box, not the empty card beside it: the box
+   changes a system login item. */
+.check > label {
+  justify-self: start;
+}
+
 .check > p.hint {
   grid-column: 2;
-  margin: 2px 0 0;
+  margin: 0;
 }
 
 .speeds {

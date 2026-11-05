@@ -121,7 +121,9 @@ function exclusionItem(
   // Focus scrolls the list only as far as the box; this brings in the whole
   // row, which holds the focus ring.
   checkbox.addEventListener("focus", () => {
-    item.scrollIntoView({ block: "nearest" });
+    if (checkbox.matches(":focus-visible")) {
+      item.scrollIntoView({ block: "nearest" });
+    }
   });
   return item;
 }
@@ -254,15 +256,22 @@ async function start(): Promise<void> {
   };
 
   let loginChangeQueue = Promise.resolve();
+  let latestLoginChange = 0;
   page.launchAtLogin.addEventListener("change", () => {
     const wanted = page.launchAtLogin.checked;
+    latestLoginChange += 1;
+    const thisChange = latestLoginChange;
     loginChangeQueue = loginChangeQueue
       .then(() => setLaunchAtLogin(wanted))
       .then((result) => {
         if (!result.ok) {
           console.error("launch at login not changed", result.error);
         }
-        page.launchAtLogin.checked = launchAtLoginShown(wanted, result);
+        // A result that a later change has overtaken would flip the box
+        // against the user's last input; the last result sets it.
+        if (thisChange === latestLoginChange) {
+          page.launchAtLogin.checked = launchAtLoginShown(wanted, result);
+        }
         report({ field: "launchAtLogin", enabled: wanted }, result);
       });
   });

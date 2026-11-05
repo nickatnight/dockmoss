@@ -1,7 +1,7 @@
 use super::{ActiveApp, OnSettingsClosed, Pid, hides, is_return_target, on_settings_closed};
 
 const OWN_PID: Pid = Pid(100);
-const OWN_ID: &str = "com.dockmoss.app";
+const OWN_ID: &str = "app.dockmoss.DockMoss";
 
 #[test]
 fn only_regular_apps_other_than_dockmoss_are_return_targets() {

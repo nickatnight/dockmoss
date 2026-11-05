@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
 
-use super::{MAX_FILE_BYTES, load_or_set_aside, save};
+use super::{MAX_FILE_BYTES, load_or_set_aside, private_dir, save};
 use crate::bundle_id::BundleId;
 use crate::usage::LaunchLog;
 
@@ -286,4 +286,45 @@ fn a_failed_dropped_copy_still_loads_the_log() {
         log.last_launched(&id("com.apple.Safari")),
         Some(at("2026-11-02T09:14:03Z"))
     );
+}
+
+fn dir_mode(path: &Path) -> u32 {
+    fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+}
+
+#[test]
+fn private_dir_creates_a_missing_folder_and_its_parents_0700() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("Logs/app.dockmoss.DockMoss");
+
+    private_dir(&path).expect("created");
+
+    assert_eq!(dir_mode(&path), 0o700);
+}
+
+#[test]
+fn private_dir_makes_an_existing_folder_0700() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("app.dockmoss.DockMoss");
+    fs::create_dir(&path).expect("folder");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    private_dir(&path).expect("made private");
+
+    assert_eq!(dir_mode(&path), 0o700);
+}
+
+#[test]
+fn private_dir_refuses_a_link_and_leaves_its_target_alone() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let target = dir.path().join("elsewhere");
+    fs::create_dir(&target).expect("target");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).expect("chmod");
+    let path = dir.path().join("app.dockmoss.DockMoss");
+    std::os::unix::fs::symlink(&target, &path).expect("symlink");
+
+    let refused = private_dir(&path);
+
+    assert!(refused.is_err());
+    assert_eq!(dir_mode(&target), 0o755);
 }

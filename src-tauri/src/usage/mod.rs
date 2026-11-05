@@ -2,6 +2,7 @@ use std::io;
 use std::path::PathBuf;
 
 mod log;
+mod migrate;
 mod running;
 mod schedule;
 mod spotlight;
@@ -9,6 +10,7 @@ mod state;
 mod store;
 
 pub use log::LaunchLog;
+pub use migrate::{move_old_data, old_data_dir};
 pub use running::{AppEvent, AppEventKind, RunningApp, tracked_bundle_id};
 pub use schedule::{SaveSchedule, recompute_interval};
 pub use spotlight::parse_mdls;

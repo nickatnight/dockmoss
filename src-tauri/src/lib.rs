@@ -74,6 +74,7 @@ pub fn run() {
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             app.manage(LastOtherApp::default());
+            move_old_app_data(app.handle());
             let (settings, settings_path) = load_settings(app.handle());
             app.manage(Mutex::new(settings));
             if let Some(path) = settings_path {
@@ -196,6 +197,21 @@ fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Res
         "launch log started"
     );
     Ok(())
+}
+
+/// Runs before anything reads or writes app data, so the files are read
+/// where they will be written.
+fn move_old_app_data(app: &AppHandle) {
+    let new_dir = match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            tracing::warn!(%error, "app data folder unknown; old data not moved");
+            return;
+        }
+    };
+    if let Some(old_dir) = usage::old_data_dir(&new_dir) {
+        usage::move_old_data(&old_dir, &new_dir).log();
+    }
 }
 
 fn load_settings(app: &AppHandle) -> (Settings, Option<PathBuf>) {

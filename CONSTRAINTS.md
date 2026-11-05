@@ -35,7 +35,7 @@ Dropped: Lighthouse and axe. A desktop overlay has no URL to audit, and the sett
 Scripts in `package.json` mirror this file; if they drift, this file wins:
 
 ```json
-"check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && ! grep -rn --include='*.rs' -A1 '#\\[cfg(test)\\]' src | grep -vE '#\\[cfg\\(test\\)\\]$|-[[:space:]]*mod tests \\{$|^--$' && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
+"check:fast": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && ! grep -rl --include='*.rs' 'unsafe_code' src | grep -v '^src/macos/' && ! grep -rnE --include='*.rs' -A1 '#!?\\[cfg\\(test\\)\\]' src | grep -vE '#\\[cfg\\(test\\)\\]$|-[[:space:]]*mod tests \\{$|^--$' && ! grep -rn --include='*.rs' 'include!(' src && cd .. && ! grep -rnE '@ts-(ignore|expect-error)' src && tsc --noEmit",
 "check:task": "pnpm check:fast && pnpm test && pnpm build && test -d dist && ! grep -rqE 'debug-dock-item|VITE_DOCKMOSS' dist && cd src-tauri && cargo test && cargo deny check advisories licenses && cd .. && pnpm audit --audit-level high && gitleaks git --redact --no-banner && gitleaks git --pre-commit --redact --no-banner && gitleaks git --pre-commit --staged --redact --no-banner",
 "check": "pnpm check:fast",
 "coverage": "cd src-tauri && cargo llvm-cov --ignore-filename-regex 'src/(macos/|(main|lib|tray|commands)[.]rs)'"

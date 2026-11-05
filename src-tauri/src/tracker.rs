@@ -1583,6 +1583,14 @@ mod tests {
                 expected_checks_ms: vec![],
             },
             HoverCase {
+                case: "slow: a pair of hovers inside the spacing reads once, one Fast interval after the last read",
+                pointer: still_far,
+                read_due: ms(800),
+                hovers: vec![ms(302), ms(304)],
+                expected_read: now + fast,
+                expected_checks_ms: vec![],
+            },
+            HoverCase {
                 case: "fast: hovers between Fast reads wait for the Fast read",
                 pointer: moving_in_band,
                 read_due: fast_read_due,
@@ -1604,7 +1612,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pair_of_hovers_with_the_pointer_still_reads_at_most_once_per_fast_interval() {
+    fn after_a_hover_read_the_next_hover_waits_one_fast_interval_from_that_read() {
         let start = Instant::now();
         let (activity, _) = still_far(start);
 

@@ -42,33 +42,65 @@ fn only_regular_apps_other_than_dockmoss_are_return_targets() {
     }
 }
 
+fn app(pid: i32, bundle_id: &str) -> ActiveApp {
+    ActiveApp {
+        pid: Pid(pid),
+        bundle_id: Some(bundle_id.to_owned()),
+        regular: true,
+    }
+}
+
 #[test]
 fn closing_settings_returns_focus_only_while_dockmoss_is_in_front() {
-    let finder = Pid(200);
+    let finder = app(200, "com.apple.finder");
+    let mail_on_finders_old_pid = app(200, "com.apple.mail");
     let cases = [
         (
-            "in front, target known",
+            "in front, target still running",
             true,
-            Some(finder),
-            OnSettingsClosed::ReturnTo(finder),
+            Some(&finder),
+            Some(&finder),
+            OnSettingsClosed::ReturnTo(Pid(200)),
         ),
-        ("in front, no target", true, None, OnSettingsClosed::Hide),
         (
-            "behind another app, target known",
+            "in front, target quit",
+            true,
+            Some(&finder),
+            None,
+            OnSettingsClosed::Hide,
+        ),
+        (
+            "in front, target's pid now another app",
+            true,
+            Some(&finder),
+            Some(&mail_on_finders_old_pid),
+            OnSettingsClosed::Hide,
+        ),
+        (
+            "in front, no target",
+            true,
+            None,
+            None,
+            OnSettingsClosed::Hide,
+        ),
+        (
+            "behind another app, target still running",
             false,
-            Some(finder),
+            Some(&finder),
+            Some(&finder),
             OnSettingsClosed::Leave,
         ),
         (
             "behind another app, no target",
             false,
             None,
+            None,
             OnSettingsClosed::Leave,
         ),
     ];
-    for (case, dockmoss_active, return_to, expected) in cases {
+    for (case, dockmoss_active, target, at_its_pid, expected) in cases {
         assert_eq!(
-            on_settings_closed(dockmoss_active, return_to),
+            on_settings_closed(dockmoss_active, target, at_its_pid),
             expected,
             "{case}"
         );

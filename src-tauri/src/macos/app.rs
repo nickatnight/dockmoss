@@ -16,6 +16,11 @@ pub fn front_app(_mtm: MainThreadMarker) -> Option<ActiveApp> {
         .map(|app| active_app(&app))
 }
 
+/// The app now running under `pid`, if any.
+pub fn app_at(Pid(pid): Pid, _mtm: MainThreadMarker) -> Option<ActiveApp> {
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid).map(|app| active_app(&app))
+}
+
 pub(super) fn active_app(app: &NSRunningApplication) -> ActiveApp {
     ActiveApp {
         pid: Pid(app.processIdentifier()),

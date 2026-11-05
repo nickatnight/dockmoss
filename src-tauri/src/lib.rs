@@ -944,7 +944,7 @@ fn settings_window_height(app: &AppHandle) -> f64 {
 /// The last app activated that is not this one or another copy of it, which
 /// is where closing Settings hands focus back.
 #[derive(Default)]
-struct LastOtherApp(Mutex<Option<focus::Pid>>);
+struct LastOtherApp(Mutex<Option<focus::ActiveApp>>);
 
 fn track_last_other_app(app: &AppHandle, mtm: macos::MainThreadMarker) {
     let own_pid = macos::app::own_pid();
@@ -953,7 +953,7 @@ fn track_last_other_app(app: &AppHandle, mtm: macos::MainThreadMarker) {
     let remember = move |active: focus::ActiveApp| {
         if focus::is_return_target(&active, own_pid, &own_bundle_id) {
             let last = app.state::<LastOtherApp>();
-            *last.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(active.pid);
+            *last.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(active);
         }
     };
     if let Some(front) = macos::app::front_app(mtm) {
@@ -967,12 +967,20 @@ fn return_focus(app: &AppHandle) {
         tracing::warn!("settings window closed off the main thread; focus not returned");
         return;
     };
-    let last = *app
+    let target = app
         .state::<LastOtherApp>()
         .0
         .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    let decision = focus::on_settings_closed(macos::app::is_active(mtm), last);
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let at_its_pid = target
+        .as_ref()
+        .and_then(|target| macos::app::app_at(target.pid, mtm));
+    let decision = focus::on_settings_closed(
+        macos::app::is_active(mtm),
+        target.as_ref(),
+        at_its_pid.as_ref(),
+    );
     let activated = match decision {
         OnSettingsClosed::ReturnTo(pid) => macos::app::activate_app(pid, mtm),
         OnSettingsClosed::Leave | OnSettingsClosed::Hide => false,

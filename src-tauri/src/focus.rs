@@ -28,11 +28,22 @@ pub enum OnSettingsClosed {
     Hide,
 }
 
-pub fn on_settings_closed(dockmoss_active: bool, return_to: Option<Pid>) -> OnSettingsClosed {
-    match (dockmoss_active, return_to) {
-        (false, _) => OnSettingsClosed::Leave,
-        (true, Some(pid)) => OnSettingsClosed::ReturnTo(pid),
-        (true, None) => OnSettingsClosed::Hide,
+/// `target` is the remembered app and `at_its_pid` the app running under its
+/// pid now. Focus goes back only while that is still the same app, so a pid
+/// that macOS reused for another app after the target quit is not activated.
+pub fn on_settings_closed(
+    dockmoss_active: bool,
+    target: Option<&ActiveApp>,
+    at_its_pid: Option<&ActiveApp>,
+) -> OnSettingsClosed {
+    if !dockmoss_active {
+        return OnSettingsClosed::Leave;
+    }
+    match (target, at_its_pid) {
+        (Some(target), Some(now)) if target.pid == now.pid && target.bundle_id == now.bundle_id => {
+            OnSettingsClosed::ReturnTo(target.pid)
+        }
+        _ => OnSettingsClosed::Hide,
     }
 }
 

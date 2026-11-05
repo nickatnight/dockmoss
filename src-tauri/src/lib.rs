@@ -26,6 +26,7 @@ use tauri::{
 use tauri_plugin_log::log::LevelFilter;
 
 use commands::{SettingsPath, TrackerInbox, TrackerMessage};
+use focus::OnSettingsClosed;
 use geometry::Display;
 use growth::FastForward;
 use launch_log_writer::{LaunchLogInbox, WriterMessage};
@@ -972,17 +973,15 @@ fn return_focus(app: &AppHandle) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let decision = focus::on_settings_closed(macos::app::is_active(mtm), last);
-    let hidden = match decision {
-        focus::OnSettingsClosed::Leave => false,
-        focus::OnSettingsClosed::ReturnTo(pid) if macos::app::activate_app(pid, mtm) => false,
-        focus::OnSettingsClosed::ReturnTo(_) | focus::OnSettingsClosed::Hide => {
-            if let Err(error) = app.hide() {
-                tracing::warn!(%error, "dockmoss not hidden after settings closed");
-            }
-            true
-        }
+    let hide = match decision {
+        OnSettingsClosed::Leave => false,
+        OnSettingsClosed::ReturnTo(pid) => !macos::app::activate_app(pid, mtm),
+        OnSettingsClosed::Hide => true,
     };
-    tracing::debug!(?decision, hidden, "settings window closed");
+    if hide && let Err(error) = app.hide() {
+        tracing::warn!(%error, "dockmoss not hidden after settings closed");
+    }
+    tracing::debug!(?decision, hidden = hide, "settings window closed");
 }
 
 fn is_app_url(url: &Url) -> bool {

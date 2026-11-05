@@ -226,3 +226,40 @@ const FAST_FORWARD_SPEEDS: readonly FastForward[] = [1, 10, 100, 1000];
 export function toFastForward(value: string): FastForward | null {
   return FAST_FORWARD_SPEEDS.find((speed) => String(speed) === value) ?? null;
 }
+
+/** The box as Settings opens: what macOS reports, or unticked and disabled
+ * when it did not answer in time. */
+export function launchAtLoginBox(status: boolean | null): {
+  checked: boolean;
+  disabled: boolean;
+} {
+  return { checked: status === true, disabled: status === null };
+}
+
+export interface LoginChangeDone {
+  result: LaunchAtLoginResult;
+  /** What the box shows now, or null when a later change has overtaken this one. */
+  shown: boolean | null;
+}
+
+/** Runs launch at login changes one at a time, in order. Only the latest
+ * change's result sets the box; every result still reports. */
+export function createLoginToggle(
+  set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
+): (wanted: boolean) => Promise<LoginChangeDone> {
+  let previous: Promise<unknown> = Promise.resolve();
+  let latest = 0;
+  return (wanted) => {
+    latest += 1;
+    const thisChange = latest;
+    const done = previous.then(async () => {
+      const result = await set(wanted);
+      return {
+        result,
+        shown: thisChange === latest ? launchAtLoginShown(wanted, result) : null,
+      };
+    });
+    previous = done.catch(() => undefined);
+    return done;
+  };
+}

@@ -11,7 +11,9 @@ import type {
 } from "../ipc";
 import {
   NO_FEEDBACK,
+  createLoginToggle,
   createSettingsSaver,
+  launchAtLoginBox,
   exclusionLimitMessage,
   invalidDays,
   launchAtLoginShown,
@@ -667,5 +669,100 @@ describe("launchAtLoginShown", () => {
     ["on, no reply", true, { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, false],
   ] as const)("%s: the box shows what macOS ends in", (_case, wanted, result, expected) => {
     expect(launchAtLoginShown(wanted, result)).toBe(expected);
+  });
+});
+
+describe("createLoginToggle", () => {
+  const ok = (enabled: boolean): LaunchAtLoginResult => ({ ok: true, enabled });
+  const notChanged: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "login_item_not_changed", message: "launch at login was not changed" },
+  };
+  function fakeSet() {
+    const calls: { wanted: boolean; reply: (result: LaunchAtLoginResult) => void }[] = [];
+    const set = (wanted: boolean) =>
+      new Promise<LaunchAtLoginResult>((reply) => calls.push({ wanted, reply }));
+    return { calls, set };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("sets the box from a lone change's result", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const done = toggle(true);
+    await settle();
+    calls[0]?.reply(ok(true));
+
+    expect(await done).toEqual({ result: ok(true), shown: true });
+  });
+
+  it("runs a second change only after the first has answered", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    void toggle(true);
+    void toggle(false);
+    await settle();
+    expect(calls.map(({ wanted }) => wanted)).toEqual([true]);
+
+    calls[0]?.reply(ok(true));
+    await settle();
+    expect(calls.map(({ wanted }) => wanted)).toEqual([true, false]);
+  });
+
+  it("leaves the box alone for a result a later change has overtaken, and the last result sets it", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const first = toggle(true);
+    const second = toggle(false);
+    await settle();
+    calls[0]?.reply(ok(true));
+    await settle();
+    calls[1]?.reply(ok(false));
+
+    expect(await first).toEqual({ result: ok(true), shown: null });
+    expect(await second).toEqual({ result: ok(false), shown: false });
+  });
+
+  it("lets the last result set the box even when it fails", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const first = toggle(true);
+    const second = toggle(false);
+    await settle();
+    calls[0]?.reply(ok(true));
+    await settle();
+    calls[1]?.reply(notChanged);
+
+    expect((await first).shown).toBeNull();
+    expect(await second).toEqual({ result: notChanged, shown: true });
+  });
+
+  it("sets the box again for a change made after the last one answered", async () => {
+    const { calls, set } = fakeSet();
+    const toggle = createLoginToggle(set);
+
+    const first = toggle(true);
+    await settle();
+    calls[0]?.reply(ok(true));
+    expect((await first).shown).toBe(true);
+
+    const second = toggle(false);
+    await settle();
+    calls[1]?.reply(ok(false));
+    expect((await second).shown).toBe(false);
+  });
+});
+
+describe("launchAtLoginBox", () => {
+  it.each([
+    ["on", true, { checked: true, disabled: false }],
+    ["off", false, { checked: false, disabled: false }],
+    ["unknown: macOS did not answer in time", null, { checked: false, disabled: true }],
+  ] as const)("%s", (_case, status, expected) => {
+    expect(launchAtLoginBox(status)).toEqual(expected);
   });
 });

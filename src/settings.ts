@@ -11,7 +11,8 @@ import {
   exclusionLimitMessage,
   exclusionRows,
   invalidDays,
-  launchAtLoginShown,
+  createLoginToggle,
+  launchAtLoginBox,
   nextFeedback,
   reannounced,
   thresholdMessage,
@@ -77,7 +78,7 @@ document.addEventListener("keydown", (event) => {
 
 function show(view: SettingsView): void {
   const { settings, limits } = view;
-  page.launchAtLogin.checked = view.launchAtLogin === true;
+  page.launchAtLogin.checked = launchAtLoginBox(view.launchAtLogin).checked;
   for (const input of dayInputs) {
     input.min = String(limits.minFuzzDays);
     input.max = String(limits.maxOvergrownDays);
@@ -218,7 +219,7 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
   page.intensity.disabled = false;
-  page.launchAtLogin.disabled = view.launchAtLogin === null;
+  page.launchAtLogin.disabled = launchAtLoginBox(view.launchAtLogin).disabled;
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const messages = {
@@ -255,25 +256,18 @@ async function start(): Promise<void> {
       });
   };
 
-  let loginChangeQueue = Promise.resolve();
-  let latestLoginChange = 0;
+  const toggleLogin = createLoginToggle(setLaunchAtLogin);
   page.launchAtLogin.addEventListener("change", () => {
     const wanted = page.launchAtLogin.checked;
-    latestLoginChange += 1;
-    const thisChange = latestLoginChange;
-    loginChangeQueue = loginChangeQueue
-      .then(() => setLaunchAtLogin(wanted))
-      .then((result) => {
-        if (!result.ok) {
-          console.error("launch at login not changed", result.error);
-        }
-        // A result that a later change has overtaken would flip the box
-        // against the user's last input; the last result sets it.
-        if (thisChange === latestLoginChange) {
-          page.launchAtLogin.checked = launchAtLoginShown(wanted, result);
-        }
-        report({ field: "launchAtLogin", enabled: wanted }, result);
-      });
+    void toggleLogin(wanted).then(({ result, shown }) => {
+      if (!result.ok) {
+        console.error("launch at login not changed", result.error);
+      }
+      if (shown !== null) {
+        page.launchAtLogin.checked = shown;
+      }
+      report({ field: "launchAtLogin", enabled: wanted }, result);
+    });
   });
 
   for (const input of dayInputs) {

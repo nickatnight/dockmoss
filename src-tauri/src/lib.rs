@@ -1,3 +1,4 @@
+mod bounded;
 mod bundle_id;
 mod commands;
 mod dock;
@@ -248,11 +249,8 @@ struct DataDir {
 }
 
 impl DataDir {
-    /// `None` when the move left this file in the old folder: writing a new
-    /// one here would strand the old one for good, so this session goes
-    /// without it and the next start moves it.
     fn file(&self, name: &str) -> Option<PathBuf> {
-        (!self.moved.left_behind(name)).then(|| self.dir.join(name))
+        self.moved.file_in(&self.dir, name)
     }
 }
 

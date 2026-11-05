@@ -8,6 +8,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::Error;
+use crate::bounded;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
 use crate::login_item;
@@ -80,23 +81,16 @@ pub async fn get_settings(
 /// `None` when `ServiceManagement` does not answer in time, so Settings opens
 /// anyway, with only the launch at login box left disabled.
 async fn launch_at_login() -> Option<bool> {
-    let (reply, replied) = mpsc::channel();
-    let read = tauri::async_runtime::spawn_blocking(move || {
-        if reply
-            .send(macos::login_item::status().opens_at_login())
-            .is_err()
-        {
-            tracing::debug!("launch at login status read after settings stopped waiting");
-        }
-    });
-    drop(read);
-    let waited =
-        tauri::async_runtime::spawn_blocking(move || replied.recv_timeout(LOGIN_STATUS_TIMEOUT))
-            .await;
+    let waited = tauri::async_runtime::spawn_blocking(|| {
+        bounded::read_within(LOGIN_STATUS_TIMEOUT, || {
+            macos::login_item::status().opens_at_login()
+        })
+    })
+    .await;
     match waited {
-        Ok(Ok(opens_at_login)) => Some(opens_at_login),
-        Ok(Err(error)) => {
-            tracing::warn!(%error, "launch at login status not read in time");
+        Ok(Some(opens_at_login)) => Some(opens_at_login),
+        Ok(None) => {
+            tracing::warn!("launch at login status not read in time");
             None
         }
         Err(error) => {

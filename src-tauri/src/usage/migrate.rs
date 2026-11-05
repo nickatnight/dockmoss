@@ -91,6 +91,13 @@ impl MoveReport {
         self.failed.contains(&name)
     }
 
+    /// `dir/name`, or `None` when the move left `name` in the old folder:
+    /// writing a new one in `dir` would strand the old one for good, so the
+    /// session goes without it and the next start moves it.
+    pub fn file_in(&self, dir: &Path, name: &str) -> Option<PathBuf> {
+        (!self.left_behind(name)).then(|| dir.join(name))
+    }
+
     /// `info` when this start moved, found or removed something; a start
     /// with nothing left to do logs only at `debug`.
     pub fn worth_reporting(&self) -> bool {

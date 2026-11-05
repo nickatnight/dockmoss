@@ -271,6 +271,27 @@ fn a_read_only_old_folder_still_gives_the_new_folder_the_file() {
 
 /// `chflags uchg` makes a file immutable: macOS refuses to link or rename
 /// it, which is how a move fails here.
+/// Clears the immutable flag on its paths when dropped, even when a test
+/// fails, so `TempDir` can delete them. Declared after the folders, so it
+/// drops first.
+struct ClearsImmutable(Vec<std::path::PathBuf>);
+
+impl Drop for ClearsImmutable {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            if fs::symlink_metadata(path).is_ok() {
+                let cleared = std::process::Command::new("chflags")
+                    .arg("nouchg")
+                    .arg(path)
+                    .status();
+                if !cleared.is_ok_and(|status| status.success()) {
+                    eprintln!("could not clear the immutable flag on {}", path.display());
+                }
+            }
+        }
+    }
+}
+
 fn set_immutable(path: &Path, immutable: bool) {
     let flag = if immutable { "uchg" } else { "nouchg" };
     let status = std::process::Command::new("chflags")
@@ -286,6 +307,10 @@ fn a_failed_move_leaves_the_file_behind_and_a_later_start_moves_it() {
     let folders = folders();
     write(&folders.old, "launch_log.json", "log");
     write(&folders.old, "settings.json", "settings");
+    let _clears = ClearsImmutable(vec![
+        folders.old.join("launch_log.json"),
+        folders.new.join("launch_log.json"),
+    ]);
     set_immutable(&folders.old.join("launch_log.json"), true);
 
     let first = move_old_data(&folders.old, &folders.new);
@@ -496,6 +521,15 @@ fn only_a_start_that_did_or_found_something_reports_at_info() {
             true,
         ),
         (
+            "moved, with a .tmp keeping the old folder",
+            MoveReport {
+                moved: 1,
+                old_folder: OldFolder::Left,
+                ..MoveReport::default()
+            },
+            true,
+        ),
+        (
             "kept",
             MoveReport {
                 kept: 1,
@@ -525,5 +559,67 @@ fn only_a_start_that_did_or_found_something_reports_at_info() {
     ];
     for (case, report, expected) in cases {
         assert_eq!(report.worth_reporting(), expected, "{case}");
+    }
+}
+
+#[test]
+fn a_name_taken_after_the_plan_is_never_overwritten() {
+    let folders = folders();
+    fs::create_dir(&folders.new).expect("new folder");
+    write(&folders.old, "launch_log.json", "old");
+    write(&folders.new, "launch_log.json", "taken");
+
+    let moved = super::move_file(
+        &folders.old.join("launch_log.json"),
+        &folders.new.join("launch_log.json"),
+    );
+
+    assert!(matches!(moved, super::Moved::NameTaken));
+    assert_eq!(read(&folders.new, "launch_log.json"), "taken");
+    assert_eq!(read(&folders.old, "launch_log.json"), "old");
+}
+
+#[test]
+fn a_file_left_behind_gets_no_path_in_the_new_folder() {
+    let dir = Path::new("/data/app.dockmoss.DockMoss");
+    let nothing_failed = MoveReport::default();
+    let log_failed = MoveReport {
+        failed: vec!["launch_log.json"],
+        old_folder: OldFolder::Left,
+        ..MoveReport::default()
+    };
+    let settings_failed = MoveReport {
+        failed: vec!["settings.json"],
+        old_folder: OldFolder::Left,
+        ..MoveReport::default()
+    };
+    let cases = [
+        (
+            "nothing failed: the launch log",
+            &nothing_failed,
+            "launch_log.json",
+            Some(dir.join("launch_log.json")),
+        ),
+        (
+            "the launch log failed: the launch log",
+            &log_failed,
+            "launch_log.json",
+            None,
+        ),
+        (
+            "the launch log failed: settings",
+            &log_failed,
+            "settings.json",
+            Some(dir.join("settings.json")),
+        ),
+        (
+            "settings failed: settings",
+            &settings_failed,
+            "settings.json",
+            None,
+        ),
+    ];
+    for (case, report, name, expected) in cases {
+        assert_eq!(report.file_in(dir, name), expected, "{case}");
     }
 }

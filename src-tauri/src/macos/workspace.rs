@@ -11,6 +11,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSNotification, NSOperationQueue, NSString, NSURL};
 
+use crate::focus::ActiveApp;
 use crate::usage::{AppEvent, AppEventKind, RunningApp};
 
 const ACCESSIBILITY_SETTINGS_URL: &str =
@@ -83,6 +84,24 @@ pub fn on_app_events(on_event: impl Fn(AppEvent) + Send + Sync + 'static, mtm: M
             mtm,
         );
     }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "the notification name is an AppKit extern static"
+)]
+pub fn on_app_activated(
+    on_activated: impl Fn(ActiveApp) + Send + Sync + 'static,
+    mtm: MainThreadMarker,
+) {
+    // SAFETY: the name is an immutable NSString constant that AppKit
+    // initialises before any Rust code runs.
+    let name = unsafe { NSWorkspaceDidActivateApplicationNotification };
+    observe(
+        name,
+        move |app| on_activated(super::app::active_app(app)),
+        mtm,
+    );
 }
 
 /// Calls `on_app` on the main thread with the application of each workspace

@@ -2,6 +2,7 @@ mod bundle_id;
 mod commands;
 mod dock;
 mod error;
+mod focus;
 mod geometry;
 mod growth;
 mod macos;
@@ -39,8 +40,6 @@ const LAUNCH_LOG_FILE: &str = "launch_log.json";
 const SETTINGS_FILE: &str = "settings.json";
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 const TRUST_POLL_INTERVAL: Duration = Duration::from_secs(5);
-const SECOND_LAUNCH_POLL: Duration = Duration::from_millis(20);
-const SECOND_LAUNCH_POLLS: u32 = 50;
 const APP_LOG_LEVEL: LevelFilter = if cfg!(debug_assertions) {
     LevelFilter::Debug
 } else {
@@ -73,7 +72,7 @@ pub fn run() {
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            app.manage(ReturnFocusTo::default());
+            app.manage(LastOtherApp::default());
             let (settings, settings_path) = load_settings(app.handle());
             app.manage(Mutex::new(settings));
             if let Some(path) = settings_path {
@@ -95,6 +94,7 @@ pub fn run() {
             )]
             let mtm =
                 macos::MainThreadMarker::new().expect("tauri runs setup() on the main thread");
+            track_last_other_app(app.handle(), mtm);
             if let Err(error) = start_launch_log(app.handle(), mtm) {
                 tracing::warn!(%error, "usage tracking not started; running without growth");
             }
@@ -143,32 +143,10 @@ pub fn run() {
 /// needs.
 fn on_second_launch(app: &AppHandle) {
     tracing::info!("dockmoss launched again; opening settings");
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        for _ in 0..SECOND_LAUNCH_POLLS {
-            if !another_copy_or_nothing_in_front(&app) {
-                break;
-            }
-            std::thread::sleep(SECOND_LAUNCH_POLL);
-        }
-        let handle = app.clone();
-        if let Err(error) = app.run_on_main_thread(move || show_settings_window(&handle)) {
-            tracing::warn!(%error, "settings not opened for the second launch");
-        }
-    });
-}
-
-fn another_copy_or_nothing_in_front(app: &AppHandle) -> bool {
-    let own_bundle_id = app.config().identifier.clone();
-    let (reply, answer) = mpsc::channel();
-    let asked = app.run_on_main_thread(move || {
-        let in_front = macos::MainThreadMarker::new()
-            .is_some_and(|mtm| macos::app::another_copy_or_nothing_in_front(&own_bundle_id, mtm));
-        if reply.send(in_front).is_err() {
-            tracing::debug!("front app check finished after its caller stopped waiting");
-        }
-    });
-    asked.is_ok() && answer.recv().unwrap_or(false)
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || show_settings_window(&handle)) {
+        tracing::warn!(%error, "settings not opened for the second launch");
+    }
 }
 
 fn start_launch_log(app: &AppHandle, mtm: macos::MainThreadMarker) -> tauri::Result<()> {
@@ -907,14 +885,6 @@ fn build_overlay(app: &AppHandle, display: Display) -> Result<WebviewWindow, Err
 }
 
 pub(crate) fn show_settings_window(app: &AppHandle) {
-    let Some(mtm) = macos::MainThreadMarker::new() else {
-        tracing::warn!("settings requested off the main thread; window not shown");
-        return;
-    };
-    if let Some(pid) = macos::app::active_other_app(mtm) {
-        let return_to = app.state::<ReturnFocusTo>();
-        *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
-    }
     let window = if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
         window
     } else {
@@ -947,10 +917,10 @@ fn build_settings_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
             .on_navigation(is_app_url)
             .build()?;
     let app = app.clone();
-    window.on_window_event(move |event| match event {
-        WindowEvent::Focused(false) => follow_focus_away(&app),
-        WindowEvent::Destroyed => return_focus(&app),
-        _ => {}
+    window.on_window_event(move |event| {
+        if let WindowEvent::Destroyed = event {
+            return_focus(&app);
+        }
     });
     Ok(window)
 }
@@ -965,41 +935,49 @@ fn settings_window_height(app: &AppHandle) -> f64 {
     geometry::settings_window_height(SETTINGS_HEIGHT, work_area_height)
 }
 
-/// Once the user moves to another app, that app (not the one active when
-/// Settings opened) is where the keyboard goes back if they return and close.
-fn follow_focus_away(app: &AppHandle) {
-    let Some(mtm) = macos::MainThreadMarker::new() else {
-        return;
-    };
-    if macos::app::is_active(mtm) {
-        return;
-    }
-    let now_active = macos::app::active_other_app(mtm);
-    let return_to = app.state::<ReturnFocusTo>();
-    *return_to.0.lock().unwrap_or_else(PoisonError::into_inner) = now_active;
-    tracing::debug!(
-        recorded = now_active.is_some(),
-        "settings window left for another app"
-    );
-}
-
+/// The last app activated that is not this one or another copy of it, which
+/// is where closing Settings hands focus back.
 #[derive(Default)]
-struct ReturnFocusTo(Mutex<Option<macos::app::Pid>>);
+struct LastOtherApp(Mutex<Option<focus::Pid>>);
+
+fn track_last_other_app(app: &AppHandle, mtm: macos::MainThreadMarker) {
+    let own_pid = macos::app::own_pid();
+    let own_bundle_id = app.config().identifier.clone();
+    let app = app.clone();
+    let remember = move |active: focus::ActiveApp| {
+        if focus::is_return_target(&active, own_pid, &own_bundle_id) {
+            let last = app.state::<LastOtherApp>();
+            *last.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(active.pid);
+        }
+    };
+    if let Some(front) = macos::app::front_app(mtm) {
+        remember(front);
+    }
+    macos::workspace::on_app_activated(remember, mtm);
+}
 
 fn return_focus(app: &AppHandle) {
     let Some(mtm) = macos::MainThreadMarker::new() else {
         tracing::warn!("settings window closed off the main thread; focus not returned");
         return;
     };
-    let return_to = app.state::<ReturnFocusTo>();
-    let pid = return_to
+    let last = *app
+        .state::<LastOtherApp>()
         .0
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take();
-    let active = macos::app::is_active(mtm);
-    let returned = active && pid.is_some_and(|pid| macos::app::activate_app(pid, mtm));
-    tracing::debug!(active, returned, "settings window closed");
+        .unwrap_or_else(PoisonError::into_inner);
+    let decision = focus::on_settings_closed(macos::app::is_active(mtm), last);
+    let hidden = match decision {
+        focus::OnSettingsClosed::Leave => false,
+        focus::OnSettingsClosed::ReturnTo(pid) if macos::app::activate_app(pid, mtm) => false,
+        focus::OnSettingsClosed::ReturnTo(_) | focus::OnSettingsClosed::Hide => {
+            if let Err(error) = app.hide() {
+                tracing::warn!(%error, "dockmoss not hidden after settings closed");
+            }
+            true
+        }
+    };
+    tracing::debug!(?decision, hidden, "settings window closed");
 }
 
 fn is_app_url(url: &Url) -> bool {

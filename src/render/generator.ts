@@ -398,7 +398,7 @@ function propScale([from, to]: readonly [number, number], level: number): number
   return PROP_SCALE * (PROP_SMALLEST_SHARE + (1 - PROP_SMALLEST_SHARE) * smoothstep(from, to, level));
 }
 
-function propShapes(seed: number, level: number): Shape[] {
+export function propShapes(seed: number, level: number): Shape[] {
   const random = mulberry32((seed ^ PROP_STREAM) >>> 0);
   const between = ([low, high]: readonly [number, number]): number => low + (high - low) * random();
   const mushroomLeft = random() < 0.5;

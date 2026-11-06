@@ -333,6 +333,28 @@ describe("baking", () => {
       expect(layer).toBe(layers.get(key) ?? 8);
     }
   });
+
+  it("drops an evicted bake, so a later reallocation uploads only the bakes still wanted", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 8));
+    env.renderer.growth(patchyNine);
+    env.frames.runFrame();
+    const oldKey = env.bakes.find(({ seed }) => seed === fnv1a32("app.3#0"))?.key;
+
+    env.renderer.growth(patchyNine.map((app) => (app.bundleId === "app.3" ? { ...app, overgrowth: 0.9 } : app)));
+    env.frames.runFrame();
+    const newKey = env.bakes[env.bakes.length - 1].key;
+    env.calls().length = 0;
+    env.renderer.dock(nine);
+    env.frames.runFrame();
+
+    const upload = env.calls().find((call) => call.op === "upload");
+    const keys = upload?.op === "upload" ? upload.cells.map(({ image }) => image.key) : [];
+    expect(env.ops()).toEqual(["allocate", "upload", "draw"]);
+    expect(keys).toHaveLength(9);
+    expect(keys).toContain(newKey);
+    expect(keys).not.toContain(oldKey);
+  });
 });
 
 describe("at rest", () => {

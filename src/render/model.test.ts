@@ -469,6 +469,14 @@ describe("glslConstants", () => {
     expect([...ownConstants].filter((name) => generated.has(name))).toEqual([]);
   });
 
+  it("declares only constants moss.frag.glsl uses", () => {
+    const code = fragmentSource.replace(/\/\/.*$/gm, "").replace("#pragma moss_constants", "");
+    const generated = [...glslConstants().matchAll(/^const \w+ (\w+) =/gm)].map(([, name]) => name);
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.filter((name) => !new RegExp(`\\b${name}\\b`).test(code))).toEqual([]);
+  });
+
   it("writes every float with a decimal point, as GLSL requires", () => {
     for (const [, value] of glslConstants().matchAll(/^const float \w+ = (.+);$/gm)) {
       expect(value).toMatch(/\./);

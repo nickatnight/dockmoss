@@ -18,6 +18,7 @@ import {
   levelStep,
   mossScene,
   mossShapes,
+  propShapes,
 } from "./generator";
 import { artBox, bakeBox, fnv1a32, quantize } from "./model";
 
@@ -161,6 +162,15 @@ describe("levelStep", () => {
 describe("iconAnchors, against the prototype", () => {
   it("shows the prototype's 151 anchors at level 1", () => {
     expect(iconAnchors(PROTOTYPE_SEED, 1)).toHaveLength(151);
+  });
+
+  // Fuzz is ours from look check round 1, not the prototype's: this pins it, as the
+  // jitter goldens pin jitter, so a threshold change cannot move every user's moss unnoticed.
+  it("grows the approved Fuzz at level 0.25: 20 anchors, the first one small", () => {
+    const quarter = iconAnchors(PROTOTYPE_SEED, 0.25);
+
+    expect(quarter).toHaveLength(20);
+    expect(quarter[0]).toEqual({ id: 0, x: 0.25908533413894475, y: 109.71585649810731, r: 2.5042980507104757 });
   });
 
   it("places and sizes them as the prototype does at level 1", () => {
@@ -321,7 +331,31 @@ describe("growth across the 24 steps", () => {
   });
 });
 
+describe("spore stalks", () => {
+  const stalks = (level: number) =>
+    strokes(mossScene({ seed: PROTOTYPE_SEED, step: step(level), overgrown: false }).moss, "#8A5A2B");
+
+  it("grow only above level 0.55, as in the prototype", () => {
+    expect(stalks(0.5)).toEqual([]);
+    expect(stalks(0.6).length).toBeGreaterThan(0);
+  });
+});
+
 describe("props", () => {
+  it("stay inside the icon at their smallest and largest, over 2,000 seeds", () => {
+    for (let index = 0; index < 2000; index++) {
+      const seed = fnv1a32(`app.${index}#0`);
+      for (const level of [1 / LEVEL_STEPS, 1]) {
+        for (const shape of propShapes(seed, level)) {
+          const box = bounds(shape);
+          if (box.left < 0 || box.top < 0 || box.right > ICON_UNITS || box.bottom > ICON_UNITS) {
+            expect.fail(`seed ${seed} level ${level}: ${JSON.stringify(box)}`);
+          }
+        }
+      }
+    }
+  });
+
   it.each(SEEDS)("never grow on an item that is not overgrown (seed %d)", (seed) => {
     for (const at of STEPS) {
       expect(mossScene({ seed, step: at, overgrown: false }).props).toEqual([]);

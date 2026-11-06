@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type BakeContext, bake, drawScene } from "./bake";
 import {
@@ -185,6 +185,24 @@ describe("drawScene", () => {
 });
 
 describe("bake", () => {
+  it("reports a canvas without a 2D context", () => {
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext(): null {
+          return null;
+        }
+      },
+    );
+    try {
+      expect(bake(mossScene({ seed: 4271, step: 24 as LevelStep, overgrown: true }), 256)).toEqual({
+        kind: "noContext",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("makes no canvas at level 0", () => {
     expect(bake(mossScene({ seed: 4271, step: 0 as LevelStep, overgrown: true }), 256)).toEqual({
       kind: "empty",

@@ -31,11 +31,15 @@ src-tauri/src/
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules (watch_dock,
                  #   watch_growth, get_settings, save_settings, set_launch_at_login)
   tracker.rs     # pure: per Dock read -> what to send, log and show; the poll rate,
-                 #   Activity (Fast only while something moves) and read deadlines
+                 #   Activity (Fast only while something moves), read deadlines, and
+                 #   the hover cut (wait_for_read: a Dock hover change ends a long wait,
+                 #   no sooner than one Fast interval after the last read)
   geometry.rs    # pure: AX rects -> overlay-local logical pixels (the one conversion),
                  #   and the settings window's height clamped to the work area
-  dock.rs        # pure: raw Dock children -> DockItems (application items only), and
-                 #   ReadGate (no AX read while trust is revoked)
+  dock.rs        # pure: raw Dock children -> DockItems (application items only),
+                 #   ReadGate (no AX read while trust is revoked), and HoverObserverGate
+                 #   (when the hover observer may register: trusted, not latched after
+                 #   APIDisabled, not refused)
   bundle_id.rs   # pure: BundleId newtype
   settings.rs    # pure apart from std file I/O: Settings (thresholds, intensity,
                  #   exclusions, fast-forward), one decoder per field, load_file (capped,
@@ -58,7 +62,9 @@ src-tauri/src/
                  #   com.dockmoss.app folder (plan_move pure, move_old_data std I/O)
   macos/         # every objc2 / AppKit / AX call, the `mdls` subprocess, and every
                  #   `unsafe` block; app.rs: the front app, the app at a pid, and
-                 #   activating one; login_item.rs: SMAppService.mainApp status and set
+                 #   activating one; login_item.rs: SMAppService.mainApp status and set;
+                 #   dock_observer.rs: the dock-observer thread (AXObserver for the
+                 #   Dock's AXSelectedChildrenChanged, its own CFRunLoop)
 src-tauri/capabilities/   # one capability file per window: overlay.json, settings.json
 overlay.html, settings.html   # one Vite entry per window
 src/                      # webview: overlay.ts (one subscription per channel, fanned out),
@@ -100,6 +106,11 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **AppKit runs on the main thread.** Take a `MainThreadMarker` in any function that touches `NSWindow`/`NSWorkspace`, and reach the main thread from elsewhere with `app.run_on_main_thread(...)`.
 - **AX calls are synchronous IPC to the Dock process** and can block. Run Dock polling on a dedicated thread, or with `tauri::async_runtime::spawn_blocking`, and never on the main thread. Release CF objects through `CFRetained`/RAII wrappers instead of calling `CFRelease` by hand.
 - **Every AX read costs the Dock process CPU** (about 0.4% at 2 Hz). The tracker reads at 60 Hz only while something moves: the pointer near the Dock, a frame sent within 250 ms, or a pointer waiting at a hidden Dock's edge (1 s after its last move). A pointer at rest in the band gets pointer-only checks at 10 Hz, with no AX read. Keep any new reason to poll fast bounded in time, and put it in `tracker.rs`'s `Activity` with table tests (ADR-0012).
+- **A Dock hover change ends a long wait** (ADR-0017). The Dock posts no move or resize notification for its items, only `AXSelectedChildrenChanged` when the hovered item changes (entry, each item crossed, exit). So reads stay polled, and the notification only starts them early.
+  - The `dock-observer` thread (`macos/dock_observer.rs`) registers for it on its own `CFRunLoop`, never on the main thread, and sends `TrackerMessage::DockHoverChanged`. It is optional: the tracker starts first, and polling is the fallback.
+  - Whether it may register is decided by the pure `dock::HoverObserverGate`: the cached `TrustState` and a fresh, no-prompt `check_trust`, a latch after `APIDisabled` until trust is seen revoked, and a stop after `NotificationUnsupported`. Attempts are at least 2 s apart.
+  - In `Activity::wait_for_read`, a hover ends a wait longer than one `Fast` interval, but never makes a read due sooner than one `Fast` interval after the last read. That caps hover-driven reads at 60 a second, two per selection change while the pointer is still, and adds no reason to stay at `Fast`.
+  - It is the only `TrackerMessage` that cuts the wait short (ADR-0007, amended).
 - Get the native window with `window.ns_window()` and cast it to `&NSWindow` inside `macos/overlay.rs` only.
 
 ## Tauri 2 conventions

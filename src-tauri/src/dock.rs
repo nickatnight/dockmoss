@@ -139,13 +139,70 @@ fn app_item(child: RawDockChild, display: Display) -> Option<DockItem> {
     })
 }
 
+/// How one registration of the Dock hover observer (`macos::dock_observer`)
+/// ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverRegistration {
+    Registered,
+    /// The Dock refuses the notification (`kAXErrorNotificationUnsupported`),
+    /// so no later attempt can succeed.
+    Unsupported,
+    /// Access is refused (`kAXErrorAPIDisabled`) though trust was cached as
+    /// granted: a revoked grant, or a TCC entry that disagrees with the check.
+    ApiDisabled,
+    /// Anything else, such as a Dock still starting: worth another attempt.
+    Failed,
+}
+
+/// Whether the hover observer may register with the Dock. Its thread waits
+/// between attempts; this decides whether an attempt is made at all. Like
+/// `ReadGate`, it makes no AX call while trust is revoked: an attempt needs
+/// the cached trust and a fresh, no-prompt `check`, and after access was
+/// refused it waits until the cached trust has been seen revoked.
+#[derive(Debug, Default)]
+pub struct HoverObserverGate {
+    refused: bool,
+    latched: bool,
+}
+
+impl HoverObserverGate {
+    /// Seeing the cached trust revoked releases the latch.
+    pub fn may_register(&mut self, trust: Trust, check: impl FnOnce() -> Trust) -> bool {
+        if self.refused {
+            return false;
+        }
+        if !trust.is_trusted() {
+            self.latched = false;
+            return false;
+        }
+        !self.latched && check().is_trusted()
+    }
+
+    pub fn record(&mut self, registration: HoverRegistration) {
+        match registration {
+            HoverRegistration::Unsupported => self.refused = true,
+            HoverRegistration::ApiDisabled => self.latched = true,
+            HoverRegistration::Registered | HoverRegistration::Failed => {}
+        }
+    }
+
+    /// The Dock refused the notification: the observer can stop, and entry
+    /// into a magnification is found by polling alone.
+    pub fn gave_up(&self) -> bool {
+        self.refused
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::{DockError, DockItem, RawDockChild, ReadGate, app_items};
+    use super::{
+        DockError, DockItem, HoverObserverGate, HoverRegistration, RawDockChild, ReadGate,
+        app_items,
+    };
     use crate::bundle_id::BundleId;
     use crate::geometry::{Display, LogicalRect, ScreenRect};
     use crate::trust::Trust;
@@ -659,6 +716,142 @@ mod tests {
 
         for (error, dock_wide) in cases {
             assert_eq!(error.is_dock_wide(), dock_wide, "{error}");
+        }
+    }
+
+    /// One earlier attempt: the cached trust, the fresh check (if the gate
+    /// makes one), and the outcome recorded if the attempt was allowed.
+    type Step = (Trust, Trust, HoverRegistration);
+
+    #[derive(Debug, PartialEq)]
+    struct GateAnswer {
+        allowed: bool,
+        fresh_checks: u32,
+        gave_up: bool,
+    }
+
+    const ALLOWED: GateAnswer = GateAnswer {
+        allowed: true,
+        fresh_checks: 1,
+        gave_up: false,
+    };
+    const BLOCKED_UNCHECKED: GateAnswer = GateAnswer {
+        allowed: false,
+        fresh_checks: 0,
+        gave_up: false,
+    };
+    const BLOCKED_BY_CHECK: GateAnswer = GateAnswer {
+        allowed: false,
+        fresh_checks: 1,
+        gave_up: false,
+    };
+    const GAVE_UP: GateAnswer = GateAnswer {
+        allowed: false,
+        fresh_checks: 0,
+        gave_up: true,
+    };
+
+    /// Replays `history`, then asks once more with `trust` and `check`.
+    fn hover_gate_after(history: &[Step], trust: Trust, check: Trust) -> GateAnswer {
+        let mut gate = HoverObserverGate::default();
+        for &(trust, check, outcome) in history {
+            if gate.may_register(trust, || check) {
+                gate.record(outcome);
+            }
+        }
+        let made = Cell::new(0);
+        let allowed = gate.may_register(trust, || {
+            made.set(made.get() + 1);
+            check
+        });
+        GateAnswer {
+            allowed,
+            fresh_checks: made.get(),
+            gave_up: gate.gave_up(),
+        }
+    }
+
+    const TRUSTED: Trust = Trust::Trusted;
+    const UNTRUSTED: Trust = Trust::Untrusted;
+
+    #[test]
+    fn the_hover_observer_registers_only_when_cached_and_fresh_trust_agree() {
+        let cases = [
+            (
+                "untrusted: no fresh check",
+                UNTRUSTED,
+                TRUSTED,
+                BLOCKED_UNCHECKED,
+            ),
+            ("trusted, checked trusted", TRUSTED, TRUSTED, ALLOWED),
+            (
+                "trusted, but the fresh check says untrusted",
+                TRUSTED,
+                UNTRUSTED,
+                BLOCKED_BY_CHECK,
+            ),
+        ];
+
+        for (case, trust, check, expected) in cases {
+            assert_eq!(hover_gate_after(&[], trust, check), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn the_hover_observer_retries_a_failure_and_stops_after_the_dock_refuses() {
+        let cases = [
+            (
+                "after a failure worth a retry",
+                HoverRegistration::Failed,
+                ALLOWED,
+            ),
+            (
+                "after a registration that held",
+                HoverRegistration::Registered,
+                ALLOWED,
+            ),
+            (
+                "after the Dock refused",
+                HoverRegistration::Unsupported,
+                GAVE_UP,
+            ),
+        ];
+
+        for (case, outcome, expected) in cases {
+            let history = [(TRUSTED, TRUSTED, outcome)];
+            assert_eq!(
+                hover_gate_after(&history, TRUSTED, TRUSTED),
+                expected,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn refused_access_latches_the_hover_observer_until_trust_is_seen_revoked() {
+        let refused = (TRUSTED, TRUSTED, HoverRegistration::ApiDisabled);
+        let held = (TRUSTED, TRUSTED, HoverRegistration::Registered);
+        let revoked = (UNTRUSTED, TRUSTED, HoverRegistration::Registered);
+        let cases: [(&str, &[Step], GateAnswer); 3] = [
+            (
+                "refused while cached as trusted: no fresh check",
+                &[refused],
+                BLOCKED_UNCHECKED,
+            ),
+            ("still latched later", &[refused, held], BLOCKED_UNCHECKED),
+            (
+                "revoked, then granted again: released",
+                &[refused, revoked],
+                ALLOWED,
+            ),
+        ];
+
+        for (case, history, expected) in cases {
+            assert_eq!(
+                hover_gate_after(history, TRUSTED, TRUSTED),
+                expected,
+                "{case}"
+            );
         }
     }
 }

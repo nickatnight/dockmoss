@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::ptr::{self, NonNull};
 
-use objc2::rc::autoreleasepool;
+use objc2::rc::{AutoreleasePool, autoreleasepool};
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{
     AXCopyMultipleAttributeOptions, AXError, AXUIElement, AXValue, AXValueType,
@@ -64,19 +64,19 @@ impl DockReader {
     }
 
     pub fn read(&mut self) -> Result<Vec<RawDockChild>, DockError> {
-        let read = autoreleasepool(|_| self.read_in_pool());
+        let read = autoreleasepool(|pool| self.read_in_pool(pool));
         if read.is_err() {
             self.dock = None;
         }
         read
     }
 
-    fn read_in_pool(&mut self) -> Result<Vec<RawDockChild>, DockError> {
+    fn read_in_pool(&mut self, pool: AutoreleasePool<'_>) -> Result<Vec<RawDockChild>, DockError> {
         if self.dock.is_none() {
             if !self.timeout_set {
                 self.timeout_set = set_global_messaging_timeout();
             }
-            self.dock = Some(find_dock()?);
+            self.dock = Some(find_dock(pool)?);
         }
         let dock = self.dock.as_ref().ok_or(DockError::NotRunning)?;
         let list = item_list(dock)?;
@@ -171,15 +171,17 @@ fn keep_child(read: Result<RawDockChild, DockError>) -> Result<Option<RawDockChi
     }
 }
 
-fn find_dock() -> Result<CFRetained<AXUIElement>, DockError> {
-    let pid =
-        NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
-            .iter()
-            .find(|app| is_system_dock(app))
-            .map(|dock| dock.processIdentifier())
-            .ok_or(DockError::NotRunning)?;
+fn find_dock(pool: AutoreleasePool<'_>) -> Result<CFRetained<AXUIElement>, DockError> {
+    let pid = system_dock_pid(pool).ok_or(DockError::NotRunning)?;
     tracing::debug!(pid, "dock process found");
     Ok(application(pid))
+}
+
+pub(super) fn system_dock_pid(_pool: AutoreleasePool<'_>) -> Option<i32> {
+    NSRunningApplication::runningApplicationsWithBundleIdentifier(ns_string!(DOCK_BUNDLE_ID))
+        .iter()
+        .find(|app| is_system_dock(app))
+        .map(|dock| dock.processIdentifier())
 }
 
 /// The running system Dock, not another process that claims its bundle ID.
@@ -192,7 +194,7 @@ fn is_system_dock(app: &NSRunningApplication) -> bool {
 }
 
 #[expect(unsafe_code, reason = "AXUIElementCreateApplication is a C function")]
-fn application(pid: i32) -> CFRetained<AXUIElement> {
+pub(super) fn application(pid: i32) -> CFRetained<AXUIElement> {
     // SAFETY: AXUIElementCreateApplication accepts any pid and only builds a
     // new element for it (no IPC happens until an attribute is read). The
     // binding wraps the +1 result in `CFRetained`; it returns null only when

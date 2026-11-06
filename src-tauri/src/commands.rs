@@ -23,6 +23,7 @@ pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
     ScreenParametersChanged,
     OverlayOrderFailed,
+    DockHoverChanged,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);

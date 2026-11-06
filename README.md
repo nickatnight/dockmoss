@@ -9,6 +9,7 @@ MVP slice 13 of 13: settings apply live, launch at login, and the release bundle
 A transparent, click-through window covers the main display one level above the Dock, on every Space. A `dock-tracker` thread reads the Dock through Accessibility:
 - at 60 Hz while the pointer is within 150 pt of the Dock (or of the bottom edge while the Dock is hidden) and moving, or the Dock moved in the last 250 ms, and at 2 Hz otherwise;
 - while the pointer rests in that band, it also checks the pointer position alone (no Dock read) 10 times a second, so a magnification started from rest goes back to 60 Hz within about 100 ms;
+- a second thread listens for the Dock's own notice that the item under the pointer changed. The Dock sends it when the pointer enters the Dock, crosses an icon or leaves. It makes the next read due at once, so the moss follows a magnification from its first frames (about 17 ms) instead of waiting up to 500 ms for the next 2 Hz read. Those reads are never closer than 1/60 s apart. With the pointer away from the Dock, a launching app's bouncing icon is still followed at 2 Hz;
 - with the Dock hidden, a pointer within 4 pt of the bottom edge keeps 60 Hz until 1 s after it last moved, longer than the Dock's default auto-hide delay, so the Dock sliding in is read at once rather than at the next 2 Hz read. With `com.apple.dock autohide-delay` set above 1 s, the reveal waits for that 2 Hz read again;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 

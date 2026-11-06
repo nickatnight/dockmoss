@@ -437,8 +437,11 @@ function placed(shape: Shape, [footX, footY]: Point, scale: number): Shape {
 const PROP_STREAM = 0x50524f50;
 /** The props' full scale, at level 1. */
 const PROP_SCALE = 0.9;
-/** Below its ramp a prop is this share of its full scale: small, but there. */
-const PROP_SMALLEST_SHARE = 0.4;
+/**
+ * Below its ramp a prop is this share of its full scale: smaller, but big
+ * enough to read at any intensity above 0 (look check round 1; it was 0.4).
+ */
+const PROP_SMALLEST_SHARE = 0.7;
 /** The levels over which each prop grows from its smallest to full scale: the last few steps. */
 const MUSHROOM_RAMP = [0.78, 0.9] as const;
 const FLOWER_RAMP = [0.88, 0.98] as const;

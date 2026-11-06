@@ -357,9 +357,9 @@ describe("props", () => {
     }
   });
 
-  it("are a mushroom and a flower, smaller at a low level than at level 1, and in the same place", () => {
+  it("are a mushroom and a flower, at the lowest level 70% of their size at level 1, in the same place", () => {
     const seed = fnv1a32("com.hnc.Discord#0");
-    const low = mossScene({ seed, step: step(0.25), overgrown: true }).props;
+    const low = mossScene({ seed, step: 1 as LevelStep, overgrown: true }).props;
     const full = mossScene({ seed, step: step(1), overgrown: true }).props;
     const width = (shapes: readonly Shape[], color: string): number => {
       const box = bounds(shapes.find(({ paint }) => paint.kind === "fill" && paint.color === color) as Shape);
@@ -371,9 +371,9 @@ describe("props", () => {
     };
 
     // The mushroom's cap and the flower's centre.
+    // Look check round 1: big enough to read at any intensity above 0.
     for (const color of ["#C8553D", "#E8833A"]) {
-      expect(width(low, color)).toBeGreaterThan(0);
-      expect(width(low, color)).toBeLessThan(width(full, color));
+      expect(width(low, color) / width(full, color)).toBeCloseTo(0.7, 6);
     }
     // The mushroom's shadow sits at its foot.
     expect(foot(low, "#17381B")).toEqual(foot(full, "#17381B"));

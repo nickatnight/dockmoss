@@ -18,11 +18,10 @@ export function startMossRenderer(root: HTMLElement, { overgrowthOverride }: Mos
     createGl: () => createMossGl(canvas),
     bake: (request) => {
       const baked = bake(mossScene(request), request.side);
-      if (baked.kind !== "baked") {
-        console.error(`moss renderer: no bake (${baked.kind})`);
-        return null;
+      if (baked.kind === "noContext") {
+        console.error("moss renderer: no 2D context for a bake");
       }
-      return baked.canvas;
+      return baked.kind === "baked" ? baked.canvas : null;
     },
     overgrowthOverride,
   });

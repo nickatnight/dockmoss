@@ -303,6 +303,36 @@ describe("baking", () => {
 
     expect(draws()[0].map(({ key }) => key)).toEqual(["ru.keepcoder.Telegram#0"]);
   });
+
+  const nine: DockItem[] = Array.from({ length: 9 }, (_, index) => ({
+    bundleId: `app.${index}` as BundleId,
+    rect: { ...discord.rect, x: 300 + index * 47 },
+  }));
+  const patchyNine: AppGrowth[] = nine.map(({ bundleId }) => ({ bundleId, overgrowth: 0.6, stage: "patchy" }));
+
+  it("grows the atlas for a ninth icon, putting the eight kept bakes back in their old layers", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 8));
+    env.renderer.growth(patchyNine);
+    env.frames.runFrame();
+    const layers = new Map(env.draws()[0].map(({ key, layer }) => [key as string, layer]));
+    env.calls().length = 0;
+    env.bakes.length = 0;
+
+    env.renderer.dock(nine);
+    env.frames.runFrame();
+
+    expect(env.bakes.map(({ seed }) => seed)).toEqual([fnv1a32("app.8#0")]);
+    expect(env.ops()).toEqual(["allocate", "upload", "draw"]);
+    expect(env.calls()[0]).toEqual({ op: "allocate", layers: 16, side: 256 });
+    const upload = env.calls()[1];
+    const uploaded = upload.op === "upload" ? upload.cells.map(({ layer, image }) => [image.seed, layer]) : [];
+    expect(uploaded).toHaveLength(9);
+    for (const { key, layer } of env.draws()[0]) {
+      expect(uploaded).toContainEqual([fnv1a32(key), layer]);
+      expect(layer).toBe(layers.get(key) ?? 8);
+    }
+  });
 });
 
 describe("at rest", () => {

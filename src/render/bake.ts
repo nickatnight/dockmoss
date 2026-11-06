@@ -61,7 +61,7 @@ function trace(context: BakeContext, shape: Shape): void {
   }
 }
 
-function paint(context: BakeContext, paint: Paint): void {
+function paintShape(context: BakeContext, paint: Paint): void {
   switch (paint.kind) {
     case "fill":
       context.globalAlpha = paint.alpha;
@@ -87,7 +87,7 @@ function paint(context: BakeContext, paint: Paint): void {
 function draw(context: BakeContext, shapes: readonly Shape[]): void {
   for (const shape of shapes) {
     trace(context, shape);
-    paint(context, shape.paint);
+    paintShape(context, shape.paint);
   }
 }
 

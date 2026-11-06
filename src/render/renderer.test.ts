@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
-import type { BakeRequest } from "./atlas";
+import { BAKES_PER_FRAME, type BakeRequest } from "./atlas";
 import type { MossGl } from "./gl";
 import { type MossInstance, SHRIVEL_MS, bakeBox, fnv1a32, toDeviceBox } from "./model";
 import { createRenderer } from "./renderer";
@@ -81,6 +81,13 @@ function setup(fails: (request: BakeRequest) => boolean = () => false) {
   const ops = () => calls().map((call) => call.op);
   const draws = () => calls().flatMap((call) => (call.op === "draw" ? [call.instances] : []));
   return { renderer, frames, gls, calls, ops, draws, bakes };
+}
+
+/** Runs frames until the renderer asks for no more, as spread-out bakes need. */
+function settle(env: ReturnType<typeof setup>, time = 0): void {
+  for (let frame = 0; env.frames.pending > 0 && frame < 100; frame++) {
+    env.frames.runFrame(time + frame * 17);
+  }
 }
 
 const discord: DockItem = {
@@ -314,8 +321,9 @@ describe("baking", () => {
     const env = setup();
     env.renderer.dock(nine.slice(0, 8));
     env.renderer.growth(patchyNine);
-    env.frames.runFrame();
-    const layers = new Map(env.draws()[0].map(({ key, layer }) => [key as string, layer]));
+    settle(env);
+    const draws = env.draws();
+    const layers = new Map(draws[draws.length - 1].map(({ key, layer }) => [key as string, layer]));
     env.calls().length = 0;
     env.bakes.length = 0;
 
@@ -334,15 +342,37 @@ describe("baking", () => {
     }
   });
 
+  it("bakes at most BAKES_PER_FRAME icons a frame, and draws the rest as their bakes arrive", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 5));
+    env.renderer.growth(patchyNine);
+
+    const perFrame: number[][] = [];
+    for (let frame = 0; frame < 5 && (frame === 0 || env.frames.pending > 0); frame++) {
+      const bakesBefore = env.bakes.length;
+      env.frames.runFrame(frame * 17);
+      const draws = env.draws();
+      perFrame.push([env.bakes.length - bakesBefore, draws[draws.length - 1].length]);
+    }
+
+    expect(BAKES_PER_FRAME).toBe(2);
+    expect(perFrame).toEqual([
+      [2, 2],
+      [2, 4],
+      [1, 5],
+    ]);
+    expect(env.frames.pending).toBe(0);
+  });
+
   it("drops an evicted bake, so a later reallocation uploads only the bakes still wanted", () => {
     const env = setup();
     env.renderer.dock(nine.slice(0, 8));
     env.renderer.growth(patchyNine);
-    env.frames.runFrame();
+    settle(env);
     const oldKey = env.bakes.find(({ seed }) => seed === fnv1a32("app.3#0"))?.key;
 
     env.renderer.growth(patchyNine.map((app) => (app.bundleId === "app.3" ? { ...app, overgrowth: 0.9 } : app)));
-    env.frames.runFrame();
+    settle(env);
     const newKey = env.bakes[env.bakes.length - 1].key;
     env.calls().length = 0;
     env.renderer.dock(nine);

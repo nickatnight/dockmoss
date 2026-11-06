@@ -3,6 +3,9 @@ import type { MossyIcon } from "./model";
 
 export const MAX_MAGNIFIED_TILE_POINTS = 128;
 
+/** A software bake takes about 12 ms, so a frame makes at most this many; the rest wait for the next frames. */
+export const BAKES_PER_FRAME = 2;
+
 export function bakeSide(pixelRatio: number): number {
   return Math.round(MAX_MAGNIFIED_TILE_POINTS * pixelRatio);
 }

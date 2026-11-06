@@ -1,5 +1,13 @@
 import type { AppGrowth, DockItem } from "../ipc";
-import { EMPTY_ATLAS, type BakeKey, type BakeRequest, bakeRequest, bakeSide, planAtlas } from "./atlas";
+import {
+  BAKES_PER_FRAME,
+  EMPTY_ATLAS,
+  type BakeKey,
+  type BakeRequest,
+  bakeRequest,
+  bakeSide,
+  planAtlas,
+} from "./atlas";
 import type { MossGl } from "./gl";
 import {
   type LayerOf,
@@ -41,6 +49,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
   let atlas = EMPTY_ATLAS;
   const cells = new Map<BakeKey, { layer: number; image: Image }>();
   let planned: { pixelRatio: number; icons: readonly MossyIcon[]; layerOf: LayerOf } | null = null;
+  let bakesPending = false;
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
   let latest: MossyIcon[] = [];
@@ -69,13 +78,20 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       icons.map((icon) => bakeRequest(icon, pixelRatio)),
       bakeSide(pixelRatio),
     );
-    atlas = plan.atlas;
+    const later = plan.bakes.slice(BAKES_PER_FRAME);
+    bakesPending = later.length > 0;
+    // A bake left for a later frame stays out of the atlas, so the next plan makes it.
+    const layers = new Map(plan.atlas.layers);
+    for (const { request } of later) {
+      layers.delete(request.key);
+    }
+    atlas = { ...plan.atlas, layers };
     for (const key of cells.keys()) {
       if (!atlas.layers.has(key)) {
         cells.delete(key);
       }
     }
-    const baked = plan.bakes.flatMap(({ request, layer }) => {
+    const baked = plan.bakes.slice(0, BAKES_PER_FRAME).flatMap(({ request, layer }) => {
       const image = options.bake(request);
       if (image === null) {
         return [];
@@ -91,7 +107,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       target.upload(baked);
     }
     const layerOf: LayerOf = (icon) => cells.get(bakeRequest(icon, pixelRatio).key)?.layer;
-    planned = { pixelRatio, icons, layerOf };
+    planned = bakesPending ? null : { pixelRatio, icons, layerOf };
     return layerOf;
   }
 
@@ -106,7 +122,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     if (due) {
       lastLoopFrameMs = time;
     }
-    if (due || changed) {
+    if (due || changed || bakesPending) {
       const canvasHeight = Math.round(size.height * size.pixelRatio);
       const layerOf = prepareAtlas(gl, [...latest, ...[...shrivels.values()].map(({ icon }) => icon)]);
       const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight, layerOf);
@@ -114,7 +130,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight, layerOf), ...shrivelling.instances]);
       drawn = { icons: latest, showsShrivel: shrivelling.instances.length > 0 };
     }
-    if (loopRuns()) {
+    if (loopRuns() || bakesPending) {
       requestFrame();
     } else {
       lastLoopFrameMs = null;
@@ -161,6 +177,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       atlas = EMPTY_ATLAS;
       cells.clear();
       planned = null;
+      bakesPending = false;
       drawn = "unknown";
       shrivels = new Map();
       lastLoopFrameMs = null;

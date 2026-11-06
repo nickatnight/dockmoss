@@ -7,15 +7,16 @@ const CONSTANTS_LINE = "#pragma moss_constants";
 const FLOATS_PER_INSTANCE = INSTANCE_ATTRIBUTES.reduce((sum, { size }) => sum + size, 0);
 const BYTES_PER_FLOAT = 4;
 
-export interface MossGl {
+export interface MossGl<Image> {
   /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
   resize(width: number, height: number): void;
-  /** Clears the canvas, then draws every instance in one call, swayed to `swaySeconds`. */
-  draw(instances: readonly MossInstance[], swaySeconds: number): void;
+  allocate(layers: number, side: number): void;
+  upload(cells: readonly { layer: number; image: Image }[]): void;
+  draw(instances: readonly MossInstance[]): void;
   clear(): void;
 }
 
-export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
+export function createMossGl(canvas: HTMLCanvasElement): MossGl<OffscreenCanvas> | null {
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
@@ -35,7 +36,6 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   gl.disable(gl.BLEND);
   gl.clearColor(0, 0, 0, 0);
   const resolution = gl.getUniformLocation(program, "u_resolution");
-  const swaySecondsUniform = gl.getUniformLocation(program, "u_sway_seconds");
   gl.uniform2f(resolution, canvas.width, canvas.height);
 
   const buffer = gl.createBuffer();
@@ -54,6 +54,10 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   }
   let data = new Float32Array(0);
 
+  gl.activeTexture(gl.TEXTURE0);
+  let atlas: WebGLTexture | null = null;
+  let atlasSide = 0;
+
   const clear = (): void => {
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
@@ -69,9 +73,42 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       gl.viewport(0, 0, width, height);
       gl.uniform2f(resolution, width, height);
     },
-    draw(instances, swaySeconds) {
+    allocate(layers, side) {
+      gl.deleteTexture(atlas);
+      atlas = gl.createTexture();
+      atlasSide = side;
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, Math.floor(Math.log2(side)) + 1, gl.RGBA8, side, side, layers);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    },
+    upload(cells) {
+      if (cells.length === 0) {
+        return;
+      }
+      // Premultiplied, as the canvas composites, so mipmaps do not darken the moss's edges.
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      for (const { layer, image } of cells) {
+        gl.texSubImage3D(
+          gl.TEXTURE_2D_ARRAY,
+          0,
+          0,
+          0,
+          layer,
+          atlasSide,
+          atlasSide,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          image,
+        );
+      }
+      gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    },
+    draw(instances) {
       clear();
-      gl.uniform1f(swaySecondsUniform, swaySeconds);
       const length = instances.length * FLOATS_PER_INSTANCE;
       if (data.length < length) {
         data = new Float32Array(length);

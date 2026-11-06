@@ -1,12 +1,13 @@
+import { bake } from "./bake";
 import { createMossGl } from "./gl";
+import { mossScene } from "./generator";
 import { type FrameSink, createRenderer } from "./renderer";
 
 export interface MossOptions {
   overgrowthOverride: number | null;
-  sway: boolean;
 }
 
-export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway }: MossOptions): FrameSink {
+export function startMossRenderer(root: HTMLElement, { overgrowthOverride }: MossOptions): FrameSink {
   const canvas = document.createElement("canvas");
   canvas.className = "moss";
   canvas.setAttribute("aria-hidden", "true");
@@ -15,8 +16,14 @@ export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway 
   const renderer = createRenderer({
     schedule: (callback) => requestAnimationFrame(callback),
     createGl: () => createMossGl(canvas),
+    bake: (request) => {
+      const baked = bake(mossScene(request), request.side);
+      if (baked.kind === "noContext") {
+        console.error("moss renderer: no 2D context for a bake");
+      }
+      return baked.kind === "baked" ? baked.canvas : null;
+    },
     overgrowthOverride,
-    sway,
   });
   const resize = (): void => renderer.resize(innerWidth, innerHeight, devicePixelRatio);
 

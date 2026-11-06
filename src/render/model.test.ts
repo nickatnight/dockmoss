@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
-  CORNER_RADIUS_PER_SIDE,
   INSTANCE_ATTRIBUTES,
   SHRIVEL_MS,
-  SPRITE_TIP_LEAN,
   WITHER_TINT,
   type MossInstance,
   type MossOvergrowth,
@@ -14,33 +12,29 @@ import {
   type Drawn,
   type Shrivel,
   type Shrivels,
-  type Sprite,
   artBox,
   glslConstants,
   fnv1a32,
   itemKeys,
-  mossHue,
   mossInstances,
   mossyIcons,
   parseOvergrowthOverride,
-  parseSwayFlag,
   mossOvergrowth,
   quantize,
-  seedOffset,
   shrivelFrame,
   shrivelInstance,
   shrivelProgress,
   shrivelsAfter,
-  spritesFor,
   step,
   toDeviceBox,
-  worstCaseFront,
 } from "./model";
 import * as model from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
 import vertexSource from "./moss.vert.glsl?raw";
 
 const TILE = { y: 918, width: 56, height: 56 };
+
+const LAYER_ZERO = (): number => 0;
 
 function item(bundleId: string, x: number): DockItem {
   return { bundleId: bundleId as BundleId, rect: { x, ...TILE } };
@@ -285,34 +279,40 @@ describe("step", () => {
 });
 
 describe("mossInstances", () => {
-  it("draws static moss unwithered", () => {
-    const [instance] = mossInstances([icon({ overgrowth: mossy(1), overgrown: true })], 2, 1964);
+  it("draws static moss whole and unwithered", () => {
+    const [instance] = mossInstances([icon({ overgrowth: mossy(1), overgrown: true })], 2, 1964, LAYER_ZERO);
 
     expect(instance.wither).toBe(0);
+    expect(instance.remaining).toBe(1);
   });
 
-  it("gives an overgrown icon its sprites, and any other icon none", () => {
-    const [overgrown, patchy] = mossInstances(
-      [icon({ overgrowth: mossy(1), overgrown: true }), icon({ overgrowth: mossy(0.9) })],
-      2,
-      1964,
-    );
+  it("gives each icon the layer of its bake, and leaves out an icon without one", () => {
+    const discord = icon();
+    const chess = icon({ key: "com.apple.Chess#0" as ItemKey, seed: fnv1a32("com.apple.Chess#0") });
+    const telegram = icon({ key: "ru.keepcoder.Telegram#0" as ItemKey, seed: fnv1a32("ru.keepcoder.Telegram#0") });
+    const layers = new Map<ItemKey, number>([
+      [discord.key, 3],
+      [telegram.key, 0],
+    ]);
 
-    expect(overgrown.sprites).toEqual(spritesFor(3244016102));
-    expect(overgrown.sprites.length).toBeGreaterThan(0);
-    expect(patchy.sprites).toEqual([]);
+    const instances = mossInstances([discord, chess, telegram], 2, 1964, ({ key }) => layers.get(key));
+
+    expect(instances.map(({ key, layer }) => [key, layer])).toEqual([
+      [discord.key, 3],
+      [telegram.key, 0],
+    ]);
   });
 
-  it("puts each icon's art box in canvas device pixels, with its seed and overgrowth", () => {
+  it("puts each icon's bake over its tile's width, centred on the art, in canvas device pixels", () => {
     const tile = { x: 711, y: 918, width: 47, height: 59 };
-    const icons = [icon({ tile, overgrowth: mossy(0.6) })];
 
-    const [instance] = mossInstances(icons, 2, 1964);
+    const [instance] = mossInstances([icon({ tile })], 2, 1964, LAYER_ZERO);
 
-    expect(instance.box).toEqual(toDeviceBox(artBox(tile), 2, 1964));
-    expect(instance.seed).toBe(3244016102);
-    expect(instance.overgrowth).toBe(quantize(0.6));
-    expect(instance.hue).toBe(mossHue(3244016102));
+    const art = toDeviceBox(artBox(tile), 2, 1964);
+    expect(instance.box.width).toBeCloseTo(47 * 2, 9);
+    expect(instance.box.height).toBeCloseTo(47 * 2, 9);
+    expect(instance.box.x + instance.box.width / 2).toBeCloseTo(art.x + art.width / 2, 9);
+    expect(instance.box.y + instance.box.height / 2).toBeCloseTo(art.y + art.height / 2, 9);
   });
 });
 
@@ -394,24 +394,6 @@ describe("parseOvergrowthOverride", () => {
   });
 });
 
-describe("parseSwayFlag", () => {
-  it("turns sway on for 1", () => {
-    expect(parseSwayFlag("1")).toEqual({ kind: "set", sway: true });
-  });
-
-  it.each(["0", ""])("leaves sway off for %j", (raw) => {
-    expect(parseSwayFlag(raw)).toEqual({ kind: "set", sway: false });
-  });
-
-  it("leaves sway off when unset", () => {
-    expect(parseSwayFlag(undefined)).toEqual({ kind: "set", sway: false });
-  });
-
-  it.each(["yes", "true", "2"])("rejects %j", (raw) => {
-    expect(parseSwayFlag(raw)).toEqual({ kind: "invalid", raw });
-  });
-});
-
 describe("toDeviceBox", () => {
   it("scales a CSS-pixel rect by the pixel ratio and measures y up from the canvas bottom", () => {
     const rect = { x: 700, y: 918, width: 56, height: 56 };
@@ -455,85 +437,6 @@ describe("art boxes", () => {
   });
 });
 
-describe("seedOffset", () => {
-  it.each([
-    [0, [0, 0]],
-    [0x96d9fb5b, [62.8388671875, 37.7119140625]],
-    [0xffffffff, [63.9990234375, 63.9990234375]],
-  ])("moves seed %d to its own patch of noise, from the seed's low and high halves", (seed, offset) => {
-    expect(seedOffset(seed)).toEqual(offset);
-  });
-});
-
-describe("worstCaseFront", () => {
-  it("keeps moss at overgrowth 1 at or below 0.55 of the art height on the centre column", () => {
-    expect(worstCaseFront(0.5, 1)).toBeLessThanOrEqual(0.55);
-  });
-
-  it.each([0, 0.066, 0.934, 1])("keeps moss below the top corner arcs at x = %d", (x) => {
-    expect(worstCaseFront(x, 1)).toBeLessThan(1 - CORNER_RADIUS_PER_SIDE);
-  });
-
-  it("raises the centre front as overgrowth rises through 0.3, 0.6 and 1.0", () => {
-    const fronts = [0.3, 0.6, 1].map((overgrowth) => worstCaseFront(0.5, overgrowth));
-
-    expect(fronts[0]).toBeGreaterThan(0);
-    expect(fronts[1]).toBeGreaterThan(fronts[0]);
-    expect(fronts[2]).toBeGreaterThan(fronts[1]);
-  });
-
-  it.each([0, 0.5, 1])("draws nothing at overgrowth 0, at x = %d", (x) => {
-    expect(worstCaseFront(x, 0)).toBe(0);
-  });
-
-  // Derived by hand, not from a run. At overgrowth 1 the reach is 0.62 and the
-  // front peaks at 0.62 + 0.46875 * 0.24 (ragged) + 0.5 * 0.05 (tufts) + 0.012
-  // (sway) + max(0.04, 0.03) (fuzz or shadow) = 0.8095. On x = 0.5 the corner
-  // distance is the smaller one: 1.25 * sqrt(0.434^2 + (y - 0.066)^2) = 0.8095
-  // at y = 0.5467, so the 1/1000 scan returns 0.547. The other rows follow the
-  // same sum (reach 0.62 * 0.6^0.8 and 0.62 * 0.3^0.8), checked in Python.
-  // Dropping any term of the sum moves at least one row.
-  it.each([
-    [0.5, 1, 0.547],
-    [0.066, 1, 0.714],
-    [0.5, 0.6, 0.354],
-    [0.5, 0.3, 0.251],
-  ])("puts the worst front on x = %d at overgrowth %d at %d", (x, overgrowth, expected) => {
-    expect(worstCaseFront(x, overgrowth)).toBe(expected);
-  });
-});
-
-describe("mossHue", () => {
-  const hues = Array.from({ length: 2000 }, (_, index) => mossHue(fnv1a32(`app.${index}#0`)));
-
-  it("stays from -1 (warmer) to 1 (cooler)", () => {
-    expect(Math.min(...hues)).toBeGreaterThanOrEqual(-1);
-    expect(Math.max(...hues)).toBeLessThanOrEqual(1);
-  });
-
-  it("spreads icons across the range, not all one hue", () => {
-    expect(hues.filter((hue) => hue < -0.5).length).toBeGreaterThan(300);
-    expect(hues.filter((hue) => hue > 0.5).length).toBeGreaterThan(300);
-  });
-
-  // Golden values: a change here recolours every icon's moss.
-  it.each([
-    [0, -1],
-    [0xffffffff, -0.23921568627450984],
-    [3244016102, 0.3411764705882352],
-  ])("is fixed for seed %d", (seed, hue) => {
-    expect(mossHue(seed)).toBe(hue);
-  });
-});
-
-describe("the sway clock", () => {
-  it("wraps at a whole number of every sway period", () => {
-    for (const period of [model.MOSS_SWAY_PERIOD, model.SPRITE_SWAY_PERIOD]) {
-      expect(model.SWAY_CYCLE_SECONDS % period, String(period)).toBe(0);
-    }
-  });
-});
-
 describe("glslConstants", () => {
   it("declares each shader constant with the model's own value", () => {
     const lines = glslConstants().split("\n");
@@ -566,6 +469,14 @@ describe("glslConstants", () => {
     expect([...ownConstants].filter((name) => generated.has(name))).toEqual([]);
   });
 
+  it("declares only constants moss.frag.glsl uses", () => {
+    const code = fragmentSource.replace(/\/\/.*$/gm, "").replace("#pragma moss_constants", "");
+    const generated = [...glslConstants().matchAll(/^const \w+ (\w+) =/gm)].map(([, name]) => name);
+
+    expect(generated.length).toBeGreaterThan(0);
+    expect(generated.filter((name) => !new RegExp(`\\b${name}\\b`).test(code))).toEqual([]);
+  });
+
   it("writes every float with a decimal point, as GLSL requires", () => {
     for (const [, value] of glslConstants().matchAll(/^const float \w+ = (.+);$/gm)) {
       expect(value).toMatch(/\./);
@@ -573,96 +484,14 @@ describe("glslConstants", () => {
   });
 });
 
-function clipDistance(x: number, y: number): number {
-  const r = CORNER_RADIUS_PER_SIDE;
-  const qx = Math.abs(x - 0.5) - 0.5 + r;
-  const qy = Math.abs(y - 0.5) - 0.5 + r;
-  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
-}
-
-function leanedCorners({ x, y, size }: Sprite): [number, number][] {
-  const half = size / 2;
-  const lean = SPRITE_TIP_LEAN * size;
-  return [
-    [x - half, y - half],
-    [x + half, y - half],
-    [x - half - lean, y + half],
-    [x + half + lean, y + half],
-  ];
-}
-
-describe("spritesFor", () => {
-  const seeds = Array.from({ length: 2000 }, (_, index) => fnv1a32(`app.${index}#0`));
-
-  it("gives every seed 1 to 3 sprites, and each count to some seed", () => {
-    const counts = new Set(seeds.map((seed) => spritesFor(seed).length));
-
-    expect([...counts].sort()).toEqual([1, 2, 3]);
-  });
-
-  it("uses both mushrooms and flowers", () => {
-    const kinds = new Set(seeds.flatMap((seed) => spritesFor(seed).map(({ kind }) => kind)));
-
-    expect([...kinds].sort()).toEqual(["flower", "mushroom"]);
-  });
-
-  it("keeps every sprite's box, leaning either way, inside the clip and at or below 0.55 of the art height", () => {
-    for (const seed of seeds) {
-      for (const sprite of spritesFor(seed)) {
-        for (const [cx, cy] of leanedCorners(sprite)) {
-          expect(clipDistance(cx, cy), `seed ${seed}`).toBeLessThan(0);
-        }
-        expect(sprite.y + sprite.size / 2, `seed ${seed}`).toBeLessThanOrEqual(0.55);
-      }
-    }
-  });
-
-  it("leans a sprite's tip by at most 1.5 device px on tile size 45's 74 px art box", () => {
-    const largest = Math.max(...seeds.flatMap((seed) => spritesFor(seed).map(({ size }) => size)));
-
-    expect(SPRITE_TIP_LEAN * largest * 74).toBeLessThanOrEqual(1.5);
-  });
-
-  it("never overlaps two sprites on one icon", () => {
-    for (const seed of seeds) {
-      const sprites = spritesFor(seed);
-      for (const [index, a] of sprites.entries()) {
-        for (const b of sprites.slice(index + 1)) {
-          const apart = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) >= (a.size + b.size) / 2;
-          expect(apart, `seed ${seed}`).toBe(true);
-        }
-      }
-    }
-  });
-
-  // Golden values: a change here moves every overgrown icon's sprites.
-  it.each([
-    [
-      "com.hnc.Discord#0",
-      [
-        { kind: "flower", x: 0.37352608400397, y: 0.22917886829003692, size: 0.18107235140632838 },
-        { kind: "mushroom", x: 0.7711941741872579, y: 0.16338266673963517, size: 0.15032056090887636 },
-        { kind: "mushroom", x: 0.581096185836941, y: 0.1918341681500897, size: 0.16903756269719453 },
-      ],
-    ],
-    [
-      "ru.keepcoder.Telegram#0",
-      [{ kind: "mushroom", x: 0.6663523845374585, y: 0.1644334005890414, size: 0.17918860734906047 }],
-    ],
-  ])("places the same sprites for %s on every run", (key, sprites) => {
-    expect(spritesFor(fnv1a32(key))).toEqual(sprites);
-  });
-});
-
 const GLSL_SIZES: Record<string, number> = { float: 1, vec2: 2, vec3: 3, vec4: 4 };
 
 const layoutInstance: MossInstance = {
+  key: "com.hnc.Discord#0" as ItemKey,
   box: { x: 10, y: 20, width: 74, height: 74 },
-  seed: 0x12345678,
-  overgrowth: mossy(0.6),
-  hue: -0.5,
+  layer: 3,
   wither: 0.25,
-  sprites: [{ kind: "flower", x: 0.4, y: 0.2, size: 0.15 }],
+  remaining: 0.5,
 };
 
 describe("INSTANCE_ATTRIBUTES", () => {
@@ -684,18 +513,11 @@ describe("INSTANCE_ATTRIBUTES", () => {
     expect(unread).toEqual([]);
   });
 
-  it("writes exactly `size` values per attribute, zeros for a missing sprite", () => {
+  it("writes exactly `size` values per attribute: the box, the layer, the wither and what remains", () => {
     const values = INSTANCE_ATTRIBUTES.map((attribute) => attribute.values(layoutInstance));
 
     expect(values.map((written) => written.length)).toEqual(INSTANCE_ATTRIBUTES.map(({ size }) => size));
-    expect(values.flat()).toEqual([
-      10, 20, 74, 74,
-      ((0x5678 / 0x10000) * 64), ((0x1234 / 0x10000) * 64),
-      quantize(0.6), -0.5, 0.25,
-      0.4, 0.2, 0.15, 2,
-      0, 0, 0, 0,
-      0, 0, 0, 0,
-    ]);
+    expect(values.flat()).toEqual([10, 20, 74, 74, 3, 0.25, 0.5]);
   });
 });
 
@@ -844,48 +666,37 @@ describe("shrivelInstance", () => {
   const overgrown = icon({ overgrowth: mossy(1), overgrown: true });
 
   function at(progress: number, from: MossyIcon = overgrown): MossInstance | null {
-    return shrivelInstance(from, progress, 2, 1964);
+    return shrivelInstance(from, progress, 2, 1964, 0);
   }
 
   it("starts from the icon as the canvas last drew it", () => {
-    expect(at(0)).toEqual(mossInstances([overgrown], 2, 1964)[0]);
+    expect(at(0)).toEqual(mossInstances([overgrown], 2, 1964, LAYER_ZERO)[0]);
   });
 
   it("leaves the icon no instance at progress 1, so it is clean", () => {
     expect(at(1)).toBeNull();
   });
 
-  // Derived by hand: the smoothstep at 0.25 is 3 * 0.25^2 - 2 * 0.25^3 = 0.15625,
-  // so 0.84375 of the overgrowth remains, which is 216/256 and needs no rounding.
-  it("eases the front down slowly at first: a quarter of the way, an overgrown icon keeps 0.84375", () => {
-    expect(at(0.25)?.overgrowth).toBe(0.84375);
+  it("eases the front down slowly at first: a quarter of the way, 0.84375 of the moss remains", () => {
+    expect(at(0.25)?.remaining).toBe(0.84375);
   });
 
-  it("recedes the front from its start to the bottom edge, never rising, and at or below 0.55", () => {
-    const fronts = progresses.flatMap((progress) => {
-      const instance = at(progress);
-      return instance === null ? [] : [worstCaseFront(0.5, instance.overgrowth)];
-    });
-    const start = worstCaseFront(0.5, 1);
+  it("recedes the front all the way to the bottom edge, never rising", () => {
+    const remaining = progresses.map((progress) => at(progress)?.remaining ?? 0);
 
-    expect(fronts.length).toBeGreaterThan(80);
-    for (const [index, front] of fronts.entries()) {
-      expect(front).toBeLessThanOrEqual(start);
-      expect(front).toBeLessThanOrEqual(0.55);
-      expect(front).toBeLessThanOrEqual(fronts[index - 1] ?? start);
+    expect(remaining[0]).toBe(1);
+    for (let index = 1; index < remaining.length; index++) {
+      expect(remaining[index]).toBeLessThanOrEqual(remaining[index - 1]);
     }
-    expect(fronts[fronts.length - 1]).toBeLessThan(start / 5);
+    expect(remaining[99]).toBeLessThan(0.001);
   });
 
-  it("recedes from a patchy start the same way, to no moss", () => {
+  it("recedes a patchy icon's front the same way as an overgrown one's", () => {
     const patchy = icon({ overgrowth: mossy(0.5) });
-    const overgrowths = progresses.map((progress) => at(progress, patchy)?.overgrowth ?? 0);
 
-    for (let index = 1; index < overgrowths.length; index++) {
-      expect(overgrowths[index]).toBeLessThanOrEqual(overgrowths[index - 1]);
+    for (const progress of progresses) {
+      expect(at(progress, patchy)?.remaining).toBe(at(progress)?.remaining);
     }
-    expect(overgrowths[0]).toBe(0.5);
-    expect(overgrowths[overgrowths.length - 1]).toBe(0);
   });
 
   it("withers the moss from none at the start to full before the end, never back", () => {
@@ -899,44 +710,11 @@ describe("shrivelInstance", () => {
     }
   });
 
-  it("shrinks every sprite to nothing inside its own box, the clip and the 0.55 bound", () => {
-    const seeds = Array.from({ length: 500 }, (_, index) => fnv1a32(`app.${index}#0`));
-    for (const seed of seeds) {
-      const from = icon({ seed, overgrowth: mossy(1), overgrown: true });
-      const start = spritesFor(seed);
-      let previous: readonly Sprite[] = start;
-      for (const progress of progresses) {
-        const sprites = at(progress, from)?.sprites ?? [];
-        if (sprites.length === 0) {
-          continue;
-        }
-        expect(sprites).toHaveLength(start.length);
-        for (const [slot, sprite] of sprites.entries()) {
-          const top = sprite.y + sprite.size / 2;
-          expect(sprite.size, `seed ${seed}`).toBeLessThanOrEqual(previous[slot].size);
-          expect(top, `seed ${seed}`).toBeLessThanOrEqual(start[slot].y + start[slot].size / 2);
-          expect(top, `seed ${seed}`).toBeLessThanOrEqual(0.55);
-          expect(sprite.y - sprite.size / 2, `seed ${seed}`).toBeCloseTo(start[slot].y - start[slot].size / 2, 12);
-          for (const [cx, cy] of leanedCorners(sprite)) {
-            expect(clipDistance(cx, cy), `seed ${seed}`).toBeLessThan(0);
-          }
-        }
-        previous = sprites;
-      }
-      const drawnFrames = progresses.flatMap((progress) => at(progress, from) ?? []);
-      const last = drawnFrames[drawnFrames.length - 1];
-      expect(Math.max(...last.sprites.map(({ size }) => size)), `seed ${seed}`).toBeLessThan(0.02);
-    }
-  });
-
-  it("keeps the icon's tile, seed, hue and sprite kinds", () => {
+  it("keeps the icon's key, box and bake", () => {
     const instance = at(0.5);
-    const start = mossInstances([overgrown], 2, 1964)[0];
+    const start = mossInstances([overgrown], 2, 1964, LAYER_ZERO)[0];
 
-    expect(instance?.box).toEqual(start.box);
-    expect(instance?.seed).toBe(start.seed);
-    expect(instance?.hue).toBe(start.hue);
-    expect(instance?.sprites.map(({ kind, x }) => ({ kind, x }))).toEqual(start.sprites.map(({ kind, x }) => ({ kind, x })));
+    expect([instance?.key, instance?.box, instance?.layer]).toEqual([start.key, start.box, start.layer]);
   });
 });
 
@@ -946,10 +724,23 @@ describe("shrivelFrame", () => {
   const discord = icon({ tile: { x: 760, ...TILE } });
 
   it("starts a shrivel's clock on its first frame and draws it there as last drawn", () => {
-    const { instances, running } = shrivelFrame(new Map([[chessKey, { icon: chess, startMs: null }]]), 5000, 2, 1964);
+    const { instances, running } = shrivelFrame(new Map([[chessKey, { icon: chess, startMs: null }]]), 5000, 2, 1964, LAYER_ZERO);
 
-    expect(instances).toEqual(mossInstances([chess], 2, 1964));
+    expect(instances).toEqual(mossInstances([chess], 2, 1964, LAYER_ZERO));
     expect([...running.values()]).toEqual([{ icon: chess, startMs: 5000 }]);
+  });
+
+  it("draws a shrivel from the bake of the icon as last drawn, and ends one with no bake", () => {
+    const shrivels = new Map([
+      [chessKey, { icon: chess, startMs: 1000 }],
+      [discord.key, { icon: discord, startMs: 1000 }],
+    ]);
+    const layerOf = ({ key, overgrowth }: MossyIcon) => (key === chessKey && overgrowth === 1 ? 5 : undefined);
+
+    const { instances, running } = shrivelFrame(shrivels, 1100, 2, 1964, layerOf);
+
+    expect(instances.map(({ layer }) => layer)).toEqual([5]);
+    expect([...running.keys()]).toEqual([chessKey]);
   });
 
   it("draws concurrent shrivels each at its own progress", () => {
@@ -958,9 +749,9 @@ describe("shrivelFrame", () => {
       [discord.key, { icon: discord, startMs: 1300 }],
     ]);
 
-    const { instances } = shrivelFrame(shrivels, 1300, 2, 1964);
+    const { instances } = shrivelFrame(shrivels, 1300, 2, 1964, LAYER_ZERO);
 
-    expect(instances).toEqual([shrivelInstance(chess, 0.5, 2, 1964), shrivelInstance(discord, 0, 2, 1964)]);
+    expect(instances).toEqual([shrivelInstance(chess, 0.5, 2, 1964, 0), shrivelInstance(discord, 0, 2, 1964, 0)]);
   });
 
   it("drops a shrivel at its end and draws nothing for it", () => {
@@ -969,9 +760,9 @@ describe("shrivelFrame", () => {
       [discord.key, { icon: discord, startMs: 1300 }],
     ]);
 
-    const { instances, running } = shrivelFrame(shrivels, 1000 + SHRIVEL_MS, 2, 1964);
+    const { instances, running } = shrivelFrame(shrivels, 1000 + SHRIVEL_MS, 2, 1964, LAYER_ZERO);
 
-    expect(instances).toEqual([shrivelInstance(discord, 0.5, 2, 1964)]);
+    expect(instances).toEqual([shrivelInstance(discord, 0.5, 2, 1964, 0)]);
     expect([...running.keys()]).toEqual([discord.key]);
   });
 });

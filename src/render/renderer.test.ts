@@ -1,26 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
+import { BAKES_PER_FRAME, type BakeRequest } from "./atlas";
 import type { MossGl } from "./gl";
-import { type MossInstance, SHRIVEL_MS, artBox, fnv1a32, toDeviceBox } from "./model";
+import { type MossInstance, SHRIVEL_MS, bakeBox, fnv1a32, toDeviceBox } from "./model";
 import { createRenderer } from "./renderer";
+
+type FakeImage = BakeRequest;
 
 type Call =
   | { op: "resize"; width: number; height: number }
-  | { op: "draw"; instances: readonly MossInstance[]; swaySeconds: number }
+  | { op: "allocate"; layers: number; side: number }
+  | { op: "upload"; cells: readonly { layer: number; image: FakeImage }[] }
+  | { op: "draw"; instances: readonly MossInstance[] }
   | { op: "clear" };
 
 function fakeGls() {
   const created: Call[][] = [];
-  const create = (): MossGl => {
+  const create = (): MossGl<FakeImage> => {
     const calls: Call[] = [];
     created.push(calls);
     return {
       resize: (width, height) => {
         calls.push({ op: "resize", width, height });
       },
-      draw: (instances, swaySeconds) => {
-        calls.push({ op: "draw", instances, swaySeconds });
+      allocate: (layers, side) => {
+        calls.push({ op: "allocate", layers, side });
+      },
+      upload: (cells) => {
+        calls.push({ op: "upload", cells });
+      },
+      draw: (instances) => {
+        calls.push({ op: "draw", instances });
       },
       clear: () => {
         calls.push({ op: "clear" });
@@ -52,20 +63,31 @@ function manualScheduler() {
   };
 }
 
-function setup(sway = false) {
+function setup(fails: (request: BakeRequest) => boolean = () => false) {
   const gls = fakeGls();
   const frames = manualScheduler();
-  const renderer = createRenderer({
+  const bakes: BakeRequest[] = [];
+  const renderer = createRenderer<FakeImage>({
     schedule: frames.schedule,
     createGl: gls.create,
+    bake: (request) => {
+      bakes.push(request);
+      return fails(request) ? null : request;
+    },
     overgrowthOverride: null,
-    sway,
   });
   renderer.resize(1512, 982, 2);
   const calls = (): Call[] => gls.created[gls.created.length - 1] ?? [];
   const ops = () => calls().map((call) => call.op);
   const draws = () => calls().flatMap((call) => (call.op === "draw" ? [call.instances] : []));
-  return { renderer, frames, gls, calls, ops, draws };
+  return { renderer, frames, gls, calls, ops, draws, bakes };
+}
+
+/** Runs frames until the renderer asks for no more, as spread-out bakes need. */
+function settle(env: ReturnType<typeof setup>, time = 0): void {
+  for (let frame = 0; env.frames.pending > 0 && frame < 100; frame++) {
+    env.frames.runFrame(time + frame * 17);
+  }
 }
 
 const discord: DockItem = {
@@ -126,9 +148,9 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(calls()).toContainEqual({ op: "resize", width: 1920, height: 1080 });
-    const artBottom = 918 + (59 + 0.79 * 47) / 2;
+    const bakeBottom = 918 + 59 / 2 + 47 / 2;
     expect(draws()).toHaveLength(1);
-    expect(draws()[0][0].box.y).toBeCloseTo(1080 - artBottom, 6);
+    expect(draws()[0][0].box.y).toBeCloseTo(1080 - bakeBottom, 6);
   });
 
   it("redraws on a new context after the old one is lost and restored", () => {
@@ -154,7 +176,7 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(draws()).toHaveLength(1);
-    expect(draws()[0].map(({ overgrowth }) => overgrowth)).toEqual([0.6015625, 1]);
+    expect(draws()[0].map(({ key }) => key)).toEqual(["com.hnc.Discord#0", "ru.keepcoder.Telegram#0"]);
   });
 
   it("draws nothing, and schedules nothing, for a clean Dock whose tiles move", () => {
@@ -182,119 +204,326 @@ describe("createRenderer", () => {
   });
 });
 
-describe("the sway loop", () => {
-  const patchy = (overgrowth: number): AppGrowth[] => [
-    { bundleId: discord.bundleId, overgrowth, stage: overgrowth >= 0.5 ? "patchy" : "fuzz" },
-  ];
+describe("baking", () => {
+  const telegram: DockItem = {
+    bundleId: "ru.keepcoder.Telegram" as BundleId,
+    rect: { ...discord.rect, x: 664 },
+  };
+  const both: AppGrowth[] = [...mossy, { bundleId: telegram.bundleId, overgrowth: 0.3, stage: "fuzz" }];
 
-  function runFrames(env: ReturnType<typeof setup>, count: number, start = 0): number[] {
-    const before = env.calls().length;
-    for (let index = 0; index < count; index++) {
-      env.frames.runFrame(start + (index * 1000) / 60);
-    }
-    return env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []));
-  }
+  it("bakes each mossy icon once, into the atlas, before its first draw", () => {
+    const { renderer, frames, ops, calls, draws, bakes } = setup();
 
-  it("does not run with sway off, even with a patchy icon", () => {
-    const env = setup(false);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.8));
+    renderer.dock([discord, telegram]);
+    renderer.growth(both);
+    frames.runFrame();
 
-    expect(runFrames(env, 1)).toHaveLength(1);
-    expect(env.frames.pending).toBe(0);
+    expect(bakes.map(({ side }) => side)).toEqual([256, 256]);
+    expect(ops().slice(-3)).toEqual(["allocate", "upload", "draw"]);
+    const upload = calls().find((call) => call.op === "upload");
+    expect(upload?.op === "upload" && upload.cells.map(({ layer, image }) => [layer, image.key])).toEqual([
+      [0, bakes[0].key],
+      [1, bakes[1].key],
+    ]);
+    expect(draws()[0].map(({ layer }) => layer)).toEqual([0, 1]);
   });
 
-  it("does not run with sway on while every icon is below patchy", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.45));
+  it("only draws when the Dock moves", () => {
+    const env = drawn();
+    env.bakes.length = 0;
 
-    expect(runFrames(env, 1)).toHaveLength(1);
-    expect(env.frames.pending).toBe(0);
+    env.renderer.dock([{ ...discord, rect: { x: 600, y: 905, width: 66, height: 78 } }]);
+    env.frames.runFrame();
+
+    expect(env.bakes).toEqual([]);
+    expect(env.ops()).toEqual(["draw"]);
   });
 
-  it("runs with sway on and an icon at patchy, at 30 frames a second", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.5));
+  it("only draws for a growth frame whose level steps are unchanged", () => {
+    const env = drawn();
+    env.bakes.length = 0;
 
-    const drawTimes = runFrames(env, 60, 1000);
+    env.renderer.growth([{ ...mossy[0], overgrowth: 0.59 }]);
+    env.frames.runFrame();
 
-    expect(env.frames.pending).toBe(1);
-    expect(drawTimes).toHaveLength(30);
-    for (let index = 1; index < drawTimes.length; index++) {
-      expect(drawTimes[index] - drawTimes[index - 1]).toBeGreaterThanOrEqual(1 / 30 - 1e-9);
-    }
+    expect(env.bakes).toEqual([]);
+    expect(env.ops()).toEqual(["draw"]);
   });
 
-  it("stops scheduling once the last icon drops below patchy", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 10);
+  it("bakes only the icon whose level step changed, into the layer its old bake frees", () => {
+    const env = setup();
+    env.renderer.dock([discord, telegram]);
+    env.renderer.growth(both);
+    env.frames.runFrame();
+    env.calls().length = 0;
+    env.bakes.length = 0;
 
-    env.renderer.growth(patchy(0.3));
-    runFrames(env, 1, 500);
+    env.renderer.growth([{ ...mossy[0], overgrowth: 0.8 }, both[1]]);
+    env.frames.runFrame();
 
-    expect(env.frames.pending).toBe(0);
-    expect(runFrames(env, 5, 600)).toEqual([]);
+    expect(env.bakes).toHaveLength(1);
+    expect(env.ops()).toEqual(["upload", "draw"]);
+    expect(env.draws()[0].map(({ layer }) => layer)).toEqual([0, 1]);
   });
 
-  it("stops at once when the Dock empties", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 3);
+  it("bakes every icon again at the new size when the backing scale changes", () => {
+    const env = drawn();
+    env.bakes.length = 0;
+
+    env.renderer.resize(1512, 982, 1);
+    env.frames.runFrame();
+
+    expect(env.bakes.map(({ side }) => side)).toEqual([128]);
+    expect(env.calls()).toContainEqual({ op: "allocate", layers: 8, side: 128 });
+  });
+
+  it("keeps its bakes while the Dock hides, so showing it again only draws", () => {
+    const env = drawn();
+    env.bakes.length = 0;
 
     env.renderer.dock([]);
-    runFrames(env, 1, 100);
+    env.renderer.dock([discord]);
+    env.frames.runFrame();
 
+    expect(env.bakes).toEqual([]);
+    expect(env.ops()).toEqual(["clear", "draw"]);
+  });
+
+  it("bakes again on a restored context", () => {
+    const env = drawn();
+    env.bakes.length = 0;
+
+    env.renderer.contextLost();
+    env.renderer.contextRestored();
+    env.frames.runFrame();
+
+    expect(env.bakes).toHaveLength(1);
+    expect(env.gls.created[1].map(({ op }) => op)).toEqual(["resize", "allocate", "upload", "draw"]);
+  });
+
+  it("leaves out an icon whose bake failed", () => {
+    const { renderer, frames, draws } = setup(({ seed }) => seed === fnv1a32("com.hnc.Discord#0"));
+
+    renderer.dock([discord, telegram]);
+    renderer.growth(both);
+    frames.runFrame();
+
+    expect(draws()[0].map(({ key }) => key)).toEqual(["ru.keepcoder.Telegram#0"]);
+  });
+
+  const nine: DockItem[] = Array.from({ length: 9 }, (_, index) => ({
+    bundleId: `app.${index}` as BundleId,
+    rect: { ...discord.rect, x: 300 + index * 47 },
+  }));
+  const patchyNine: AppGrowth[] = nine.map(({ bundleId }) => ({ bundleId, overgrowth: 0.6, stage: "patchy" }));
+
+  it("grows the atlas for a ninth icon, putting the eight kept bakes back in their old layers", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 8));
+    env.renderer.growth(patchyNine);
+    settle(env);
+    const draws = env.draws();
+    const layers = new Map(draws[draws.length - 1].map(({ key, layer }) => [key as string, layer]));
+    env.calls().length = 0;
+    env.bakes.length = 0;
+
+    env.renderer.dock(nine);
+    env.frames.runFrame();
+
+    expect(env.bakes.map(({ seed }) => seed)).toEqual([fnv1a32("app.8#0")]);
+    expect(env.ops()).toEqual(["allocate", "upload", "draw"]);
+    expect(env.calls()[0]).toEqual({ op: "allocate", layers: 16, side: 256 });
+    const upload = env.calls()[1];
+    const uploaded = upload.op === "upload" ? upload.cells.map(({ layer, image }) => [image.seed, layer]) : [];
+    expect(uploaded).toHaveLength(9);
+    for (const { key, layer } of env.draws()[0]) {
+      expect(uploaded).toContainEqual([fnv1a32(key), layer]);
+      expect(layer).toBe(layers.get(key) ?? 8);
+    }
+  });
+
+  it("bakes at most BAKES_PER_FRAME icons a frame, and draws the rest as their bakes arrive", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 5));
+    env.renderer.growth(patchyNine);
+
+    const perFrame: number[][] = [];
+    for (let frame = 0; frame < 10 && (frame === 0 || env.frames.pending > 0); frame++) {
+      const bakesBefore = env.bakes.length;
+      env.frames.runFrame(frame * 17);
+      const draws = env.draws();
+      perFrame.push([env.bakes.length - bakesBefore, draws[draws.length - 1].length]);
+    }
+
+    const expected: number[][] = [];
+    for (let drawn = 0; drawn < 5; ) {
+      const baked = Math.min(BAKES_PER_FRAME, 5 - drawn);
+      drawn += baked;
+      expected.push([baked, drawn]);
+    }
+    expect(expected.length).toBeGreaterThan(1);
+    expect(perFrame).toEqual(expected);
     expect(env.frames.pending).toBe(0);
   });
 
-  it("wraps the sway clock every SWAY_CYCLE_SECONDS", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.8));
+  it("keeps drawing every icon from its old bake while its new one waits, when many change step at once", () => {
+    const env = setup();
+    const six = nine.slice(0, 6);
+    env.renderer.dock(six);
+    env.renderer.growth(patchyNine);
+    settle(env);
+    const imageIn = new Map<number, BakeRequest>();
+    const record = (from: number) => {
+      for (const call of env.calls().slice(from)) {
+        if (call.op === "upload") for (const { layer, image } of call.cells) imageIn.set(layer, image);
+      }
+    };
+    record(0);
 
-    expect(runFrames(env, 1, 61_000)[0]).toBeCloseTo(1, 6);
+    env.renderer.growth(patchyNine.map((app) => ({ ...app, overgrowth: 0.9 })));
+    const drawnPerFrame: number[] = [];
+    for (let frame = 0; frame === 0 || (env.frames.pending > 0 && frame < 20); frame++) {
+      const from = env.calls().length;
+      env.frames.runFrame(frame * 17);
+      const calls = env.calls().slice(from);
+      const draw = calls.find((call) => call.op === "draw");
+      const instances = draw?.op === "draw" ? draw.instances : [];
+      // No upload goes into a layer another icon draws in the same frame.
+      for (const call of calls) {
+        if (call.op !== "upload") continue;
+        for (const { layer, image } of call.cells) {
+          for (const instance of instances) {
+            if (instance.layer === layer) expect(fnv1a32(instance.key)).toBe(image.seed);
+          }
+        }
+      }
+      record(from);
+      // Every icon draws, from a layer holding its own bake, old or new.
+      drawnPerFrame.push(instances.length);
+      for (const { key, layer } of instances) {
+        expect(imageIn.get(layer)?.seed).toBe(fnv1a32(key));
+      }
+    }
+
+    expect(drawnPerFrame.length).toBeGreaterThan(1);
+    expect(drawnPerFrame.every((count) => count === 6)).toBe(true);
+    const lastDraw = env.draws()[env.draws().length - 1];
+    expect(lastDraw.map(({ layer }) => imageIn.get(layer)?.step)).toEqual(Array(6).fill(22));
   });
 
-  it("draws a restarted loop's first frame at its own time, when a growth frame stopped it", () => {
-    const env = setup(true);
+  it("bakes props for an icon that turns Overgrown at the same overgrowth", () => {
+    const env = setup();
     env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 1, 2000);
-    env.renderer.growth(patchy(0.3));
-    runFrames(env, 1, 2010);
+    env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 1, stage: "patchy" }]);
+    settle(env);
+    env.calls().length = 0;
+    env.bakes.length = 0;
 
-    env.renderer.growth(patchy(0.9));
+    env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 1, stage: "overgrown" }]);
+    settle(env);
 
-    expect(runFrames(env, 1, 2020)).toEqual([2.02]);
+    expect(env.bakes.map(({ overgrown }) => overgrown)).toEqual([true]);
+    expect(env.ops()).toEqual(["upload", "draw"]);
   });
 
-  it("draws a restarted loop's first frame at its own time, when the Dock emptied between frames", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 1, 2000);
+  it("draws the new app when one Dock item is swapped for another at the same growth", () => {
+    const env = setup();
+    const a = { bundleId: "app.a" as BundleId, rect: discord.rect };
+    const b = { bundleId: "app.b" as BundleId, rect: discord.rect };
+    const both: AppGrowth[] = [a, b].map(({ bundleId }) => ({ bundleId, overgrowth: 0.6, stage: "patchy" }));
+    env.renderer.dock([a]);
+    env.renderer.growth(both);
+    settle(env);
+    env.bakes.length = 0;
+
+    env.renderer.dock([b]);
+    settle(env);
+
+    expect(env.bakes.map(({ seed }) => seed)).toEqual([fnv1a32("app.b#0")]);
+    const draws = env.draws();
+    expect(draws[draws.length - 1].map(({ key }) => key)).toEqual(["app.b#0"]);
+  });
+
+  it("keeps the bakes it made when the Dock hides while others wait, and makes only the rest on show", () => {
+    const env = setup();
+    const six = nine.slice(0, 6);
+    env.renderer.dock(six);
+    env.renderer.growth(patchyNine);
+    env.frames.runFrame(0);
+    expect(env.bakes).toHaveLength(2);
+
     env.renderer.dock([]);
+    env.frames.runFrame(17);
+    env.renderer.dock(six);
+    settle(env, 34);
 
-    env.renderer.dock([discord]);
-
-    expect(runFrames(env, 1, 2020)).toEqual([2.02]);
+    expect(env.bakes).toHaveLength(6);
   });
 
-  it("keeps the last sway pose for a draw after the loop stops", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    const swayed = runFrames(env, 4, 2000);
-    env.renderer.growth(patchy(0.3));
+  it("settles nine icons that appear at once, growing the atlas while bakes wait", () => {
+    const env = setup();
+    env.renderer.dock(nine);
+    env.renderer.growth(patchyNine);
+    settle(env);
 
-    const settled = runFrames(env, 1, 3000);
+    const draws = env.draws();
+    const last = draws[draws.length - 1];
+    expect(env.bakes).toHaveLength(9);
+    expect(last).toHaveLength(9);
+    expect(new Set(last.map(({ layer }) => layer)).size).toBe(9);
+    expect(env.frames.pending).toBe(0);
+  });
 
-    expect(settled).toEqual([swayed[swayed.length - 1]]);
+  it("bakes everything again on a context restored while bakes wait", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 6));
+    env.renderer.growth(patchyNine);
+    env.frames.runFrame(0);
+
+    env.renderer.contextLost();
+    env.renderer.contextRestored();
+    settle(env, 17);
+
+    expect(env.bakes).toHaveLength(2 + 6);
+    const draws = env.draws();
+    expect(draws[draws.length - 1]).toHaveLength(6);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("drops an evicted bake, so a later reallocation uploads only the bakes still wanted", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 8));
+    env.renderer.growth(patchyNine);
+    settle(env);
+    const oldKey = env.bakes.find(({ seed }) => seed === fnv1a32("app.3#0"))?.key;
+
+    env.renderer.growth(patchyNine.map((app) => (app.bundleId === "app.3" ? { ...app, overgrowth: 0.9 } : app)));
+    settle(env);
+    const newKey = env.bakes[env.bakes.length - 1].key;
+    env.calls().length = 0;
+    env.renderer.dock(nine);
+    env.frames.runFrame();
+
+    const upload = env.calls().find((call) => call.op === "upload");
+    const keys = upload?.op === "upload" ? upload.cells.map(({ image }) => image.key) : [];
+    expect(env.ops()).toEqual(["allocate", "upload", "draw"]);
+    expect(keys).toHaveLength(9);
+    expect(keys).toContain(newKey);
+    expect(keys).not.toContain(oldKey);
+  });
+});
+
+describe("at rest", () => {
+  it("draws an overgrown Dock once, then schedules nothing", () => {
+    const { renderer, frames, ops } = setup();
+    renderer.dock([discord]);
+    renderer.growth([{ bundleId: discord.bundleId, overgrowth: 1, stage: "overgrown" }]);
+
+    frames.runFrame(0);
+    frames.runFrame(1000 / 60);
+
+    expect(ops().filter((op) => op === "draw")).toHaveLength(1);
+    expect(frames.pending).toBe(0);
   });
 });
 
@@ -303,12 +532,11 @@ describe("the shrivel", () => {
     bundleId: "com.apple.Chess" as BundleId,
     rect: { x: 664, y: 918, width: 47, height: 59 },
   };
-  const chessSeed = fnv1a32("com.apple.Chess#0");
   const overgrownChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 1, stage: "overgrown" }];
   const launchedChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" }];
 
-  function mossyDock(sway = false) {
-    const env = setup(sway);
+  function mossyDock() {
+    const env = setup();
     env.renderer.dock([discord, chess]);
     env.renderer.growth(overgrownChess);
     env.frames.runFrame(500);
@@ -331,13 +559,28 @@ describe("the shrivel", () => {
     return drawnFrames;
   }
 
-  const chessIn = ({ instances }: DrawCall) => instances.find(({ seed }) => seed === chessSeed);
+  const chessIn = ({ instances }: DrawCall) => instances.find(({ key }) => key === "com.apple.Chess#0");
 
   function shrivelling(env: ReturnType<typeof setup>): void {
     env.renderer.growth(launchedChess);
     const drawnFrames = runAt60Hz(env, 1000, 100);
     expect(chessIn(drawnFrames[drawnFrames.length - 1])?.wither).toBeGreaterThan(0);
   }
+
+  it("draws from the icon's last bake, and bakes nothing", () => {
+    const env = mossyDock();
+    const chessLayer = 1;
+    env.bakes.length = 0;
+
+    env.renderer.growth(launchedChess);
+    const drawnFrames = runAt60Hz(env, 1000, 300);
+
+    expect(env.bakes).toEqual([]);
+    expect(drawnFrames.length).toBeGreaterThan(2);
+    for (const drawnFrame of drawnFrames) {
+      expect(chessIn(drawnFrame)?.layer).toBe(chessLayer);
+    }
+  });
 
   it("starts when a growth frame zeroes a mossy icon, from the icon as last drawn", () => {
     const env = mossyDock();
@@ -346,7 +589,7 @@ describe("the shrivel", () => {
 
     expect(env.frames.pending).toBe(1);
     const [first] = runAt60Hz(env, 1000, 0);
-    expect(chessIn(first)).toMatchObject({ overgrowth: 1, wither: 0 });
+    expect(chessIn(first)).toMatchObject({ wither: 0, remaining: 1 });
     expect(first.instances).toHaveLength(2);
   });
 
@@ -375,7 +618,7 @@ describe("the shrivel", () => {
     expect(drawnFrames.length).toBeGreaterThan(10);
     expect(last.time).toBeLessThanOrEqual(1000 + SHRIVEL_MS);
     expect(chessIn(last)).toBeUndefined();
-    expect(last.instances.map(({ overgrowth }) => overgrowth)).toEqual([0.6015625]);
+    expect(last.instances.map(({ key }) => key)).toEqual(["com.hnc.Discord#0"]);
     expect(env.frames.pending).toBe(0);
   });
 
@@ -402,18 +645,22 @@ describe("the shrivel", () => {
     env.renderer.dock([discord, magnified]);
     const [next] = runAt60Hz(env, 1150, 0);
 
-    expect(chessIn(next)?.box).toEqual(toDeviceBox(artBox(magnified.rect), 2, 1964));
+    expect(chessIn(next)?.box).toEqual(toDeviceBox(bakeBox(magnified.rect), 2, 1964));
   });
 
   it("draws the new state, and stops, when the app has moss again", () => {
     const env = mossyDock();
     shrivelling(env);
 
+    env.bakes.length = 0;
     env.renderer.growth([...mossy, { bundleId: chess.bundleId, overgrowth: 0.3, stage: "fuzz" }]);
     const drawnFrames = runAt60Hz(env, 1150, 500);
 
     expect(drawnFrames).toHaveLength(1);
-    expect(chessIn(drawnFrames[0])).toMatchObject({ overgrowth: 77 / 256, wither: 0 });
+    expect(chessIn(drawnFrames[0])).toMatchObject({ wither: 0, remaining: 1 });
+    expect(env.bakes.map(({ seed, step, overgrown }) => ({ seed, step, overgrown }))).toEqual([
+      { seed: fnv1a32("com.apple.Chess#0"), step: 8, overgrown: false },
+    ]);
     expect(env.frames.pending).toBe(0);
   });
 
@@ -520,23 +767,11 @@ describe("the shrivel", () => {
     env.renderer.growth(launchedChess);
     const drawnFrames = runAt60Hz(env, 1000, 1000);
 
-    expect(drawnFrames[5].instances.map(({ seed, wither }) => ({ seed, withered: wither > 0 }))).toEqual([
-      { seed: chessSeed, withered: true },
-      { seed: fnv1a32("com.apple.Chess#1"), withered: true },
+    expect(drawnFrames[5].instances.map(({ key, wither }) => ({ key, withered: wither > 0 }))).toEqual([
+      { key: "com.apple.Chess#0", withered: true },
+      { key: "com.apple.Chess#1", withered: true },
     ]);
     expect(drawnFrames[drawnFrames.length - 1].instances).toEqual([]);
-  });
-
-  it("does not sway the moss while it shrivels with sway off", () => {
-    const env = mossyDock(false);
-    env.renderer.growth(launchedChess);
-
-    const drawnFrames = runAt60Hz(env, 1000, 1000);
-
-    expect(drawnFrames.length).toBeGreaterThan(10);
-    expect(env.calls().flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []))).toEqual(
-      drawnFrames.map(() => 0),
-    );
   });
 
   it("restarts the loop after a shrivel ends in a frame, at 30 fps from its first frame", () => {
@@ -555,26 +790,6 @@ describe("the shrivel", () => {
     }
   });
 
-  it("restarts sway on its own pose after a shrivel ends in a frame", () => {
-    const env = setup(true);
-    const fuzzyDiscord = { bundleId: discord.bundleId, overgrowth: 0.3, stage: "fuzz" } as const;
-    env.renderer.dock([discord, chess]);
-    env.renderer.growth([fuzzyDiscord, overgrownChess[1]]);
-    env.frames.runFrame(500);
-    // Chess was overgrown, so sway ran; once it is clean only its shrivel runs the loop.
-    env.renderer.growth([fuzzyDiscord, launchedChess[1]]);
-    const frames = runAt60Hz(env, 1000, 1000);
-    const end = frames[frames.length - 1].time;
-    expect(env.frames.pending).toBe(0);
-
-    env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 0.9, stage: "patchy" }, launchedChess[1]]);
-    const before = env.calls().length;
-    env.frames.runFrame(end + 20);
-    const sways = env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []));
-
-    expect(sways).toEqual([((end + 20) / 1000) % 60]);
-  });
-
   it("starts a second shrivel while the first runs, as apps launched back to back do", () => {
     const env = mossyDock();
     env.renderer.growth(launchedChess);
@@ -584,9 +799,8 @@ describe("the shrivel", () => {
     env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 0, stage: "clean" }, launchedChess[1]]);
     const drawnFrames = runAt60Hz(env, 1250, 1000);
 
-    const discordSeed = fnv1a32("com.hnc.Discord#0");
     const discordWithers = drawnFrames.flatMap(({ instances }) =>
-      instances.filter(({ seed }) => seed === discordSeed).map(({ wither }) => wither),
+      instances.filter(({ key }) => key === "com.hnc.Discord#0").map(({ wither }) => wither),
     );
     expect(discordWithers[0]).toBe(0);
     expect(discordWithers.some((wither) => wither > 0)).toBe(true);

@@ -13,9 +13,9 @@ A transparent, click-through window covers the main display one level above the 
 - with the Dock hidden, a pointer within 4 pt of the bottom edge keeps 60 Hz until 1 s after it last moved, longer than the Dock's default auto-hide delay, so the Dock sliding in is read at once rather than at the next 2 Hz read. With `com.apple.dock autohide-delay` set above 1 s, the reveal waits for that 2 Hz read again;
 - it streams a frame to the overlay only when an icon moves by 0.5 pt or more, or the list changes.
 
-The overlay draws moss on every Dock app whose overgrowth is above 0, all in one instanced WebGL draw. Overgrowth 0 draws nothing. At the Overgrown stage an icon also gets one to three small mushrooms or flowers, placed from its bundle ID and the same on every run. The moss grows from the icon's bottom edge and bottom corners, and at 1.0 it covers about the lower half of the icon in the middle, higher at the sides, so the top half of the app's glyph stays visible. It is clipped to the icon's rounded rect (corner radius 22.5% of its side), so it never reaches the Dock's tooltip above the icon. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes, except during a shrivel. Each icon gets its own moss pattern and a shade between olive and blue-green, the same on every run; two Dock items for one app get the same overgrowth and a pattern each. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
+The overlay draws moss on every Dock app whose overgrowth is above 0, all in one instanced WebGL draw. Overgrowth 0 draws nothing. The moss is made of lit cushions, fronds and, from about halfway, spore stalks. It starts as a thin strip along the icon's bottom edge, climbs the sides, and reaches the top edge last: at 1.0 it is a thick frame around the app's glyph, whose centre stays mostly clear. At the Overgrown stage an icon also gets a small mushroom and a flower, placed from its bundle ID inside the icon, on the moss near its bottom; at a low intensity they are smaller, at least 70% of full size. The moss may overhang the icon by half the gap to its neighbours, so it never reaches the next icon, and it stays inside the Dock tile, below the tooltip the Dock shows above it. The icon art is taken to be a square centred in the Dock tile, 0.79 of the tile's width, measured on a bottom Dock at the default and magnified sizes; a side Dock is not supported. Each icon's moss is baked once per growth step (24 steps) and then drawn from a cache, so a magnification only moves it. The moss follows magnification, auto-hide and Dock restarts, and the renderer draws one frame per visible change, with no frame loop while nothing changes, except during a shrivel or while new bakes are made (two a frame). Each icon gets its own moss pattern, the same on every run; two Dock items for one app get the same overgrowth and a pattern each. While the Dock is hidden, or cannot be read (no grant, Dock restarting), the window is ordered out. It also follows changes to the main display's resolution or arrangement. Clicks, hovers and magnification pass through to the Dock.
 
-When you open an app whose icon has moss, the moss shrivels over 600 ms: it turns brown, sinks to the icon's bottom edge, and any mushrooms or flowers shrink with it, then the icon is clean. It plays once, on the icon's tile as it moves, and several icons can shrivel at once. Any drop of a mossy icon to clean plays it: opening the app, or a settings change that clears the icon (an exclusion, intensity 0, or higher thresholds). An icon that leaves the Dock, a Dock that hides, a webview reload, or moss growing back ends a shrivel at once. While a shrivel runs, the renderer runs a frame loop at 30 frames a second, and stops it once the icon is clean. With `VITE_DOCKMOSS_OVERGROWTH` set, nothing shrivels, because the override pins every icon's overgrowth.
+When you open an app whose icon has moss, the moss shrivels over 600 ms: it turns brown and its top edge sinks to the bottom of the icon, taking any mushroom or flower with it, then the icon is clean. It plays once, on the icon's tile as it moves, and several icons can shrivel at once. Any drop of a mossy icon to clean plays it: opening the app, or a settings change that clears the icon (an exclusion, intensity 0, or higher thresholds). An icon that leaves the Dock, a Dock that hides, a webview reload, or moss growing back ends a shrivel at once. While a shrivel runs, the renderer runs a frame loop at 30 frames a second, and stops it once the icon is clean. With `VITE_DOCKMOSS_OVERGROWTH` set, nothing shrivels, because the override pins every icon's overgrowth.
 
 The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay window itself is still in the Accessibility tree, as an empty web area.
 
@@ -23,7 +23,7 @@ The overlay's content is hidden from VoiceOver (`aria-hidden`). The overlay wind
 
 `pnpm tauri dev` also outlines each application icon, alternating magenta and cyan, and labels it with the app's overgrowth (0.00 to 1.00) over its stage, for example `0.66` over `patchy`. Every second label sits one label higher, so neighbouring labels don't cover each other at the default Dock size. While the Dock is magnified, labels near the pointer can still overlap. The labels sit above macOS's own Dock tooltip and can hide part of it. If the overlay's `watch_dock` or `watch_growth` call is rejected, a 2 pt red bar runs along the bottom of the screen. `pnpm build` leaves all of this out.
 
-To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. Every Dock icon then uses that value, and at 1 every icon is also overgrown, with sprites. Any other value is ignored with a console warning. `VITE_DOCKMOSS_SWAY=1` turns on the sway loop: tuft tips and sprites move gently, at 30 frames a second, while some icon is at least patchy. Sway is off in every other build: this loop costs about 19% CPU (job 010, M9). A later job replaces it with a cheaper sway, under a 3% bar, and adds its setting.
+To see moss at a chosen overgrowth, set `VITE_DOCKMOSS_OVERGROWTH` to a number from 0 to 1. Every Dock icon then uses that value, and at 1 every icon is also overgrown, with a mushroom and a flower. Any other value is ignored with a console warning. There is no sway: job 017 removed the old sway loop (about 19% CPU, job 010), and a later job adds a cheaper sway with its setting.
 
 ```sh
 VITE_DOCKMOSS_OVERGROWTH=0.6 pnpm tauri dev
@@ -207,13 +207,18 @@ src/                # webview frontend: overlay.ts (one subscription per channel
                     #   out to the renderer and, in dev builds, the debug layer), ipc.ts
                     #   (every invoke call, the watchDock and watchGrowth Channels),
                     #   debug.ts / debug.css (dev only: outlines, labels, the override)
-  render/           # WebGL2 moss: model.ts (pure: mossy icons, keys and seeds, art box,
-                    #   draw rule, sprites, the reach bound, the shader's constants and
-                    #   the instance attribute layout, and the shrivel model;
-                    #   model.test.ts), renderer.ts (draws on change, plus a 30 fps
-                    #   loop for sway and the shrivel, behind injected schedule and
-                    #   MossGl; renderer.test.ts), gl.ts (one instanced draw),
-                    #   index.ts (DOM wiring), moss.vert.glsl, moss.frag.glsl
+  render/           # baked moss drawn with WebGL2: generator.ts (pure: the moss's
+                    #   shapes for one item at one growth step; generator.test.ts),
+                    #   bake.ts (shapes onto a Canvas2D canvas; bake.test.ts),
+                    #   atlas.ts (pure: which bakes the texture atlas holds, two new
+                    #   bakes a frame; atlas.test.ts), model.ts (pure: mossy icons,
+                    #   keys and seeds, art and bake boxes, draw rule, the shader's
+                    #   constants and the instance attribute layout, and the shrivel
+                    #   model; model.test.ts), renderer.ts (draws on change, bakes
+                    #   into the atlas, plus a 30 fps loop for the shrivel, behind
+                    #   injected schedule, bake and MossGl; renderer.test.ts), gl.ts
+                    #   (the texture-array atlas and one instanced draw), index.ts
+                    #   (DOM wiring), moss.vert.glsl, moss.frag.glsl
   settings.ts, settings.css  # the settings form
   settings/model.ts # pure: next settings, the one-at-a-time saver, feedback rules,
                     #   exclusion rows, the launch at login box and its one-at-a-time

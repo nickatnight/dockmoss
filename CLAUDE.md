@@ -69,14 +69,22 @@ src-tauri/capabilities/   # one capability file per window: overlay.json, settin
 overlay.html, settings.html   # one Vite entry per window
 src/                      # webview: overlay.ts (one subscription per channel, fanned out),
                           #   ipc.ts, debug.ts / debug.css (dev builds only)
-  render/                 # WebGL2 moss: model.ts (pure: mossy icons, item keys and seeds,
-                          #   art box, draw rule, sprites, reach bound, shader constants,
-                          #   instance attribute layout, and the shrivel: which items
-                          #   start one, its progress, and an icon's instance at a progress),
-                          #   renderer.ts (draws on change, plus a 30 fps loop for sway and
-                          #   the shrivel, behind an injected schedule and MossGl),
-                          #   gl.ts (one instanced draw), index.ts (DOM wiring),
-                          #   moss.{vert,frag}.glsl
+  render/                 # baked moss, drawn with WebGL2 (ADR-0018):
+                          #   generator.ts (pure: the moss prototype's port, shapes for one
+                          #   item at one of 24 level steps: anchors, cushions, fronds,
+                          #   spore stalks, and an Overgrown item's mushroom and flower),
+                          #   bake.ts (shapes to Canvas2D calls on a software-backed
+                          #   OffscreenCanvas), atlas.ts (pure: bake keys, and the atlas
+                          #   plan: one texture-array layer per bake, eviction, two bakes
+                          #   a frame, an item's held bake kept while its new one waits),
+                          #   model.ts (pure: mossy icons, item keys and seeds, art and bake
+                          #   boxes, draw rule, shader constants, instance attribute layout,
+                          #   and the shrivel: which items start one, its progress, and an
+                          #   icon's instance at a progress), renderer.ts (draws on change,
+                          #   bakes into the atlas, plus a 30 fps loop for the shrivel,
+                          #   behind an injected schedule, bake and MossGl), gl.ts (the
+                          #   texture-array atlas and one instanced draw), index.ts (DOM
+                          #   wiring), moss.{vert,frag}.glsl
   settings.ts             # the settings form: DOM wiring and ⌘W (lazy window import)
   settings.css
   settings/model.ts       # pure: the next settings from one change, the one-at-a-time
@@ -123,11 +131,11 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
   - The settings window gets `allow-get-settings`, `allow-save-settings`, `allow-set-launch-at-login` and `core:window:allow-close`, and no plugin permissions: Rust validates and writes every setting (ADR-0014) and changes the login item (ADR-0016).
   - `core:window:allow-close` lets a webview name any window's label, so the overlay refuses `CloseRequested` (`prevent_close`). Quitting goes through `app.exit`, which does not send it.
   - Neither window can call the other's commands. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
-- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels, `VITE_DOCKMOSS_OVERGROWTH` and `VITE_DOCKMOSS_SWAY`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). A build-only Vite plugin fails `pnpm build` if `src/debug.ts` is anywhere in the module graph. The settings entry never imports `debug.ts`, the renderer or `overlay.ts`. Put Dock data into the DOM with `textContent` only.
-- **Renderer constants have one source.** Shape, sway, sprite and shrivel constants live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`, and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call (ADR-0012), shrivelling ones included.
+- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels and `VITE_DOCKMOSS_OVERGROWTH`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). A build-only Vite plugin fails `pnpm build` if `src/debug.ts` is anywhere in the module graph. The settings entry never imports `debug.ts`, the renderer or `overlay.ts`. Put Dock data into the DOM with `textContent` only.
+- **Renderer constants have one source.** The moss's palette, layers, anchor layout, props and its 24 level steps live in `src/render/generator.ts`; the bake size and the two-bakes-a-frame budget in `atlas.ts`. The shader's constants (`MIP_LOD_BIAS`, `SHRIVEL_FRONT_WIDTH`, `WITHER_TINT`) live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL, and its tests fail a constant the shader uses but nobody generated, or one generated that the shader does not use. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`: the bake box, the atlas layer, the wither and what a shrivel leaves (`a_box`, `a_layer`, `a_wither`, `a_remaining`), and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call that samples its layer of one texture array (ADR-0012, ADR-0018), shrivelling ones included.
 - **One DockMoss at a time** (ADR-0015). `tauri-plugin-single-instance` is registered first in the Builder. A second launch reaches the running copy's socket (`/tmp/app_dockmoss_DockMoss_si.sock`, derived from the identifier) and exits 0 inside the plugin's setup, before any other plugin and before `setup()` opens a file, builds the tray or creates a window, so it leaves no log of its own. The running copy opens or focuses Settings on a second launch (the plugin callback, sent to the main thread) and on `RunEvent::Reopen`, which is what a Finder double-click, Spotlight or `open` sends to a running app. The callback never logs its `argv` or `cwd`, which can hold the user's name. DockMoss never records its own bundle ID as used, so a second copy starting up is not a launch (`usage::tracked_bundle_id`).
 - **Navigation guard:** both window builders pass `.on_navigation(is_app_url)`, which allows only the bundled `tauri:` origin, plus localhost in debug builds (`navigation::is_app_origin`, table-tested).
-- **The shrivel is inferred, not sent.** The webview starts one when an icon it drew as mossy comes back clean in the growth stream; Rust sends no event for it (ADR-0013). So any drop of a mossy icon to 0 shrivels, including one a setting causes: an exclusion, intensity 0, or higher thresholds (ADR-0016). Its 600 ms run is one more condition of `createRenderer`'s time-limited loop, and the loop stops when the last shrivel draws the icon clean.
+- **The shrivel is inferred, not sent.** The webview starts one when an icon it drew as mossy comes back clean in the growth stream; Rust sends no event for it (ADR-0013). It draws from the icon's bake, and the shader browns it (`WITHER_TINT`) while a front eases down over it to the bottom edge (ADR-0018). So any drop of a mossy icon to 0 shrivels, including one a setting causes: an exclusion, intensity 0, or higher thresholds (ADR-0016). Its 600 ms run is one more condition of `createRenderer`'s time-limited loop, and the loop stops when the last shrivel draws the icon clean.
 
 ## macOS overlay gotchas
 
@@ -181,5 +189,5 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - `UsageState::growth(now, &Settings)` applies them, in Rust only; the webview, renderer and shaders are unchanged.
   - The thresholds and fast-forward drive the curve.
   - An excluded Dock app keeps its entry, with overgrowth 0 and stage `clean`.
-  - Intensity scales the sent overgrowth (`Intensity::scale`, clamped through `Overgrowth::new`) and leaves the stage, so an Overgrown app keeps its sprites at any intensity above 0. Intensity 0 draws no moss.
+  - Intensity scales the sent overgrowth (`Intensity::scale`, clamped through `Overgrowth::new`) and leaves the stage, so an Overgrown app keeps its props at any intensity above 0. Intensity 0 draws no moss.
 - In debug builds, a valid `DOCKMOSS_FAST_FORWARD` replaces the saved speed (`Settings::applied`). An invalid one is ignored with a `warn`, and the saved speed applies. Release builds ignore the variable. The dev overrides (`DOCKMOSS_FAST_FORWARD`, `VITE_DOCKMOSS_*`) never read or write settings.

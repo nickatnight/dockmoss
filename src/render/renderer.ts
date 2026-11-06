@@ -1,18 +1,26 @@
 import type { AppGrowth, DockItem } from "../ipc";
+import {
+  BAKES_PER_FRAME,
+  EMPTY_ATLAS,
+  type BakeKey,
+  type BakeRequest,
+  bakeRequest,
+  bakeSide,
+  planAtlas,
+} from "./atlas";
 import type { MossGl } from "./gl";
 import {
+  type LayerOf,
   type Drawn,
   LOOP_MIN_FRAME_INTERVAL_MS,
   type MossyIcon,
   NOTHING_DRAWN,
-  SWAY_CYCLE_SECONDS,
   type Shrivels,
   mossInstances,
   mossyIcons,
   shrivelFrame,
   shrivelsAfter,
   step,
-  swaying,
 } from "./model";
 
 export interface FrameSink {
@@ -20,13 +28,13 @@ export interface FrameSink {
   growth(frame: AppGrowth[]): void;
 }
 
-export interface RendererOptions {
+export interface RendererOptions<Image> {
   /** Runs `callback` once, before the next repaint, with the time in ms. */
   schedule(callback: (time: number) => void): void;
   /** A MossGl for the canvas's current context, or null if it has none. */
-  createGl(): MossGl | null;
+  createGl(): MossGl<Image> | null;
+  bake(request: BakeRequest): Image | null;
   overgrowthOverride: number | null;
-  sway: boolean;
 }
 
 export interface MossRenderer extends FrameSink {
@@ -36,8 +44,12 @@ export interface MossRenderer extends FrameSink {
   contextRestored(): void;
 }
 
-export function createRenderer(options: RendererOptions): MossRenderer {
+export function createRenderer<Image>(options: RendererOptions<Image>): MossRenderer {
   let gl = options.createGl();
+  let atlas = EMPTY_ATLAS;
+  const cells = new Map<BakeKey, { layer: number; image: Image }>();
+  let planned: { pixelRatio: number; icons: readonly MossyIcon[]; layerOf: LayerOf } | null = null;
+  let bakesPending = false;
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
   let latest: MossyIcon[] = [];
@@ -46,10 +58,8 @@ export function createRenderer(options: RendererOptions): MossRenderer {
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
   let lastLoopFrameMs: number | null = null;
-  let swaySeconds = 0;
 
-  const swayRuns = (): boolean => options.sway && swaying(latest);
-  const loopRuns = (): boolean => swayRuns() || shrivels.size > 0;
+  const loopRuns = (): boolean => shrivels.size > 0;
 
   const requestFrame = (): void => {
     if (gl !== null && !frameRequested) {
@@ -57,6 +67,48 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       options.schedule(frame);
     }
   };
+
+  function prepareAtlas(target: MossGl<Image>, icons: readonly MossyIcon[]): LayerOf {
+    const { pixelRatio } = size;
+    if (planned !== null && planned.pixelRatio === pixelRatio && sameBakes(planned.icons, icons)) {
+      return planned.layerOf;
+    }
+    const plan = planAtlas(
+      atlas,
+      icons.map((icon) => ({ item: icon.key, request: bakeRequest(icon, pixelRatio) })),
+      bakeSide(pixelRatio),
+      BAKES_PER_FRAME,
+    );
+    atlas = plan.atlas;
+    bakesPending = plan.pending;
+    for (const key of cells.keys()) {
+      if (!atlas.layers.has(key)) {
+        cells.delete(key);
+      }
+    }
+    const baked = plan.bakes.flatMap(({ request, layer }) => {
+      const image = options.bake(request);
+      if (image === null) {
+        return [];
+      }
+      const cell = { layer, image };
+      cells.set(request.key, cell);
+      return [cell];
+    });
+    if (plan.reallocate) {
+      target.allocate(atlas.capacity, atlas.side);
+      target.upload([...cells.values()]);
+    } else if (baked.length > 0) {
+      target.upload(baked);
+    }
+    const { current } = atlas;
+    const layerOf: LayerOf = (icon) => {
+      const key = current.get(icon.key);
+      return key === undefined ? undefined : cells.get(key)?.layer;
+    };
+    planned = bakesPending ? null : { pixelRatio, icons, layerOf };
+    return layerOf;
+  }
 
   function frame(time: number): void {
     frameRequested = false;
@@ -68,18 +120,16 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     const changed = step(drawn, latest, shrivels).kind !== "none";
     if (due) {
       lastLoopFrameMs = time;
-      if (swayRuns()) {
-        swaySeconds = (time / 1000) % SWAY_CYCLE_SECONDS;
-      }
     }
-    if (due || changed) {
+    if (due || changed || bakesPending) {
       const canvasHeight = Math.round(size.height * size.pixelRatio);
-      const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight);
+      const layerOf = prepareAtlas(gl, [...latest, ...[...shrivels.values()].map(({ icon }) => icon)]);
+      const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight, layerOf);
       shrivels = shrivelling.running;
-      gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight), ...shrivelling.instances], swaySeconds);
+      gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight, layerOf), ...shrivelling.instances]);
       drawn = { icons: latest, showsShrivel: shrivelling.instances.length > 0 };
     }
-    if (loopRuns()) {
+    if (loopRuns() || bakesPending) {
       requestFrame();
     } else {
       lastLoopFrameMs = null;
@@ -95,6 +145,8 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       // frame callbacks there, so the old moss would show at the next order-in.
       gl?.clear();
       drawn = NOTHING_DRAWN;
+      // Nothing to draw: the waiting bakes are planned again when the Dock shows.
+      bakesPending = false;
     } else if (next.kind === "draw" || shrivels.size > 0) {
       // A running shrivel always has a frame pending already; the size check states that it needs one.
       requestFrame();
@@ -123,6 +175,10 @@ export function createRenderer(options: RendererOptions): MossRenderer {
     resize,
     contextLost() {
       gl = null;
+      atlas = EMPTY_ATLAS;
+      cells.clear();
+      planned = null;
+      bakesPending = false;
       drawn = "unknown";
       shrivels = new Map();
       lastLoopFrameMs = null;
@@ -132,4 +188,17 @@ export function createRenderer(options: RendererOptions): MossRenderer {
       resize(size.width, size.height, size.pixelRatio);
     },
   };
+}
+
+/** The same icons, in order, with the same overgrowth and stage: the same bakes, wherever their tiles are. */
+function sameBakes(a: readonly MossyIcon[], b: readonly MossyIcon[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (icon, index) =>
+        icon.key === b[index].key &&
+        icon.overgrowth === b[index].overgrowth &&
+        icon.overgrown === b[index].overgrown,
+    )
+  );
 }

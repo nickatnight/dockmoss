@@ -5,10 +5,9 @@ import { type FrameSink, createRenderer } from "./renderer";
 
 export interface MossOptions {
   overgrowthOverride: number | null;
-  sway: boolean;
 }
 
-export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway }: MossOptions): FrameSink {
+export function startMossRenderer(root: HTMLElement, { overgrowthOverride }: MossOptions): FrameSink {
   const canvas = document.createElement("canvas");
   canvas.className = "moss";
   canvas.setAttribute("aria-hidden", "true");
@@ -26,7 +25,6 @@ export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway 
       return baked.canvas;
     },
     overgrowthOverride,
-    sway,
   });
   const resize = (): void => renderer.resize(innerWidth, innerHeight, devicePixelRatio);
 

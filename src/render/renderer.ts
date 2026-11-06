@@ -7,14 +7,12 @@ import {
   LOOP_MIN_FRAME_INTERVAL_MS,
   type MossyIcon,
   NOTHING_DRAWN,
-  SWAY_CYCLE_SECONDS,
   type Shrivels,
   mossInstances,
   mossyIcons,
   shrivelFrame,
   shrivelsAfter,
   step,
-  swaying,
 } from "./model";
 
 export interface FrameSink {
@@ -30,7 +28,6 @@ export interface RendererOptions<Image> {
   /** The moss for one bake, or null if it could not be drawn. */
   bake(request: BakeRequest): Image | null;
   overgrowthOverride: number | null;
-  sway: boolean;
 }
 
 export interface MossRenderer extends FrameSink {
@@ -53,10 +50,9 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
   let frameRequested = false;
   let size = { width: 0, height: 0, pixelRatio: 1 };
   let lastLoopFrameMs: number | null = null;
-  let swaySeconds = 0;
 
-  const swayRuns = (): boolean => options.sway && swaying(latest);
-  const loopRuns = (): boolean => swayRuns() || shrivels.size > 0;
+  /** Only a shrivel animates; nothing else redraws without a change. */
+  const loopRuns = (): boolean => shrivels.size > 0;
 
   const requestFrame = (): void => {
     if (gl !== null && !frameRequested) {
@@ -122,19 +118,13 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     const changed = step(drawn, latest, shrivels).kind !== "none";
     if (due) {
       lastLoopFrameMs = time;
-      if (swayRuns()) {
-        swaySeconds = (time / 1000) % SWAY_CYCLE_SECONDS;
-      }
     }
     if (due || changed) {
       const canvasHeight = Math.round(size.height * size.pixelRatio);
       const layerOf = prepareAtlas(gl, [...latest, ...[...shrivels.values()].map(({ icon }) => icon)]);
       const shrivelling = shrivelFrame(shrivels, time, size.pixelRatio, canvasHeight, layerOf);
       shrivels = shrivelling.running;
-      gl.draw(
-        [...mossInstances(latest, size.pixelRatio, canvasHeight, layerOf), ...shrivelling.instances],
-        swaySeconds,
-      );
+      gl.draw([...mossInstances(latest, size.pixelRatio, canvasHeight, layerOf), ...shrivelling.instances]);
       drawn = { icons: latest, showsShrivel: shrivelling.instances.length > 0 };
     }
     if (loopRuns()) {

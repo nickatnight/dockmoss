@@ -348,28 +348,8 @@ export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
   { name: "a_remaining", size: 1, values: ({ remaining }) => [remaining] },
 ];
 
-export const SWAY_MIN_OVERGROWTH = 0.5;
+/** The shrivel loop draws at most 30 frames a second. */
 export const LOOP_MIN_FRAME_INTERVAL_MS = 33;
-export const MOSS_SWAY_PERIOD = 3;
-export const SPRITE_SWAY_PERIOD = 2;
-/** How far a sprite's tip leans, in units of its box: 1.1 device px for the largest sprite at tile size 45. */
-export const SPRITE_TIP_LEAN = 0.08;
-/** Keeps the sway clock small for float32; a whole number of every sway period, so the wrap is seamless. */
-export const SWAY_CYCLE_SECONDS = 60;
-
-export function swaying(icons: readonly MossyIcon[]): boolean {
-  return icons.some(({ overgrowth }) => overgrowth >= SWAY_MIN_OVERGROWTH);
-}
-
-export type SwayFlag = { kind: "set"; sway: boolean } | { kind: "invalid"; raw: string };
-
-/** The dev-only VITE_DOCKMOSS_SWAY: "1" turns sway on; unset, "" or "0" leaves it off. */
-export function parseSwayFlag(raw: string | undefined): SwayFlag {
-  if (raw === undefined || raw === "" || raw === "0") {
-    return { kind: "set", sway: false };
-  }
-  return raw === "1" ? { kind: "set", sway: true } : { kind: "invalid", raw };
-}
 
 export type OvergrowthOverride =
   | { kind: "unset" }

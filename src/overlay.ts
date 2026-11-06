@@ -8,7 +8,6 @@ async function start(root: HTMLElement): Promise<void> {
   const sinks: FrameSink[] = [
     startMossRenderer(root, {
       overgrowthOverride: dev?.overgrowthOverride() ?? null,
-      sway: dev?.swayFlag() ?? false,
     }),
   ];
   if (dev !== null) {

@@ -13,7 +13,7 @@ type Call =
   | { op: "resize"; width: number; height: number }
   | { op: "allocate"; layers: number; side: number }
   | { op: "upload"; cells: readonly { layer: number; image: FakeImage }[] }
-  | { op: "draw"; instances: readonly MossInstance[]; swaySeconds: number }
+  | { op: "draw"; instances: readonly MossInstance[] }
   | { op: "clear" };
 
 function fakeGls() {
@@ -31,8 +31,8 @@ function fakeGls() {
       upload: (cells) => {
         calls.push({ op: "upload", cells });
       },
-      draw: (instances, swaySeconds) => {
-        calls.push({ op: "draw", instances, swaySeconds });
+      draw: (instances) => {
+        calls.push({ op: "draw", instances });
       },
       clear: () => {
         calls.push({ op: "clear" });
@@ -64,7 +64,7 @@ function manualScheduler() {
   };
 }
 
-function setup(sway = false, fails: (request: BakeRequest) => boolean = () => false) {
+function setup(fails: (request: BakeRequest) => boolean = () => false) {
   const gls = fakeGls();
   const frames = manualScheduler();
   const bakes: BakeRequest[] = [];
@@ -76,7 +76,6 @@ function setup(sway = false, fails: (request: BakeRequest) => boolean = () => fa
       return fails(request) ? null : request;
     },
     overgrowthOverride: null,
-    sway,
   });
   renderer.resize(1512, 982, 2);
   const calls = (): Call[] => gls.created[gls.created.length - 1] ?? [];
@@ -298,7 +297,7 @@ describe("baking", () => {
   });
 
   it("leaves out an icon whose bake failed", () => {
-    const { renderer, frames, draws } = setup(false, ({ seed }) => seed === fnv1a32("com.hnc.Discord#0"));
+    const { renderer, frames, draws } = setup(({ seed }) => seed === fnv1a32("com.hnc.Discord#0"));
 
     renderer.dock([discord, telegram]);
     renderer.growth(both);
@@ -308,119 +307,17 @@ describe("baking", () => {
   });
 });
 
-describe("the sway loop", () => {
-  const patchy = (overgrowth: number): AppGrowth[] => [
-    { bundleId: discord.bundleId, overgrowth, stage: overgrowth >= 0.5 ? "patchy" : "fuzz" },
-  ];
+describe("at rest", () => {
+  it("draws an overgrown Dock once, then schedules nothing", () => {
+    const { renderer, frames, ops } = setup();
+    renderer.dock([discord]);
+    renderer.growth([{ bundleId: discord.bundleId, overgrowth: 1, stage: "overgrown" }]);
 
-  function runFrames(env: ReturnType<typeof setup>, count: number, start = 0): number[] {
-    const before = env.calls().length;
-    for (let index = 0; index < count; index++) {
-      env.frames.runFrame(start + (index * 1000) / 60);
-    }
-    return env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []));
-  }
+    frames.runFrame(0);
+    frames.runFrame(1000 / 60);
 
-  it("does not run with sway off, even with a patchy icon", () => {
-    const env = setup(false);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.8));
-
-    expect(runFrames(env, 1)).toHaveLength(1);
-    expect(env.frames.pending).toBe(0);
-  });
-
-  it("does not run with sway on while every icon is below patchy", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.45));
-
-    expect(runFrames(env, 1)).toHaveLength(1);
-    expect(env.frames.pending).toBe(0);
-  });
-
-  it("runs with sway on and an icon at patchy, at 30 frames a second", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.5));
-
-    const drawTimes = runFrames(env, 60, 1000);
-
-    expect(env.frames.pending).toBe(1);
-    expect(drawTimes).toHaveLength(30);
-    for (let index = 1; index < drawTimes.length; index++) {
-      expect(drawTimes[index] - drawTimes[index - 1]).toBeGreaterThanOrEqual(1 / 30 - 1e-9);
-    }
-  });
-
-  it("stops scheduling once the last icon drops below patchy", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 10);
-
-    env.renderer.growth(patchy(0.3));
-    runFrames(env, 1, 500);
-
-    expect(env.frames.pending).toBe(0);
-    expect(runFrames(env, 5, 600)).toEqual([]);
-  });
-
-  it("stops at once when the Dock empties", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 3);
-
-    env.renderer.dock([]);
-    runFrames(env, 1, 100);
-
-    expect(env.frames.pending).toBe(0);
-  });
-
-  it("wraps the sway clock every SWAY_CYCLE_SECONDS", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.8));
-
-    expect(runFrames(env, 1, 61_000)[0]).toBeCloseTo(1, 6);
-  });
-
-  it("draws a restarted loop's first frame at its own time, when a growth frame stopped it", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 1, 2000);
-    env.renderer.growth(patchy(0.3));
-    runFrames(env, 1, 2010);
-
-    env.renderer.growth(patchy(0.9));
-
-    expect(runFrames(env, 1, 2020)).toEqual([2.02]);
-  });
-
-  it("draws a restarted loop's first frame at its own time, when the Dock emptied between frames", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    runFrames(env, 1, 2000);
-    env.renderer.dock([]);
-
-    env.renderer.dock([discord]);
-
-    expect(runFrames(env, 1, 2020)).toEqual([2.02]);
-  });
-
-  it("keeps the last sway pose for a draw after the loop stops", () => {
-    const env = setup(true);
-    env.renderer.dock([discord]);
-    env.renderer.growth(patchy(0.9));
-    const swayed = runFrames(env, 4, 2000);
-    env.renderer.growth(patchy(0.3));
-
-    const settled = runFrames(env, 1, 3000);
-
-    expect(settled).toEqual([swayed[swayed.length - 1]]);
+    expect(ops().filter((op) => op === "draw")).toHaveLength(1);
+    expect(frames.pending).toBe(0);
   });
 });
 
@@ -432,8 +329,8 @@ describe("the shrivel", () => {
   const overgrownChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 1, stage: "overgrown" }];
   const launchedChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" }];
 
-  function mossyDock(sway = false) {
-    const env = setup(sway);
+  function mossyDock() {
+    const env = setup();
     env.renderer.dock([discord, chess]);
     env.renderer.growth(overgrownChess);
     env.frames.runFrame(500);
@@ -673,18 +570,6 @@ describe("the shrivel", () => {
     expect(drawnFrames[drawnFrames.length - 1].instances).toEqual([]);
   });
 
-  it("does not sway the moss while it shrivels with sway off", () => {
-    const env = mossyDock(false);
-    env.renderer.growth(launchedChess);
-
-    const drawnFrames = runAt60Hz(env, 1000, 1000);
-
-    expect(drawnFrames.length).toBeGreaterThan(10);
-    expect(env.calls().flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []))).toEqual(
-      drawnFrames.map(() => 0),
-    );
-  });
-
   it("restarts the loop after a shrivel ends in a frame, at 30 fps from its first frame", () => {
     const env = mossyDock();
     env.renderer.growth(launchedChess);
@@ -699,26 +584,6 @@ describe("the shrivel", () => {
     for (let index = 1; index < second.length; index++) {
       expect(second[index].time - second[index - 1].time).toBeGreaterThanOrEqual(1000 / 30 - 1e-9);
     }
-  });
-
-  it("restarts sway on its own pose after a shrivel ends in a frame", () => {
-    const env = setup(true);
-    const fuzzyDiscord = { bundleId: discord.bundleId, overgrowth: 0.3, stage: "fuzz" } as const;
-    env.renderer.dock([discord, chess]);
-    env.renderer.growth([fuzzyDiscord, overgrownChess[1]]);
-    env.frames.runFrame(500);
-    // Chess was overgrown, so sway ran; once it is clean only its shrivel runs the loop.
-    env.renderer.growth([fuzzyDiscord, launchedChess[1]]);
-    const frames = runAt60Hz(env, 1000, 1000);
-    const end = frames[frames.length - 1].time;
-    expect(env.frames.pending).toBe(0);
-
-    env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 0.9, stage: "patchy" }, launchedChess[1]]);
-    const before = env.calls().length;
-    env.frames.runFrame(end + 20);
-    const sways = env.calls().slice(before).flatMap((call) => (call.op === "draw" ? [call.swaySeconds] : []));
-
-    expect(sways).toEqual([((end + 20) / 1000) % 60]);
   });
 
   it("starts a second shrivel while the first runs, as apps launched back to back do", () => {

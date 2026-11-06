@@ -14,8 +14,8 @@ export interface MossGl<Image> {
   allocate(layers: number, side: number): void;
   /** Puts each image in its atlas layer, then remakes the atlas's mipmaps. */
   upload(cells: readonly { layer: number; image: Image }[]): void;
-  /** Clears the canvas, then draws every instance in one call, swayed to `swaySeconds`. */
-  draw(instances: readonly MossInstance[], swaySeconds: number): void;
+  /** Clears the canvas, then draws every instance in one call. */
+  draw(instances: readonly MossInstance[]): void;
   clear(): void;
 }
 
@@ -39,7 +39,6 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl<OffscreenCanvas>
   gl.disable(gl.BLEND);
   gl.clearColor(0, 0, 0, 0);
   const resolution = gl.getUniformLocation(program, "u_resolution");
-  const swaySecondsUniform = gl.getUniformLocation(program, "u_sway_seconds");
   gl.uniform2f(resolution, canvas.width, canvas.height);
 
   const buffer = gl.createBuffer();
@@ -113,9 +112,8 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl<OffscreenCanvas>
       }
       gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
     },
-    draw(instances, swaySeconds) {
+    draw(instances) {
       clear();
-      gl.uniform1f(swaySecondsUniform, swaySeconds);
       const length = instances.length * FLOATS_PER_INSTANCE;
       if (data.length < length) {
         data = new Float32Array(length);

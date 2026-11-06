@@ -19,7 +19,6 @@ import {
   mossInstances,
   mossyIcons,
   parseOvergrowthOverride,
-  parseSwayFlag,
   mossOvergrowth,
   quantize,
   shrivelFrame,
@@ -395,24 +394,6 @@ describe("parseOvergrowthOverride", () => {
   });
 });
 
-describe("parseSwayFlag", () => {
-  it("turns sway on for 1", () => {
-    expect(parseSwayFlag("1")).toEqual({ kind: "set", sway: true });
-  });
-
-  it.each(["0", ""])("leaves sway off for %j", (raw) => {
-    expect(parseSwayFlag(raw)).toEqual({ kind: "set", sway: false });
-  });
-
-  it("leaves sway off when unset", () => {
-    expect(parseSwayFlag(undefined)).toEqual({ kind: "set", sway: false });
-  });
-
-  it.each(["yes", "true", "2"])("rejects %j", (raw) => {
-    expect(parseSwayFlag(raw)).toEqual({ kind: "invalid", raw });
-  });
-});
-
 describe("toDeviceBox", () => {
   it("scales a CSS-pixel rect by the pixel ratio and measures y up from the canvas bottom", () => {
     const rect = { x: 700, y: 918, width: 56, height: 56 };
@@ -452,14 +433,6 @@ describe("art boxes", () => {
     for (let index = 1; index < boxes.length; index++) {
       const left = boxes[index - 1];
       expect(boxes[index].x - (left.x + left.width)).toBeGreaterThanOrEqual(1);
-    }
-  });
-});
-
-describe("the sway clock", () => {
-  it("wraps at a whole number of every sway period", () => {
-    for (const period of [model.MOSS_SWAY_PERIOD, model.SPRITE_SWAY_PERIOD]) {
-      expect(model.SWAY_CYCLE_SECONDS % period, String(period)).toBe(0);
     }
   });
 });

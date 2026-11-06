@@ -426,6 +426,24 @@ describe("baking", () => {
     expect(env.ops()).toEqual(["upload", "draw"]);
   });
 
+  it("draws the new app when one Dock item is swapped for another at the same growth", () => {
+    const env = setup();
+    const a = { bundleId: "app.a" as BundleId, rect: discord.rect };
+    const b = { bundleId: "app.b" as BundleId, rect: discord.rect };
+    const both: AppGrowth[] = [a, b].map(({ bundleId }) => ({ bundleId, overgrowth: 0.6, stage: "patchy" }));
+    env.renderer.dock([a]);
+    env.renderer.growth(both);
+    settle(env);
+    env.bakes.length = 0;
+
+    env.renderer.dock([b]);
+    settle(env);
+
+    expect(env.bakes.map(({ seed }) => seed)).toEqual([fnv1a32("app.b#0")]);
+    const draws = env.draws();
+    expect(draws[draws.length - 1].map(({ key }) => key)).toEqual(["app.b#0"]);
+  });
+
   it("keeps the bakes it made when the Dock hides while others wait, and makes only the rest on show", () => {
     const env = setup();
     const six = nine.slice(0, 6);

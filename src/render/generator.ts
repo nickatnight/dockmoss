@@ -361,17 +361,14 @@ function placed(shape: Shape, [footX, footY]: Point, scale: number): Shape {
   const at = ([x, y]: Point): Point => [footX + x * scale, footY + y * scale];
   const paint = scaledPaint(shape.paint, scale);
   switch (shape.kind) {
-    case "circle":
-      return { ...shape, x: footX + shape.x * scale, y: footY + shape.y * scale, r: shape.r * scale, paint };
-    case "ellipse":
-      return {
-        ...shape,
-        x: footX + shape.x * scale,
-        y: footY + shape.y * scale,
-        rx: shape.rx * scale,
-        ry: shape.ry * scale,
-        paint,
-      };
+    case "circle": {
+      const [x, y] = at([shape.x, shape.y]);
+      return { ...shape, x, y, r: shape.r * scale, paint };
+    }
+    case "ellipse": {
+      const [x, y] = at([shape.x, shape.y]);
+      return { ...shape, x, y, rx: shape.rx * scale, ry: shape.ry * scale, paint };
+    }
     case "path":
       return {
         ...shape,

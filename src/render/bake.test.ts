@@ -14,7 +14,6 @@ import {
 
 type Command = [name: string, ...args: unknown[]];
 
-/** A 2D context that records every call and every property it is given, in order. */
 class RecordingContext implements BakeContext {
   readonly commands: Command[] = [];
   private readonly record =
@@ -115,7 +114,6 @@ describe("drawScene", () => {
     expect(context.commands).toEqual([
       ["setTransform", scale, 0, 0, scale, OVERHANG_UNITS * scale, OVERHANG_UNITS * scale],
       ["lineCap", "round"],
-      // The contact shadow, clipped to the icon's rounded rect.
       ["save"],
       ["beginPath"],
       ["roundRect", 0, 0, ICON_UNITS, ICON_UNITS, ICON_CORNER_RADIUS],
@@ -126,7 +124,6 @@ describe("drawScene", () => {
       ["fillStyle", "#000"],
       ["fill"],
       ["restore"],
-      // The moss.
       ["beginPath"],
       ["moveTo", 1, 2],
       ["lineTo", 3, 4],
@@ -135,7 +132,6 @@ describe("drawScene", () => {
       ["strokeStyle", "#8A5A2B"],
       ["lineWidth", 0.7],
       ["stroke"],
-      // The props: fill, then stroke, as SVG paints them.
       ["beginPath"],
       ["ellipse", 50, 90, 2.3, 3.6, 0.5, 0, TAU],
       ["globalAlpha", 1],
@@ -166,11 +162,9 @@ describe("drawScene", () => {
       names.slice(from, to).filter((other) => other === name).length;
     expect(names.slice(2, 6)).toEqual(["save", "beginPath", "roundRect", "clip"]);
     expect(count("fill", 0, clipEnd)).toBe(302);
-    // Cushions and the stalks' capsules are filled, fronds and stalks stroked.
     expect(count("fill", clipEnd, names.length)).toBe(3322 + 47);
     expect(count("stroke", clipEnd, names.length)).toBe(536 + 47);
     expect(count("beginPath", clipEnd, names.length)).toBe(3322 + 536 + 47 + 47);
-    // Each shape in its own colour, in the scene's order.
     const colours = context.commands.flatMap(([name, value]) =>
       name === "fillStyle" || name === "strokeStyle" ? [value] : [],
     );
@@ -192,7 +186,6 @@ describe("drawScene", () => {
 
 describe("bake", () => {
   it("makes no canvas at level 0", () => {
-    // Under vitest there is no OffscreenCanvas, so making one would throw.
     expect(bake(mossScene({ seed: 4271, step: 0 as LevelStep, overgrown: true }), 256)).toEqual({
       kind: "empty",
     });

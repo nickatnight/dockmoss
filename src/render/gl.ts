@@ -10,11 +10,8 @@ const BYTES_PER_FLOAT = 4;
 export interface MossGl<Image> {
   /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
   resize(width: number, height: number): void;
-  /** Makes the atlas again: `layers` cells of `side` px square, all blank. */
   allocate(layers: number, side: number): void;
-  /** Puts each image in its atlas layer, then remakes the atlas's mipmaps. */
   upload(cells: readonly { layer: number; image: Image }[]): void;
-  /** Clears the canvas, then draws every instance in one call. */
   draw(instances: readonly MossInstance[]): void;
   clear(): void;
 }
@@ -57,7 +54,6 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl<OffscreenCanvas>
   }
   let data = new Float32Array(0);
 
-  // The atlas: one texture array, a bake per layer, so no mip level mixes two bakes.
   gl.activeTexture(gl.TEXTURE0);
   let atlas: WebGLTexture | null = null;
   let atlasSide = 0;
@@ -93,7 +89,6 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl<OffscreenCanvas>
         return;
       }
       // Premultiplied, as the canvas composites, so mipmaps do not darken the moss's edges.
-      // WebGL applies this to a canvas source; it would ignore it for an ImageBitmap.
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
       for (const { layer, image } of cells) {
         gl.texSubImage3D(

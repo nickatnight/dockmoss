@@ -18,7 +18,6 @@ import {
 } from "./generator";
 import { artBox, bakeBox, fnv1a32, quantize } from "./model";
 
-// The seed the prototype's page starts with; moss-rendering.md counts its shapes.
 const PROTOTYPE_SEED = 4271;
 const SEEDS = [PROTOTYPE_SEED, 0, 0xffffffff, fnv1a32("com.hnc.Discord#0"), fnv1a32("com.apple.Safari#1")];
 const STEPS = Array.from({ length: LEVEL_STEPS + 1 }, (_, step) => step as LevelStep);
@@ -35,7 +34,6 @@ function strokes(shapes: readonly Shape[], color: string): Shape[] {
   return shapes.filter(({ paint }) => paint.kind === "stroke" && paint.color === color);
 }
 
-/** A one-segment path as the prototype writes it: its start, then the offsets to its points, to one decimal. */
 function prototypePath(shape: Shape): string {
   if (shape.kind !== "path" || shape.segments.length !== 1) {
     return `not a one-segment path: ${shape.kind}`;
@@ -70,7 +68,6 @@ function bounds(shape: Shape): { left: number; top: number; right: number; botto
       bottom: shape.y + halfHeight,
     };
   }
-  // A quadratic curve stays inside the hull of its points.
   const points = [
     shape.from,
     ...shape.segments.flatMap((segment) =>
@@ -93,7 +90,6 @@ function insideIcon(x: number, y: number): boolean {
   return Math.hypot(x - nearest(x), y - nearest(y)) <= ICON_CORNER_RADIUS;
 }
 
-/** The icon's unit cells, row by row: 1 where a cell's centre is inside the rounded rect and under a moss circle. */
 function coverGrid(shapes: readonly Shape[]): Uint8Array {
   const covered = new Uint8Array(ICON_UNITS * ICON_UNITS);
   for (const { x, y, r } of circles(shapes)) {
@@ -112,17 +108,14 @@ function coverGrid(shapes: readonly Shape[]): Uint8Array {
   return covered;
 }
 
-/** How many of the icon's unit cells in its top `rows` have moss. */
 function coveredCells(shapes: readonly Shape[], rows = ICON_UNITS): number {
   return coverGrid(shapes)
     .subarray(0, rows * ICON_UNITS)
     .reduce((sum, cell) => sum + cell, 0);
 }
 
-/** The bottom edge: the icon's last 12 rows. */
 const EDGE_ROWS = 12;
 
-/** The share of the icon's columns along its bottom edge that have moss somewhere in that edge. */
 function bottomEdgeShare(shapes: readonly Shape[]): number {
   const grid = coverGrid(shapes);
   let columns = 0;
@@ -139,7 +132,6 @@ function bottomEdgeShare(shapes: readonly Shape[]): number {
   return mossy / columns;
 }
 
-/** The highest row with moss, or ICON_UNITS for none. */
 function highestMossRow(shapes: readonly Shape[]): number {
   const index = coverGrid(shapes).indexOf(1);
   return index === -1 ? ICON_UNITS : Math.floor(index / ICON_UNITS);
@@ -163,9 +155,7 @@ describe("levelStep", () => {
   });
 });
 
-// Expected values come from running moss-prototype.js itself at the same seed and level.
 describe("iconAnchors, against the prototype", () => {
-  // Below level 1 the bottom row grows earlier than the prototype's (look check round 1).
   it("shows the prototype's 151 anchors at level 1", () => {
     expect(iconAnchors(PROTOTYPE_SEED, 1)).toHaveLength(151);
   });
@@ -203,7 +193,6 @@ describe("mossScene, against the prototype", () => {
       r: 9.234395892592147,
       paint: { kind: "fill", color: "#000", alpha: 0.07 },
     });
-    // The prototype writes these to one decimal.
     const [cushion] = circles(full.moss);
     expect(cushion.paint).toEqual({ kind: "fill", color: "#17381B", alpha: 1 });
     expect([cushion.x, cushion.y, cushion.r].map((value) => value.toFixed(1))).toEqual([
@@ -222,10 +211,6 @@ describe("mossScene, against the prototype", () => {
   });
 });
 
-// The prototype's bottom row left one tuft at level 0.25, over 27 to 37% of the
-// bottom edge's columns; its own level 0.5, which reads as a strip, covered 84 to
-// 92%. Look check round 1 asked for a thin strip at 0.25: most of the edge, at
-// least 80% of it, so a tuft fails by far, and none of it above the bottom quarter.
 const FUZZ_EDGE_SHARE = 0.8;
 const FUZZ_TOP_ROW = ICON_UNITS * 0.75;
 
@@ -287,7 +272,6 @@ describe("growth across the 24 steps", () => {
     const alone = mossShapes([anchor], PROTOTYPE_SEED, 1);
     const together = mossShapes([others[0], anchor, others[1]], PROTOTYPE_SEED, 1);
 
-    // Drawn with others, its shapes are still all there, in the same order.
     let found = 0;
     for (const shape of [...together.occlusion, ...together.moss]) {
       const wanted = [...alone.occlusion, ...alone.moss][found];
@@ -369,18 +353,14 @@ describe("props", () => {
       return shape?.kind === "ellipse" ? [shape.x, shape.y] : [Number.NaN, Number.NaN];
     };
 
-    // The mushroom's cap and the flower's centre.
-    // Look check round 1: big enough to read at any intensity above 0.
     for (const color of ["#C8553D", "#E8833A"]) {
       expect(width(low, color) / width(full, color)).toBeCloseTo(0.7, 6);
     }
-    // The mushroom's shadow sits at its foot.
     expect(foot(low, "#17381B")).toEqual(foot(full, "#17381B"));
   });
 });
 
 describe("bakeBox", () => {
-  // Job 009's AX tile rects in points, normal and magnified over Discord.
   it.each([
     [
       "normal",

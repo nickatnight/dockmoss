@@ -6,33 +6,15 @@ import {
   smoothstep,
 } from "./model";
 
-/**
- * The moss generator, ported from the user's SVG prototype (moss-prototype.js:
- * iconAnchors, drawMoss, shroom and flower). It returns shapes in the
- * prototype's icon space: the icon art is 112 units square, y points down, and
- * the light comes from the top left.
- */
-
 export const ICON_UNITS = 112;
 export const ICON_CORNER_RADIUS = CORNER_RADIUS_PER_SIDE * ICON_UNITS;
-/** The Dock tile's width in icon units: the art is ART_SIDE_PER_TILE_WIDTH of it. */
 export const TILE_UNITS = ICON_UNITS / ART_SIDE_PER_TILE_WIDTH;
-/**
- * How far moss may reach past the icon on each side: half the gap between two
- * art boxes, so it never reaches a neighbour's, normal or magnified.
- */
 export const OVERHANG_UNITS = (TILE_UNITS - ICON_UNITS) / 2;
 
 export const LEVEL_STEPS = 24;
 
-/** The overgrowth a bake is drawn at, in whole steps of 1/LEVEL_STEPS: 0 to LEVEL_STEPS. */
 export type LevelStep = number & { readonly __brand: "LevelStep" };
 
-/**
- * Rounds up, so any moss at all gets a bake. The quantized overgrowth is a
- * multiple of 1/256, so the product is exact and a step is never crossed by
- * float error.
- */
 export function levelStep(overgrowth: QuantizedOvergrowth): LevelStep {
   return Math.ceil(overgrowth * LEVEL_STEPS) as LevelStep;
 }
@@ -46,19 +28,14 @@ export type Paint =
 
 export type Segment = { kind: "line"; to: Point } | { kind: "quad"; control: Point; to: Point };
 
-/** Open strokes have round caps. Ellipse rotations are in radians, clockwise. */
 export type Shape =
   | { kind: "circle"; x: number; y: number; r: number; paint: Paint }
   | { kind: "ellipse"; x: number; y: number; rx: number; ry: number; rotation: number; paint: Paint }
   | { kind: "path"; from: Point; segments: readonly Segment[]; closed: boolean; paint: Paint };
 
-/** One bake's shapes, each list back to front. */
 export interface MossScene {
-  /** The contact shadow under the moss, clipped to the icon's rounded rect. */
   occlusion: readonly Shape[];
-  /** Cushions, fronds and spore stalks. They may overhang the icon by OVERHANG_UNITS. */
   moss: readonly Shape[];
-  /** The mushroom and flower of an overgrown item, on top, inside the icon. */
   props: readonly Shape[];
 }
 
@@ -71,25 +48,11 @@ export interface Anchor {
   r: number;
 }
 
-/** How far past its threshold an anchor's level runs before it is full size. */
 const ANCHOR_GROWTH_SPAN = 0.2;
-/** An anchor shows once it has this share of its size. */
 const ANCHOR_MIN_GROWTH = 0.04;
-/**
- * The bottom row's thresholds: FIRST_ROW_START, plus up to 0.1 at random, plus
- * FIRST_ROW_SPREAD per unit away from x = 30. The prototype's (0.08 and 1/220)
- * left one tuft at level 0.25. These grow a thin strip along the whole bottom
- * edge by then (look check round 1). Every other row keeps the prototype's.
- */
 const FIRST_ROW_START = 0.04;
 const FIRST_ROW_SPREAD = 1 / 1000;
 
-/**
- * The moss anchors visible at `level`: rows along the bottom edge, the left and
- * right edges, the top edge, and a few inside the lower left. Every position
- * comes from one stream, drawn whether or not its anchor shows, so ids and
- * places never depend on the level. Each anchor grows in past its threshold.
- */
 export function iconAnchors(seed: number, level: number): Anchor[] {
   const random = mulberry32(seed);
   const anchors: Anchor[] = [];
@@ -101,7 +64,6 @@ export function iconAnchors(seed: number, level: number): Anchor[] {
       anchors.push({ id, x, y, r: r * growth });
     }
   };
-  // Five rows along the bottom, spreading out from the bottom left, the first of them early.
   for (let row = 0; row < 5; row++) {
     for (let column = 0; column < 20; column++) {
       const x = -2 + column * 6 + random() * 3;
@@ -114,21 +76,17 @@ export function iconAnchors(seed: number, level: number): Anchor[] {
       add(x, y, r, threshold);
     }
   }
-  // The left edge in two columns, climbing from the bottom.
   for (let y = 96; y > 4; y -= 7) {
     const climb = (111 - y) / 111;
     add(1 + random() * 3, y, 5 + random() * 3, 0.3 + climb * 0.45 + random() * 0.12);
     add(9 + random() * 4, y, 4.5 + random() * 2, 0.45 + climb * 0.45 + random() * 0.12);
   }
-  // The right edge, later than the left.
   for (let y = 96; y > 4; y -= 7) {
     add(111 - random() * 3, y, 5 + random() * 3, 0.45 + ((111 - y) / 111) * 0.4 + random() * 0.12);
   }
-  // The top edge, last of all.
   for (let x = 6; x < 108; x += 8) {
     add(x + random() * 3, 1 + random() * 3, 4.5 + random() * 3, 0.72 + random() * 0.2);
   }
-  // A few inside the lower left.
   for (let index = 0; index < 6; index++) {
     add(14 + random() * 20, 76 + random() * 16, 5 + random() * 3, 0.4 + random() * 0.2);
   }
@@ -137,15 +95,12 @@ export function iconAnchors(seed: number, level: number): Anchor[] {
 
 interface Layer {
   color: string;
-  /** Circle radius as a share of the anchor's. */
   size: number;
-  /** Up-left offset, in eighths of the anchor's radius. */
   dx: number;
   dy: number;
   circles: number;
 }
 
-/** Back to front: lighter layers are smaller and shifted toward the light. */
 const LAYERS: readonly Layer[] = [
   { color: "#17381B", size: 1, dx: 0, dy: 0, circles: 5 },
   { color: "#24521F", size: 0.9, dx: -0.6, dy: -1, circles: 5 },
@@ -168,21 +123,16 @@ const STALKS = {
   width: 0.7,
   color: "#8A5A2B",
   capsule: { rx: 1.1, ry: 1.9, color: "#C98F45" },
-  /** Stalks grow above this level, on this share of the anchors. */
   minLevel: 0.55,
   share: 0.35,
 } as const;
 
 interface AnchorDraws {
-  /** Per layer, per circle: angle, distance and size. */
   cushions: [number, number, number][][];
-  /** Angle, reach, length and whether the frond is the light one. */
   fronds: [number, number, number, boolean][];
-  /** Chance, lean, height and bend. */
   stalk: [number, number, number, number];
 }
 
-/** An anchor's own randomness, from the seed and its id, not from draw order. */
 function anchorDraws(seed: number, id: number): AnchorDraws {
   const random = mulberry32(seed * 100003 + id * 7919 + 1);
   const cushions = LAYERS.map((layer) =>
@@ -210,11 +160,6 @@ function anchorDraws(seed: number, id: number): AnchorDraws {
 const black = (alpha: number): Paint => ({ kind: "fill", color: "#000", alpha });
 const fill = (color: string, alpha = 1): Paint => ({ kind: "fill", color, alpha });
 
-/**
- * The prototype's drawMoss for these anchors: the contact shadow, then the
- * cushion layers across all anchors, then fronds, then spore stalks on the
- * `stalkShare` of the anchors whose chance falls under it (none at 0).
- */
 export function mossShapes(
   anchors: readonly Anchor[],
   seed: number,
@@ -300,7 +245,6 @@ export function mossShapes(
 
 const degrees = (angle: number): number => (angle * Math.PI) / 180;
 
-/** The prototype's shroom, its foot at the origin, at scale 1. */
 const MUSHROOM: readonly Shape[] = [
   { kind: "ellipse", x: 0, y: 0, rx: 7, ry: 2, rotation: 0, paint: fill("#17381B", 0.55) },
   {
@@ -359,7 +303,6 @@ const MUSHROOM: readonly Shape[] = [
 const PETAL_CENTRE = 17;
 const PETAL_REACH = 3.6;
 
-/** The prototype's flower, its foot at the origin, at scale 1. */
 const FLOWER: readonly Shape[] = [
   {
     kind: "path",
@@ -389,7 +332,6 @@ function scaledPaint(paint: Paint, scale: number): Paint {
   return paint.kind === "fill" ? paint : { ...paint, width: paint.width * scale };
 }
 
-/** `shape` moved from the origin to `foot` and scaled by `scale`, as an SVG translate and scale. */
 function placed(shape: Shape, [footX, footY]: Point, scale: number): Shape {
   const at = ([x, y]: Point): Point => [footX + x * scale, footY + y * scale];
   const paint = scaledPaint(shape.paint, scale);
@@ -419,19 +361,11 @@ function placed(shape: Shape, [footX, footY]: Point, scale: number): Shape {
   }
 }
 
-/** A stream of its own for the props, apart from the anchors' and each anchor's. */
 const PROP_STREAM = 0x50524f50;
-/** The props' full scale, at level 1. */
 const PROP_SCALE = 0.9;
-/**
- * Below its ramp a prop is this share of its full scale: smaller, but big
- * enough to read at any intensity above 0 (look check round 1; it was 0.4).
- */
 const PROP_SMALLEST_SHARE = 0.7;
-/** The levels over which each prop grows from its smallest to full scale: the last few steps. */
 const MUSHROOM_RAMP = [0.78, 0.9] as const;
 const FLOWER_RAMP = [0.88, 0.98] as const;
-/** Where a prop's foot may go: one prop in each half of the lower icon, so they never touch. */
 const PROP_FOOT_X = [
   [22, 46],
   [66, 90],
@@ -442,7 +376,6 @@ function propScale([from, to]: readonly [number, number], level: number): number
   return PROP_SCALE * (PROP_SMALLEST_SHARE + (1 - PROP_SMALLEST_SHARE) * smoothstep(from, to, level));
 }
 
-/** A mushroom and a flower placed from the seed, the one further back drawn first. */
 function propShapes(seed: number, level: number): Shape[] {
   const random = mulberry32((seed ^ PROP_STREAM) >>> 0);
   const between = ([low, high]: readonly [number, number]): number => low + (high - low) * random();
@@ -457,14 +390,11 @@ function propShapes(seed: number, level: number): Shape[] {
 }
 
 export interface SceneInput {
-  /** fnv1a32 of the item key. */
   seed: number;
   step: LevelStep;
-  /** The item's stage is Overgrown: only then does it get props. */
   overgrown: boolean;
 }
 
-/** Everything one bake draws. Level 0 draws nothing. */
 export function mossScene({ seed, step, overgrown }: SceneInput): MossScene {
   if (step <= 0) {
     return EMPTY_SCENE;

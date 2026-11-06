@@ -6,7 +6,6 @@ import type { MossGl } from "./gl";
 import { type MossInstance, SHRIVEL_MS, bakeBox, fnv1a32, toDeviceBox } from "./model";
 import { createRenderer } from "./renderer";
 
-/** A fake bake is the request it was made for. */
 type FakeImage = BakeRequest;
 
 type Call =
@@ -142,7 +141,6 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(calls()).toContainEqual({ op: "resize", width: 1920, height: 1080 });
-    // The bake is the tile's width square, centred on the art, which is centred in the tile.
     const bakeBottom = 918 + 59 / 2 + 47 / 2;
     expect(draws()).toHaveLength(1);
     expect(draws()[0][0].box.y).toBeCloseTo(1080 - bakeBottom, 6);
@@ -363,7 +361,6 @@ describe("the shrivel", () => {
 
   it("draws from the icon's last bake, and bakes nothing", () => {
     const env = mossyDock();
-    // Discord's bake went into layer 0, Chess's into layer 1.
     const chessLayer = 1;
     env.bakes.length = 0;
 
@@ -453,7 +450,6 @@ describe("the shrivel", () => {
 
     expect(drawnFrames).toHaveLength(1);
     expect(chessIn(drawnFrames[0])).toMatchObject({ wither: 0, remaining: 1 });
-    // 0.3 is 77/256, on step 8 of 24, and Fuzz grows no props.
     expect(env.bakes.map(({ seed, step, overgrown }) => ({ seed, step, overgrown }))).toEqual([
       { seed: fnv1a32("com.apple.Chess#0"), step: 8, overgrown: false },
     ]);

@@ -129,11 +129,6 @@ export function artBox(tile: LogicalRect): LogicalRect {
   };
 }
 
-/**
- * The square a bake covers, in the tile's points: the tile's width, centred on
- * the art box. The moss may overhang the art by half the gap to each
- * neighbouring art box, so it stays inside its own tile.
- */
 export function bakeBox(tile: LogicalRect): LogicalRect {
   const art = artBox(tile);
   const overhang = (tile.width - art.width) / 2;
@@ -161,14 +156,12 @@ export function toDeviceBox(
   };
 }
 
-/** The icon art's corner radius, as a share of its side. */
 export const CORNER_RADIUS_PER_SIDE = 0.225;
 
 function glslFloat(value: number): string {
   return Number.isInteger(value) ? value.toFixed(1) : String(value);
 }
 
-/** The shader's constants, as GLSL `const` declarations, one per line. */
 export function glslConstants(): string {
   const floats = { MIP_LOD_BIAS, SHRIVEL_FRONT_WIDTH };
   const vectors = { WITHER_TINT };
@@ -193,20 +186,15 @@ export function mulberry32(seed: number): () => number {
 
 export interface MossInstance {
   key: ItemKey;
-  /** The bake's box: the art box and its overhang. */
   box: DeviceBox;
-  /** The atlas layer that holds the icon's bake. */
   layer: number;
   /** 0 for living moss, 1 for moss browned all the way by a shrivel. */
   wither: number;
-  /** How much of the bake a shrivel leaves, from 1 (all) down to 0, as a front easing down. */
   remaining: number;
 }
 
-/** The atlas layer holding an icon's bake, or undefined when it has none. */
 export type LayerOf = (icon: MossyIcon) => number | undefined;
 
-/** An instance for each icon that has a bake, in order. */
 export function mossInstances(
   icons: readonly MossyIcon[],
   pixelRatio: number,
@@ -226,14 +214,7 @@ export function mossInstances(
 export const SHRIVEL_MS = 600;
 export const SHRIVEL_WITHER_END = 0.4;
 export const WITHER_TINT = [1, 0.74, 0.42] as const;
-/**
- * Samples the atlas half a mip level sharper than the GPU would pick. At 0 the
- * moss kept about 0.7 of the high-frequency detail of a bake made at the drawn
- * size, resting and magnified, and read soft beside the icon; at -0.5 about
- * 0.9; at -1 it went past the ideal at rest (aliasing). Job 017, tools/look/sharp.mjs.
- */
 export const MIP_LOD_BIAS = -0.5;
-/** How soft a shrivel's front is, as a share of the bake's height. */
 export const SHRIVEL_FRONT_WIDTH = 0.06;
 
 export interface Shrivel {
@@ -291,11 +272,6 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/**
- * A shrivelling icon at `progress`, from its bake as last drawn: the moss
- * browns by SHRIVEL_WITHER_END while its front eases down to the bottom edge.
- * Null once nothing is left, at progress 1.
- */
 export function shrivelInstance(
   icon: MossyIcon,
   progress: number,
@@ -311,12 +287,6 @@ export function shrivelInstance(
   return { ...instance, wither: smoothstep(0, SHRIVEL_WITHER_END, progress), remaining };
 }
 
-/**
- * One frame of every shrivel: each one's instance at `timeMs`, from the bake
- * of the icon as last drawn, and the shrivels still running after it. A
- * shrivel's clock starts on its first frame; one with nothing left to draw,
- * or no bake, has ended.
- */
 export function shrivelFrame(
   shrivels: Shrivels,
   timeMs: number,
@@ -355,7 +325,6 @@ export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
   { name: "a_remaining", size: 1, values: ({ remaining }) => [remaining] },
 ];
 
-/** The shrivel loop draws at most 30 frames a second. */
 export const LOOP_MIN_FRAME_INTERVAL_MS = 33;
 
 export type OvergrowthOverride =

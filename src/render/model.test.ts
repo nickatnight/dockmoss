@@ -669,7 +669,6 @@ describe("shrivelInstance", () => {
     expect(at(1)).toBeNull();
   });
 
-  // Derived by hand: the smoothstep at 0.25 is 3 * 0.25^2 - 2 * 0.25^3 = 0.15625.
   it("eases the front down slowly at first: a quarter of the way, 0.84375 of the moss remains", () => {
     expect(at(0.25)?.remaining).toBe(0.84375);
   });

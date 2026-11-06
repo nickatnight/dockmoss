@@ -25,7 +25,6 @@ export interface RendererOptions<Image> {
   schedule(callback: (time: number) => void): void;
   /** A MossGl for the canvas's current context, or null if it has none. */
   createGl(): MossGl<Image> | null;
-  /** The moss for one bake, or null if it could not be drawn. */
   bake(request: BakeRequest): Image | null;
   overgrowthOverride: number | null;
 }
@@ -40,7 +39,6 @@ export interface MossRenderer extends FrameSink {
 export function createRenderer<Image>(options: RendererOptions<Image>): MossRenderer {
   let gl = options.createGl();
   let atlas = EMPTY_ATLAS;
-  /** The bakes the atlas holds, kept to upload again when the texture is made again. */
   const images = new Map<BakeKey, Image>();
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
@@ -51,7 +49,6 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
   let size = { width: 0, height: 0, pixelRatio: 1 };
   let lastLoopFrameMs: number | null = null;
 
-  /** Only a shrivel animates; nothing else redraws without a change. */
   const loopRuns = (): boolean => shrivels.size > 0;
 
   const requestFrame = (): void => {
@@ -61,10 +58,6 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     }
   };
 
-  /**
-   * Makes the atlas hold the bakes of `icons`: bakes what is new, uploads it,
-   * and evicts the rest. Returns where each icon's bake is.
-   */
   function prepareAtlas(target: MossGl<Image>, icons: readonly MossyIcon[]): LayerOf {
     const { pixelRatio } = size;
     const plan = planAtlas(

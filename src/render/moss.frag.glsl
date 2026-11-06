@@ -4,7 +4,6 @@ precision highp sampler2DArray;
 
 #pragma moss_constants
 
-// The baked moss, one bake per layer, premultiplied, with mipmaps.
 uniform sampler2DArray u_atlas;
 
 flat in vec4 v_box;
@@ -21,7 +20,6 @@ void main() {
   // A bake's rows run down from its top, GL's up from the bottom.
   vec4 moss = texture(u_atlas, vec3(uv.x, 1.0 - uv.y, v_layer), MIP_LOD_BIAS);
 
-  // A shrivel's front eases from above the bake down to its bottom edge.
   float front = v_remaining * (1.0 + SHRIVEL_FRONT_WIDTH);
   moss *= 1.0 - smoothstep(front - SHRIVEL_FRONT_WIDTH, front, uv.y);
   moss.rgb = mix(moss.rgb, WITHER_TINT * dot(moss.rgb, REC709_LUMA), v_wither);

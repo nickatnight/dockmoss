@@ -8,7 +8,6 @@ import {
   type Shape,
 } from "./generator";
 
-/** The part of a Canvas2D context a bake uses. */
 export type BakeContext = Pick<
   OffscreenCanvasRenderingContext2D,
   | "setTransform"
@@ -92,11 +91,6 @@ function draw(context: BakeContext, shapes: readonly Shape[]): void {
   }
 }
 
-/**
- * Draws `scene` on a fresh `side` x `side` px context, the tile (the icon and
- * its overhang) filling it. Moss past the canvas edge is cut there, which is
- * what keeps it off a neighbour. An empty scene issues no call.
- */
 export function drawScene(context: BakeContext, scene: MossScene, side: number): void {
   if (isEmpty(scene)) {
     return;
@@ -118,7 +112,6 @@ export function drawScene(context: BakeContext, scene: MossScene, side: number):
 
 export type Bake = { kind: "empty" } | { kind: "baked"; canvas: OffscreenCanvas } | { kind: "noContext" };
 
-/** `scene` on a new `side` px square canvas, or no canvas when there is nothing to draw. */
 export function bake(scene: MossScene, side: number): Bake {
   if (isEmpty(scene)) {
     return { kind: "empty" };

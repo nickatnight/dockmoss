@@ -127,7 +127,7 @@ function sameRect(a: LogicalRect, b: LogicalRect): boolean {
  * running dot below it. The art is a square, centred in the tile, whose side
  * measured 0.785 to 0.808 of the tile's width, normal and magnified.
  */
-const ART_SIDE_PER_TILE_WIDTH = 0.79;
+export const ART_SIDE_PER_TILE_WIDTH = 0.79;
 
 export function artBox(tile: LogicalRect): LogicalRect {
   const side = tile.width * ART_SIDE_PER_TILE_WIDTH;
@@ -273,7 +273,7 @@ const SPRITE_Y = [0.16, 0.3] as const;
 const SPRITE_SIZE = [0.13, 0.19] as const;
 const SPRITE_TRIES = 12;
 
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;
@@ -398,7 +398,7 @@ export function shrivelProgress(startMs: number, timeMs: number): number {
   return Math.min(1, Math.max(0, (timeMs - startMs) / SHRIVEL_MS));
 }
 
-function smoothstep(edge0: number, edge1: number, x: number): number {
+export function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }

@@ -185,6 +185,26 @@ describe("drawScene", () => {
 });
 
 describe("bake", () => {
+  it("draws on a software-backed canvas, so its drawing stays out of the GPU process", () => {
+    const requested: unknown[][] = [];
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext(...args: unknown[]): null {
+          requested.push(args);
+          return null;
+        }
+      },
+    );
+    try {
+      bake(mossScene({ seed: 4271, step: 24 as LevelStep, overgrown: true }), 256);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(requested).toEqual([["2d", { willReadFrequently: true }]]);
+  });
+
   it("reports a canvas without a 2D context", () => {
     vi.stubGlobal(
       "OffscreenCanvas",

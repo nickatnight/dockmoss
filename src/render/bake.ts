@@ -117,7 +117,9 @@ export function bake(scene: MossScene, side: number): Bake {
     return { kind: "empty" };
   }
   const canvas = new OffscreenCanvas(side, side);
-  const context = canvas.getContext("2d");
+  // Software-backed: an accelerated 2D canvas draws and keeps its surface in the
+  // GPU process, which put about 30 MB on the startup peak (job 017).
+  const context = canvas.getContext("2d", { willReadFrequently: true });
   if (context === null) {
     return { kind: "noContext" };
   }

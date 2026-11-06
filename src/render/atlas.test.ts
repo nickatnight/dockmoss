@@ -18,12 +18,22 @@ const discord = icon("com.hnc.Discord#0", 0.6);
 const chess = icon("com.apple.Chess#0", 1, { overgrown: true });
 const telegram = icon("ru.keepcoder.Telegram#0", 0.3);
 
-function plan(atlas: Atlas, icons: readonly MossyIcon[], pixelRatio = 2) {
+function plan(atlas: Atlas, icons: readonly MossyIcon[], pixelRatio = 2, budget = Number.POSITIVE_INFINITY) {
   return planAtlas(
     atlas,
-    icons.map((each) => bakeRequest(each, pixelRatio)),
+    icons.map((each) => ({ item: each.key, request: bakeRequest(each, pixelRatio) })),
     Math.round(128 * pixelRatio),
+    budget,
   );
+}
+
+/** Plans frame after frame until nothing is pending, as the renderer's frames do. */
+function settled(atlas: Atlas, icons: readonly MossyIcon[], budget: number): Atlas {
+  let next = plan(atlas, icons, 2, budget);
+  for (let frame = 0; next.pending && frame < 100; frame++) {
+    next = plan(next.atlas, icons, 2, budget);
+  }
+  return next.atlas;
 }
 
 const baked = (requests: readonly { request: BakeRequest }[]) => requests.map(({ request }) => request.key);
@@ -52,6 +62,59 @@ describe("bakeRequest", () => {
 
   it("asks for another bake at another backing scale", () => {
     expect(bakeRequest(discord, 1).key).not.toBe(bakeRequest(discord, 2).key);
+  });
+});
+
+describe("planAtlas with a per-frame budget", () => {
+  const five = Array.from({ length: 5 }, (_, index) => icon(`app.${index}#0`, 0.6));
+  const fiveGrown = five.map(({ key }) => icon(key, 0.9));
+
+  it("makes at most `budget` new bakes a frame, in order, and reports the rest pending", () => {
+    const first = plan(EMPTY_ATLAS, five, 2, 2);
+
+    expect(first.bakes.map(({ request }) => request.seed)).toEqual([five[0].seed, five[1].seed]);
+    expect(first.pending).toBe(true);
+    expect([...first.atlas.current.keys()]).toEqual([five[0].key, five[1].key]);
+  });
+
+  it("keeps an item's held bake for it to draw while its new bake waits, and frees it when the new one is made", () => {
+    const held = settled(EMPTY_ATLAS, five, 2);
+
+    const frames = [plan(held, fiveGrown, 2, 2)];
+    while (frames[frames.length - 1].pending) {
+      frames.push(plan(frames[frames.length - 1].atlas, fiveGrown, 2, 2));
+    }
+
+    expect(frames.map(({ bakes }) => bakes.length)).toEqual([2, 2, 1]);
+    for (const { atlas, bakes } of frames) {
+      // Every item still has a bake to draw: its new one if made, its old one if not.
+      for (const [index, item] of fiveGrown.entries()) {
+        const key = atlas.current.get(item.key);
+        expect([bakeRequest(item, 2).key, bakeRequest(five[index], 2).key]).toContain(key);
+        expect(key !== undefined && atlas.layers.has(key)).toBe(true);
+      }
+      // A new bake never goes into a layer another item still draws from.
+      const drawnByOthers = new Set(
+        [...atlas.current.values()]
+          .filter((key) => !bakes.some(({ request }) => request.key === key))
+          .map((key) => atlas.layers.get(key)),
+      );
+      for (const { layer } of bakes) {
+        expect(drawnByOthers.has(layer)).toBe(false);
+      }
+    }
+    const last = frames[frames.length - 1].atlas;
+    expect([...last.layers.keys()].sort()).toEqual(fiveGrown.map((item) => bakeRequest(item, 2).key).sort());
+  });
+
+  it("has nothing to draw for an item after a backing scale change until its bake at the new size is made", () => {
+    const held = settled(EMPTY_ATLAS, five, 2);
+
+    const next = plan(held, five, 1, 2);
+
+    expect(next.reallocate).toBe(true);
+    expect(next.atlas.current.size).toBe(2);
+    expect(next.pending).toBe(true);
   });
 });
 

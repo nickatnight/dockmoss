@@ -75,23 +75,18 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     }
     const plan = planAtlas(
       atlas,
-      icons.map((icon) => bakeRequest(icon, pixelRatio)),
+      icons.map((icon) => ({ item: icon.key, request: bakeRequest(icon, pixelRatio) })),
       bakeSide(pixelRatio),
+      BAKES_PER_FRAME,
     );
-    const later = plan.bakes.slice(BAKES_PER_FRAME);
-    bakesPending = later.length > 0;
-    // A bake left for a later frame stays out of the atlas, so the next plan makes it.
-    const layers = new Map(plan.atlas.layers);
-    for (const { request } of later) {
-      layers.delete(request.key);
-    }
-    atlas = { ...plan.atlas, layers };
+    atlas = plan.atlas;
+    bakesPending = plan.pending;
     for (const key of cells.keys()) {
       if (!atlas.layers.has(key)) {
         cells.delete(key);
       }
     }
-    const baked = plan.bakes.slice(0, BAKES_PER_FRAME).flatMap(({ request, layer }) => {
+    const baked = plan.bakes.flatMap(({ request, layer }) => {
       const image = options.bake(request);
       if (image === null) {
         return [];
@@ -106,7 +101,11 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     } else if (baked.length > 0) {
       target.upload(baked);
     }
-    const layerOf: LayerOf = (icon) => cells.get(bakeRequest(icon, pixelRatio).key)?.layer;
+    const { current } = atlas;
+    const layerOf: LayerOf = (icon) => {
+      const key = current.get(icon.key);
+      return key === undefined ? undefined : cells.get(key)?.layer;
+    };
     planned = bakesPending ? null : { pixelRatio, icons, layerOf };
     return layerOf;
   }
@@ -146,6 +145,8 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       // frame callbacks there, so the old moss would show at the next order-in.
       gl?.clear();
       drawn = NOTHING_DRAWN;
+      // Nothing to draw: the waiting bakes are planned again when the Dock shows.
+      bakesPending = false;
     } else if (next.kind === "draw" || shrivels.size > 0) {
       // A running shrivel always has a frame pending already; the size check states that it needs one.
       requestFrame();

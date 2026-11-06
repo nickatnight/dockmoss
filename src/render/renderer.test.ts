@@ -348,19 +348,127 @@ describe("baking", () => {
     env.renderer.growth(patchyNine);
 
     const perFrame: number[][] = [];
-    for (let frame = 0; frame < 5 && (frame === 0 || env.frames.pending > 0); frame++) {
+    for (let frame = 0; frame < 10 && (frame === 0 || env.frames.pending > 0); frame++) {
       const bakesBefore = env.bakes.length;
       env.frames.runFrame(frame * 17);
       const draws = env.draws();
       perFrame.push([env.bakes.length - bakesBefore, draws[draws.length - 1].length]);
     }
 
-    expect(BAKES_PER_FRAME).toBe(2);
-    expect(perFrame).toEqual([
-      [2, 2],
-      [2, 4],
-      [1, 5],
-    ]);
+    const expected: number[][] = [];
+    for (let drawn = 0; drawn < 5; ) {
+      const baked = Math.min(BAKES_PER_FRAME, 5 - drawn);
+      drawn += baked;
+      expected.push([baked, drawn]);
+    }
+    expect(expected.length).toBeGreaterThan(1);
+    expect(perFrame).toEqual(expected);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("keeps drawing every icon from its old bake while its new one waits, when many change step at once", () => {
+    const env = setup();
+    const six = nine.slice(0, 6);
+    env.renderer.dock(six);
+    env.renderer.growth(patchyNine);
+    settle(env);
+    const imageIn = new Map<number, BakeRequest>();
+    const record = (from: number) => {
+      for (const call of env.calls().slice(from)) {
+        if (call.op === "upload") for (const { layer, image } of call.cells) imageIn.set(layer, image);
+      }
+    };
+    record(0);
+
+    env.renderer.growth(patchyNine.map((app) => ({ ...app, overgrowth: 0.9 })));
+    const drawnPerFrame: number[] = [];
+    for (let frame = 0; frame === 0 || (env.frames.pending > 0 && frame < 20); frame++) {
+      const from = env.calls().length;
+      env.frames.runFrame(frame * 17);
+      const calls = env.calls().slice(from);
+      const draw = calls.find((call) => call.op === "draw");
+      const instances = draw?.op === "draw" ? draw.instances : [];
+      // No upload goes into a layer another icon draws in the same frame.
+      for (const call of calls) {
+        if (call.op !== "upload") continue;
+        for (const { layer, image } of call.cells) {
+          for (const instance of instances) {
+            if (instance.layer === layer) expect(fnv1a32(instance.key)).toBe(image.seed);
+          }
+        }
+      }
+      record(from);
+      // Every icon draws, from a layer holding its own bake, old or new.
+      drawnPerFrame.push(instances.length);
+      for (const { key, layer } of instances) {
+        expect(imageIn.get(layer)?.seed).toBe(fnv1a32(key));
+      }
+    }
+
+    expect(drawnPerFrame.length).toBeGreaterThan(1);
+    expect(drawnPerFrame.every((count) => count === 6)).toBe(true);
+    const lastDraw = env.draws()[env.draws().length - 1];
+    expect(lastDraw.map(({ layer }) => imageIn.get(layer)?.step)).toEqual(Array(6).fill(22));
+  });
+
+  it("bakes props for an icon that turns Overgrown at the same overgrowth", () => {
+    const env = setup();
+    env.renderer.dock([discord]);
+    env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 1, stage: "patchy" }]);
+    settle(env);
+    env.calls().length = 0;
+    env.bakes.length = 0;
+
+    env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 1, stage: "overgrown" }]);
+    settle(env);
+
+    expect(env.bakes.map(({ overgrown }) => overgrown)).toEqual([true]);
+    expect(env.ops()).toEqual(["upload", "draw"]);
+  });
+
+  it("keeps the bakes it made when the Dock hides while others wait, and makes only the rest on show", () => {
+    const env = setup();
+    const six = nine.slice(0, 6);
+    env.renderer.dock(six);
+    env.renderer.growth(patchyNine);
+    env.frames.runFrame(0);
+    expect(env.bakes).toHaveLength(2);
+
+    env.renderer.dock([]);
+    env.frames.runFrame(17);
+    env.renderer.dock(six);
+    settle(env, 34);
+
+    expect(env.bakes).toHaveLength(6);
+  });
+
+  it("settles nine icons that appear at once, growing the atlas while bakes wait", () => {
+    const env = setup();
+    env.renderer.dock(nine);
+    env.renderer.growth(patchyNine);
+    settle(env);
+
+    const draws = env.draws();
+    const last = draws[draws.length - 1];
+    expect(env.bakes).toHaveLength(9);
+    expect(last).toHaveLength(9);
+    expect(new Set(last.map(({ layer }) => layer)).size).toBe(9);
+    expect(env.frames.pending).toBe(0);
+  });
+
+  it("bakes everything again on a context restored while bakes wait", () => {
+    const env = setup();
+    env.renderer.dock(nine.slice(0, 6));
+    env.renderer.growth(patchyNine);
+    env.frames.runFrame(0);
+
+    env.renderer.contextLost();
+    env.renderer.contextRestored();
+    settle(env, 17);
+
+    expect(env.bakes).toHaveLength(2 + 6);
+    const draws = env.draws();
+    expect(draws[draws.length - 1]).toHaveLength(6);
     expect(env.frames.pending).toBe(0);
   });
 

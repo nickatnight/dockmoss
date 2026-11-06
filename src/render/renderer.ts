@@ -40,6 +40,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
   let gl = options.createGl();
   let atlas = EMPTY_ATLAS;
   const cells = new Map<BakeKey, { layer: number; image: Image }>();
+  let planned: { pixelRatio: number; icons: readonly MossyIcon[]; layerOf: LayerOf } | null = null;
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
   let latest: MossyIcon[] = [];
@@ -60,6 +61,9 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
 
   function prepareAtlas(target: MossGl<Image>, icons: readonly MossyIcon[]): LayerOf {
     const { pixelRatio } = size;
+    if (planned !== null && planned.pixelRatio === pixelRatio && sameBakes(planned.icons, icons)) {
+      return planned.layerOf;
+    }
     const plan = planAtlas(
       atlas,
       icons.map((icon) => bakeRequest(icon, pixelRatio)),
@@ -86,7 +90,9 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     } else if (baked.length > 0) {
       target.upload(baked);
     }
-    return (icon) => cells.get(bakeRequest(icon, pixelRatio).key)?.layer;
+    const layerOf: LayerOf = (icon) => cells.get(bakeRequest(icon, pixelRatio).key)?.layer;
+    planned = { pixelRatio, icons, layerOf };
+    return layerOf;
   }
 
   function frame(time: number): void {
@@ -154,6 +160,7 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       gl = null;
       atlas = EMPTY_ATLAS;
       cells.clear();
+      planned = null;
       drawn = "unknown";
       shrivels = new Map();
       lastLoopFrameMs = null;
@@ -163,4 +170,17 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       resize(size.width, size.height, size.pixelRatio);
     },
   };
+}
+
+/** The same icons, in order, with the same overgrowth and stage: the same bakes, wherever their tiles are. */
+function sameBakes(a: readonly MossyIcon[], b: readonly MossyIcon[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (icon, index) =>
+        icon.key === b[index].key &&
+        icon.overgrowth === b[index].overgrowth &&
+        icon.overgrown === b[index].overgrown,
+    )
+  );
 }

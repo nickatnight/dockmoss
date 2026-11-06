@@ -11,13 +11,12 @@ import {
   type LevelStep,
   type Point,
   type Shape,
-  bakeBox,
   iconAnchors,
   levelStep,
   mossScene,
   mossShapes,
 } from "./generator";
-import { artBox, fnv1a32, quantize } from "./model";
+import { artBox, bakeBox, fnv1a32, quantize } from "./model";
 
 // The seed the prototype's page starts with; moss-rendering.md counts its shapes.
 const PROTOTYPE_SEED = 4271;

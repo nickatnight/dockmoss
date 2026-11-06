@@ -287,23 +287,11 @@ describe("step", () => {
 });
 
 describe("mossInstances", () => {
-  it("draws static moss unwithered", () => {
+  it("draws static moss whole and unwithered", () => {
     const [instance] = mossInstances([icon({ overgrowth: mossy(1), overgrown: true })], 2, 1964, LAYER_ZERO);
 
     expect(instance.wither).toBe(0);
-  });
-
-  it("gives an overgrown icon its sprites, and any other icon none", () => {
-    const [overgrown, patchy] = mossInstances(
-      [icon({ overgrowth: mossy(1), overgrown: true }), icon({ overgrowth: mossy(0.9) })],
-      2,
-      1964,
-      LAYER_ZERO,
-    );
-
-    expect(overgrown.sprites).toEqual(spritesFor(3244016102));
-    expect(overgrown.sprites.length).toBeGreaterThan(0);
-    expect(patchy.sprites).toEqual([]);
+    expect(instance.remaining).toBe(1);
   });
 
   it("gives each icon the layer of its bake, and leaves out an icon without one", () => {
@@ -317,22 +305,22 @@ describe("mossInstances", () => {
 
     const instances = mossInstances([discord, chess, telegram], 2, 1964, ({ key }) => layers.get(key));
 
-    expect(instances.map(({ seed, layer }) => [seed, layer])).toEqual([
-      [discord.seed, 3],
-      [telegram.seed, 0],
+    expect(instances.map(({ key, layer }) => [key, layer])).toEqual([
+      [discord.key, 3],
+      [telegram.key, 0],
     ]);
   });
 
-  it("puts each icon's art box in canvas device pixels, with its seed and overgrowth", () => {
+  it("puts each icon's bake over its tile's width, centred on the art, in canvas device pixels", () => {
     const tile = { x: 711, y: 918, width: 47, height: 59 };
-    const icons = [icon({ tile, overgrowth: mossy(0.6) })];
 
-    const [instance] = mossInstances(icons, 2, 1964, LAYER_ZERO);
+    const [instance] = mossInstances([icon({ tile })], 2, 1964, LAYER_ZERO);
 
-    expect(instance.box).toEqual(toDeviceBox(artBox(tile), 2, 1964));
-    expect(instance.seed).toBe(3244016102);
-    expect(instance.overgrowth).toBe(quantize(0.6));
-    expect(instance.hue).toBe(mossHue(3244016102));
+    const art = toDeviceBox(artBox(tile), 2, 1964);
+    expect(instance.box.width).toBeCloseTo(47 * 2, 9);
+    expect(instance.box.height).toBeCloseTo(47 * 2, 9);
+    expect(instance.box.x + instance.box.width / 2).toBeCloseTo(art.x + art.width / 2, 9);
+    expect(instance.box.y + instance.box.height / 2).toBeCloseTo(art.y + art.height / 2, 9);
   });
 });
 
@@ -677,13 +665,11 @@ describe("spritesFor", () => {
 const GLSL_SIZES: Record<string, number> = { float: 1, vec2: 2, vec3: 3, vec4: 4 };
 
 const layoutInstance: MossInstance = {
+  key: "com.hnc.Discord#0" as ItemKey,
   box: { x: 10, y: 20, width: 74, height: 74 },
-  seed: 0x12345678,
-  overgrowth: mossy(0.6),
-  hue: -0.5,
-  wither: 0.25,
-  sprites: [{ kind: "flower", x: 0.4, y: 0.2, size: 0.15 }],
   layer: 3,
+  wither: 0.25,
+  remaining: 0.5,
 };
 
 describe("INSTANCE_ATTRIBUTES", () => {
@@ -705,18 +691,11 @@ describe("INSTANCE_ATTRIBUTES", () => {
     expect(unread).toEqual([]);
   });
 
-  it("writes exactly `size` values per attribute, zeros for a missing sprite", () => {
+  it("writes exactly `size` values per attribute: the box, the layer, the wither and what remains", () => {
     const values = INSTANCE_ATTRIBUTES.map((attribute) => attribute.values(layoutInstance));
 
     expect(values.map((written) => written.length)).toEqual(INSTANCE_ATTRIBUTES.map(({ size }) => size));
-    expect(values.flat()).toEqual([
-      10, 20, 74, 74,
-      ((0x5678 / 0x10000) * 64), ((0x1234 / 0x10000) * 64),
-      quantize(0.6), -0.5, 0.25,
-      0.4, 0.2, 0.15, 2,
-      0, 0, 0, 0,
-      0, 0, 0, 0,
-    ]);
+    expect(values.flat()).toEqual([10, 20, 74, 74, 3, 0.25, 0.5]);
   });
 });
 
@@ -876,37 +855,27 @@ describe("shrivelInstance", () => {
     expect(at(1)).toBeNull();
   });
 
-  // Derived by hand: the smoothstep at 0.25 is 3 * 0.25^2 - 2 * 0.25^3 = 0.15625,
-  // so 0.84375 of the overgrowth remains, which is 216/256 and needs no rounding.
-  it("eases the front down slowly at first: a quarter of the way, an overgrown icon keeps 0.84375", () => {
-    expect(at(0.25)?.overgrowth).toBe(0.84375);
+  // Derived by hand: the smoothstep at 0.25 is 3 * 0.25^2 - 2 * 0.25^3 = 0.15625.
+  it("eases the front down slowly at first: a quarter of the way, 0.84375 of the moss remains", () => {
+    expect(at(0.25)?.remaining).toBe(0.84375);
   });
 
-  it("recedes the front from its start to the bottom edge, never rising, and at or below 0.55", () => {
-    const fronts = progresses.flatMap((progress) => {
-      const instance = at(progress);
-      return instance === null ? [] : [worstCaseFront(0.5, instance.overgrowth)];
-    });
-    const start = worstCaseFront(0.5, 1);
+  it("recedes the front all the way to the bottom edge, never rising", () => {
+    const remaining = progresses.map((progress) => at(progress)?.remaining ?? 0);
 
-    expect(fronts.length).toBeGreaterThan(80);
-    for (const [index, front] of fronts.entries()) {
-      expect(front).toBeLessThanOrEqual(start);
-      expect(front).toBeLessThanOrEqual(0.55);
-      expect(front).toBeLessThanOrEqual(fronts[index - 1] ?? start);
+    expect(remaining[0]).toBe(1);
+    for (let index = 1; index < remaining.length; index++) {
+      expect(remaining[index]).toBeLessThanOrEqual(remaining[index - 1]);
     }
-    expect(fronts[fronts.length - 1]).toBeLessThan(start / 5);
+    expect(remaining[99]).toBeLessThan(0.001);
   });
 
-  it("recedes from a patchy start the same way, to no moss", () => {
+  it("recedes a patchy icon's front the same way as an overgrown one's", () => {
     const patchy = icon({ overgrowth: mossy(0.5) });
-    const overgrowths = progresses.map((progress) => at(progress, patchy)?.overgrowth ?? 0);
 
-    for (let index = 1; index < overgrowths.length; index++) {
-      expect(overgrowths[index]).toBeLessThanOrEqual(overgrowths[index - 1]);
+    for (const progress of progresses) {
+      expect(at(progress, patchy)?.remaining).toBe(at(progress)?.remaining);
     }
-    expect(overgrowths[0]).toBe(0.5);
-    expect(overgrowths[overgrowths.length - 1]).toBe(0);
   });
 
   it("withers the moss from none at the start to full before the end, never back", () => {
@@ -920,44 +889,11 @@ describe("shrivelInstance", () => {
     }
   });
 
-  it("shrinks every sprite to nothing inside its own box, the clip and the 0.55 bound", () => {
-    const seeds = Array.from({ length: 500 }, (_, index) => fnv1a32(`app.${index}#0`));
-    for (const seed of seeds) {
-      const from = icon({ seed, overgrowth: mossy(1), overgrown: true });
-      const start = spritesFor(seed);
-      let previous: readonly Sprite[] = start;
-      for (const progress of progresses) {
-        const sprites = at(progress, from)?.sprites ?? [];
-        if (sprites.length === 0) {
-          continue;
-        }
-        expect(sprites).toHaveLength(start.length);
-        for (const [slot, sprite] of sprites.entries()) {
-          const top = sprite.y + sprite.size / 2;
-          expect(sprite.size, `seed ${seed}`).toBeLessThanOrEqual(previous[slot].size);
-          expect(top, `seed ${seed}`).toBeLessThanOrEqual(start[slot].y + start[slot].size / 2);
-          expect(top, `seed ${seed}`).toBeLessThanOrEqual(0.55);
-          expect(sprite.y - sprite.size / 2, `seed ${seed}`).toBeCloseTo(start[slot].y - start[slot].size / 2, 12);
-          for (const [cx, cy] of leanedCorners(sprite)) {
-            expect(clipDistance(cx, cy), `seed ${seed}`).toBeLessThan(0);
-          }
-        }
-        previous = sprites;
-      }
-      const drawnFrames = progresses.flatMap((progress) => at(progress, from) ?? []);
-      const last = drawnFrames[drawnFrames.length - 1];
-      expect(Math.max(...last.sprites.map(({ size }) => size)), `seed ${seed}`).toBeLessThan(0.02);
-    }
-  });
-
-  it("keeps the icon's tile, seed, hue and sprite kinds", () => {
+  it("keeps the icon's key, box and bake", () => {
     const instance = at(0.5);
     const start = mossInstances([overgrown], 2, 1964, LAYER_ZERO)[0];
 
-    expect(instance?.box).toEqual(start.box);
-    expect(instance?.seed).toBe(start.seed);
-    expect(instance?.hue).toBe(start.hue);
-    expect(instance?.sprites.map(({ kind, x }) => ({ kind, x }))).toEqual(start.sprites.map(({ kind, x }) => ({ kind, x })));
+    expect([instance?.key, instance?.box, instance?.layer]).toEqual([start.key, start.box, start.layer]);
   });
 });
 

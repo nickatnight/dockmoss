@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import type { BakeRequest } from "./atlas";
 import type { MossGl } from "./gl";
-import { type MossInstance, SHRIVEL_MS, artBox, fnv1a32, toDeviceBox } from "./model";
+import { type MossInstance, SHRIVEL_MS, bakeBox, fnv1a32, toDeviceBox } from "./model";
 import { createRenderer } from "./renderer";
 
 /** A fake bake is the request it was made for. */
@@ -143,9 +143,10 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(calls()).toContainEqual({ op: "resize", width: 1920, height: 1080 });
-    const artBottom = 918 + (59 + 0.79 * 47) / 2;
+    // The bake is the tile's width square, centred on the art, which is centred in the tile.
+    const bakeBottom = 918 + 59 / 2 + 47 / 2;
     expect(draws()).toHaveLength(1);
-    expect(draws()[0][0].box.y).toBeCloseTo(1080 - artBottom, 6);
+    expect(draws()[0][0].box.y).toBeCloseTo(1080 - bakeBottom, 6);
   });
 
   it("redraws on a new context after the old one is lost and restored", () => {
@@ -171,7 +172,7 @@ describe("createRenderer", () => {
     frames.runFrame();
 
     expect(draws()).toHaveLength(1);
-    expect(draws()[0].map(({ overgrowth }) => overgrowth)).toEqual([0.6015625, 1]);
+    expect(draws()[0].map(({ key }) => key)).toEqual(["com.hnc.Discord#0", "ru.keepcoder.Telegram#0"]);
   });
 
   it("draws nothing, and schedules nothing, for a clean Dock whose tiles move", () => {
@@ -303,7 +304,7 @@ describe("baking", () => {
     renderer.growth(both);
     frames.runFrame();
 
-    expect(draws()[0].map(({ seed }) => seed)).toEqual([fnv1a32("ru.keepcoder.Telegram#0")]);
+    expect(draws()[0].map(({ key }) => key)).toEqual(["ru.keepcoder.Telegram#0"]);
   });
 });
 
@@ -428,7 +429,6 @@ describe("the shrivel", () => {
     bundleId: "com.apple.Chess" as BundleId,
     rect: { x: 664, y: 918, width: 47, height: 59 },
   };
-  const chessSeed = fnv1a32("com.apple.Chess#0");
   const overgrownChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 1, stage: "overgrown" }];
   const launchedChess: AppGrowth[] = [...mossy, { bundleId: chess.bundleId, overgrowth: 0, stage: "clean" }];
 
@@ -456,7 +456,7 @@ describe("the shrivel", () => {
     return drawnFrames;
   }
 
-  const chessIn = ({ instances }: DrawCall) => instances.find(({ seed }) => seed === chessSeed);
+  const chessIn = ({ instances }: DrawCall) => instances.find(({ key }) => key === "com.apple.Chess#0");
 
   function shrivelling(env: ReturnType<typeof setup>): void {
     env.renderer.growth(launchedChess);
@@ -487,7 +487,7 @@ describe("the shrivel", () => {
 
     expect(env.frames.pending).toBe(1);
     const [first] = runAt60Hz(env, 1000, 0);
-    expect(chessIn(first)).toMatchObject({ overgrowth: 1, wither: 0 });
+    expect(chessIn(first)).toMatchObject({ wither: 0, remaining: 1 });
     expect(first.instances).toHaveLength(2);
   });
 
@@ -516,7 +516,7 @@ describe("the shrivel", () => {
     expect(drawnFrames.length).toBeGreaterThan(10);
     expect(last.time).toBeLessThanOrEqual(1000 + SHRIVEL_MS);
     expect(chessIn(last)).toBeUndefined();
-    expect(last.instances.map(({ overgrowth }) => overgrowth)).toEqual([0.6015625]);
+    expect(last.instances.map(({ key }) => key)).toEqual(["com.hnc.Discord#0"]);
     expect(env.frames.pending).toBe(0);
   });
 
@@ -543,18 +543,23 @@ describe("the shrivel", () => {
     env.renderer.dock([discord, magnified]);
     const [next] = runAt60Hz(env, 1150, 0);
 
-    expect(chessIn(next)?.box).toEqual(toDeviceBox(artBox(magnified.rect), 2, 1964));
+    expect(chessIn(next)?.box).toEqual(toDeviceBox(bakeBox(magnified.rect), 2, 1964));
   });
 
   it("draws the new state, and stops, when the app has moss again", () => {
     const env = mossyDock();
     shrivelling(env);
 
+    env.bakes.length = 0;
     env.renderer.growth([...mossy, { bundleId: chess.bundleId, overgrowth: 0.3, stage: "fuzz" }]);
     const drawnFrames = runAt60Hz(env, 1150, 500);
 
     expect(drawnFrames).toHaveLength(1);
-    expect(chessIn(drawnFrames[0])).toMatchObject({ overgrowth: 77 / 256, wither: 0 });
+    expect(chessIn(drawnFrames[0])).toMatchObject({ wither: 0, remaining: 1 });
+    // 0.3 is 77/256, on step 8 of 24, and Fuzz grows no props.
+    expect(env.bakes.map(({ seed, step, overgrown }) => ({ seed, step, overgrown }))).toEqual([
+      { seed: fnv1a32("com.apple.Chess#0"), step: 8, overgrown: false },
+    ]);
     expect(env.frames.pending).toBe(0);
   });
 
@@ -661,9 +666,9 @@ describe("the shrivel", () => {
     env.renderer.growth(launchedChess);
     const drawnFrames = runAt60Hz(env, 1000, 1000);
 
-    expect(drawnFrames[5].instances.map(({ seed, wither }) => ({ seed, withered: wither > 0 }))).toEqual([
-      { seed: chessSeed, withered: true },
-      { seed: fnv1a32("com.apple.Chess#1"), withered: true },
+    expect(drawnFrames[5].instances.map(({ key, wither }) => ({ key, withered: wither > 0 }))).toEqual([
+      { key: "com.apple.Chess#0", withered: true },
+      { key: "com.apple.Chess#1", withered: true },
     ]);
     expect(drawnFrames[drawnFrames.length - 1].instances).toEqual([]);
   });
@@ -725,9 +730,8 @@ describe("the shrivel", () => {
     env.renderer.growth([{ bundleId: discord.bundleId, overgrowth: 0, stage: "clean" }, launchedChess[1]]);
     const drawnFrames = runAt60Hz(env, 1250, 1000);
 
-    const discordSeed = fnv1a32("com.hnc.Discord#0");
     const discordWithers = drawnFrames.flatMap(({ instances }) =>
-      instances.filter(({ seed }) => seed === discordSeed).map(({ wither }) => wither),
+      instances.filter(({ key }) => key === "com.hnc.Discord#0").map(({ wither }) => wither),
     );
     expect(discordWithers[0]).toBe(0);
     expect(discordWithers.some((wither) => wither > 0)).toBe(true);

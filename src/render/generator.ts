@@ -1,9 +1,7 @@
-import type { LogicalRect } from "../ipc";
 import {
   ART_SIDE_PER_TILE_WIDTH,
   CORNER_RADIUS_PER_SIDE,
   type QuantizedOvergrowth,
-  artBox,
   mulberry32,
   smoothstep,
 } from "./model";
@@ -24,18 +22,6 @@ export const TILE_UNITS = ICON_UNITS / ART_SIDE_PER_TILE_WIDTH;
  * art boxes, so it never reaches a neighbour's, normal or magnified.
  */
 export const OVERHANG_UNITS = (TILE_UNITS - ICON_UNITS) / 2;
-
-/** The square a bake covers, in the tile's own points: the art box and its overhang. */
-export function bakeBox(tile: LogicalRect): LogicalRect {
-  const art = artBox(tile);
-  const overhang = (OVERHANG_UNITS / ICON_UNITS) * art.width;
-  return {
-    x: art.x - overhang,
-    y: art.y - overhang,
-    width: art.width + 2 * overhang,
-    height: art.height + 2 * overhang,
-  };
-}
 
 export const LEVEL_STEPS = 24;
 

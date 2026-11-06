@@ -139,6 +139,17 @@ export function artBox(tile: LogicalRect): LogicalRect {
   };
 }
 
+/**
+ * The square a bake covers, in the tile's points: the tile's width, centred on
+ * the art box. The moss may overhang the art by half the gap to each
+ * neighbouring art box, so it stays inside its own tile.
+ */
+export function bakeBox(tile: LogicalRect): LogicalRect {
+  const art = artBox(tile);
+  const overhang = (tile.width - art.width) / 2;
+  return { x: art.x - overhang, y: art.y - overhang, width: tile.width, height: tile.width };
+}
+
 /** A rect in canvas device pixels, measured from the bottom-left as GL does. */
 export interface DeviceBox {
   x: number;
@@ -241,6 +252,7 @@ export function glslConstants(): string {
     MOSS_SWAY_PERIOD,
     SPRITE_SWAY_PERIOD,
     SPRITE_TIP_LEAN,
+    SHRIVEL_FRONT_WIDTH,
   };
   const vectors = { LEFT_CORNER, RIGHT_CORNER, WITHER_TINT };
   return [
@@ -320,15 +332,15 @@ export function mossHue(seed: number): number {
 }
 
 export interface MossInstance {
+  key: ItemKey;
+  /** The bake's box: the art box and its overhang. */
   box: DeviceBox;
-  seed: number;
-  overgrowth: MossOvergrowth;
-  hue: number;
-  /** 0 for living moss, 1 for moss browned all the way by a shrivel. */
-  wither: number;
-  sprites: readonly Sprite[];
   /** The atlas layer that holds the icon's bake. */
   layer: number;
+  /** 0 for living moss, 1 for moss browned all the way by a shrivel. */
+  wither: number;
+  /** How much of the bake a shrivel leaves, from 1 (all) down to 0, as a front easing down. */
+  remaining: number;
 }
 
 /** The atlas layer holding an icon's bake, or undefined when it has none. */
@@ -346,24 +358,16 @@ export function mossInstances(
     if (layer === undefined) {
       return [];
     }
-    const { tile, seed, overgrowth, overgrown } = icon;
-    return [
-      {
-        box: toDeviceBox(artBox(tile), pixelRatio, canvasHeight),
-        seed,
-        overgrowth,
-        hue: mossHue(seed),
-        wither: 0,
-        sprites: overgrown ? spritesFor(seed) : [],
-        layer,
-      },
-    ];
+    const box = toDeviceBox(bakeBox(icon.tile), pixelRatio, canvasHeight);
+    return [{ key: icon.key, box, layer, wither: 0, remaining: 1 }];
   });
 }
 
 export const SHRIVEL_MS = 600;
 export const SHRIVEL_WITHER_END = 0.4;
 export const WITHER_TINT = [1, 0.74, 0.42] as const;
+/** How soft a shrivel's front is, as a share of the bake's height. */
+export const SHRIVEL_FRONT_WIDTH = 0.06;
 
 export interface Shrivel {
   /** The icon as the canvas last drew it, at its item's tile now. */
@@ -420,14 +424,10 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function shrunkOnFoot(sprite: Sprite, remaining: number): Sprite {
-  return { ...sprite, y: sprite.y - (sprite.size * (1 - remaining)) / 2, size: sprite.size * remaining };
-}
-
 /**
- * A shrivelling icon at `progress`: its moss browns by SHRIVEL_WITHER_END while
- * the front eases down to the bottom edge, and its sprites shrink toward their
- * feet with it. Null once nothing is left, at progress 1 at the latest.
+ * A shrivelling icon at `progress`, from its bake as last drawn: the moss
+ * browns by SHRIVEL_WITHER_END while its front eases down to the bottom edge.
+ * Null once nothing is left, at progress 1.
  */
 export function shrivelInstance(
   icon: MossyIcon,
@@ -437,16 +437,11 @@ export function shrivelInstance(
   layer: number,
 ): MossInstance | null {
   const remaining = 1 - smoothstep(0, 1, progress);
-  const overgrowth = mossOvergrowth(icon.overgrowth * remaining);
-  if (overgrowth === null) {
+  if (remaining <= 0) {
     return null;
   }
-  const [instance] = mossInstances([{ ...icon, overgrowth }], pixelRatio, canvasHeight, () => layer);
-  return {
-    ...instance,
-    wither: smoothstep(0, SHRIVEL_WITHER_END, progress),
-    sprites: instance.sprites.map((sprite) => shrunkOnFoot(sprite, remaining)),
-  };
+  const [instance] = mossInstances([icon], pixelRatio, canvasHeight, () => layer);
+  return { ...instance, wither: smoothstep(0, SHRIVEL_WITHER_END, progress), remaining };
 }
 
 /**
@@ -479,15 +474,6 @@ export function shrivelFrame(
   return { instances, running };
 }
 
-const SPRITE_KINDS: Record<Sprite["kind"], number> = { mushroom: MUSHROOM, flower: FLOWER };
-
-function spriteValues(sprite: Sprite | undefined): number[] {
-  if (sprite === undefined) {
-    return [0, 0, 0, NO_SPRITE];
-  }
-  return [sprite.x, sprite.y, sprite.size, SPRITE_KINDS[sprite.kind]];
-}
-
 export interface InstanceAttribute {
   name: string;
   size: number;
@@ -497,15 +483,9 @@ export interface InstanceAttribute {
 /** One instance's attributes in buffer order, each an `in` of moss.vert.glsl. */
 export const INSTANCE_ATTRIBUTES: readonly InstanceAttribute[] = [
   { name: "a_box", size: 4, values: ({ box }) => [box.x, box.y, box.width, box.height] },
-  { name: "a_seed", size: 2, values: ({ seed }) => seedOffset(seed) },
-  { name: "a_overgrowth", size: 1, values: ({ overgrowth }) => [overgrowth] },
-  { name: "a_hue", size: 1, values: ({ hue }) => [hue] },
+  { name: "a_layer", size: 1, values: ({ layer }) => [layer] },
   { name: "a_wither", size: 1, values: ({ wither }) => [wither] },
-  ...Array.from({ length: MAX_SPRITES }, (_, slot) => ({
-    name: `a_sprite${slot}`,
-    size: 4,
-    values: ({ sprites }: MossInstance) => spriteValues(sprites[slot]),
-  })),
+  { name: "a_remaining", size: 1, values: ({ remaining }) => [remaining] },
 ];
 
 export const SWAY_MIN_OVERGROWTH = 0.5;

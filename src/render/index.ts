@@ -1,4 +1,6 @@
+import { bake } from "./bake";
 import { createMossGl } from "./gl";
+import { mossScene } from "./generator";
 import { type FrameSink, createRenderer } from "./renderer";
 
 export interface MossOptions {
@@ -15,6 +17,14 @@ export function startMossRenderer(root: HTMLElement, { overgrowthOverride, sway 
   const renderer = createRenderer({
     schedule: (callback) => requestAnimationFrame(callback),
     createGl: () => createMossGl(canvas),
+    bake: (request) => {
+      const baked = bake(mossScene(request), request.side);
+      if (baked.kind !== "baked") {
+        console.error(`moss renderer: no bake (${baked.kind})`);
+        return null;
+      }
+      return baked.canvas;
+    },
     overgrowthOverride,
     sway,
   });

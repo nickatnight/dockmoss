@@ -7,15 +7,19 @@ const CONSTANTS_LINE = "#pragma moss_constants";
 const FLOATS_PER_INSTANCE = INSTANCE_ATTRIBUTES.reduce((sum, { size }) => sum + size, 0);
 const BYTES_PER_FLOAT = 4;
 
-export interface MossGl {
+export interface MossGl<Image> {
   /** Sets the backing store size in device pixels. Clears the canvas if it changes. */
   resize(width: number, height: number): void;
+  /** Makes the atlas again: `layers` cells of `side` px square, all blank. */
+  allocate(layers: number, side: number): void;
+  /** Puts each image in its atlas layer, then remakes the atlas's mipmaps. */
+  upload(cells: readonly { layer: number; image: Image }[]): void;
   /** Clears the canvas, then draws every instance in one call, swayed to `swaySeconds`. */
   draw(instances: readonly MossInstance[], swaySeconds: number): void;
   clear(): void;
 }
 
-export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
+export function createMossGl(canvas: HTMLCanvasElement): MossGl<OffscreenCanvas> | null {
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
@@ -54,6 +58,11 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
   }
   let data = new Float32Array(0);
 
+  // The atlas: one texture array, a bake per layer, so no mip level mixes two bakes.
+  gl.activeTexture(gl.TEXTURE0);
+  let atlas: WebGLTexture | null = null;
+  let atlasSide = 0;
+
   const clear = (): void => {
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
@@ -68,6 +77,41 @@ export function createMossGl(canvas: HTMLCanvasElement): MossGl | null {
       canvas.height = height;
       gl.viewport(0, 0, width, height);
       gl.uniform2f(resolution, width, height);
+    },
+    allocate(layers, side) {
+      gl.deleteTexture(atlas);
+      atlas = gl.createTexture();
+      atlasSide = side;
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, Math.floor(Math.log2(side)) + 1, gl.RGBA8, side, side, layers);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    },
+    upload(cells) {
+      if (cells.length === 0) {
+        return;
+      }
+      // Premultiplied, as the canvas composites, so mipmaps do not darken the moss's edges.
+      // WebGL applies this to a canvas source; it would ignore it for an ImageBitmap.
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      for (const { layer, image } of cells) {
+        gl.texSubImage3D(
+          gl.TEXTURE_2D_ARRAY,
+          0,
+          0,
+          0,
+          layer,
+          atlasSide,
+          atlasSide,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          image,
+        );
+      }
+      gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
     },
     draw(instances, swaySeconds) {
       clear();

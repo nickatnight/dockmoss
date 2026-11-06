@@ -327,21 +327,38 @@ export interface MossInstance {
   /** 0 for living moss, 1 for moss browned all the way by a shrivel. */
   wither: number;
   sprites: readonly Sprite[];
+  /** The atlas layer that holds the icon's bake. */
+  layer: number;
 }
 
+/** The atlas layer holding an icon's bake, or undefined when it has none. */
+export type LayerOf = (icon: MossyIcon) => number | undefined;
+
+/** An instance for each icon that has a bake, in order. */
 export function mossInstances(
   icons: readonly MossyIcon[],
   pixelRatio: number,
   canvasHeight: number,
+  layerOf: LayerOf,
 ): MossInstance[] {
-  return icons.map(({ tile, seed, overgrowth, overgrown }) => ({
-    box: toDeviceBox(artBox(tile), pixelRatio, canvasHeight),
-    seed,
-    overgrowth,
-    hue: mossHue(seed),
-    wither: 0,
-    sprites: overgrown ? spritesFor(seed) : [],
-  }));
+  return icons.flatMap((icon) => {
+    const layer = layerOf(icon);
+    if (layer === undefined) {
+      return [];
+    }
+    const { tile, seed, overgrowth, overgrown } = icon;
+    return [
+      {
+        box: toDeviceBox(artBox(tile), pixelRatio, canvasHeight),
+        seed,
+        overgrowth,
+        hue: mossHue(seed),
+        wither: 0,
+        sprites: overgrown ? spritesFor(seed) : [],
+        layer,
+      },
+    ];
+  });
 }
 
 export const SHRIVEL_MS = 600;
@@ -417,13 +434,14 @@ export function shrivelInstance(
   progress: number,
   pixelRatio: number,
   canvasHeight: number,
+  layer: number,
 ): MossInstance | null {
   const remaining = 1 - smoothstep(0, 1, progress);
   const overgrowth = mossOvergrowth(icon.overgrowth * remaining);
   if (overgrowth === null) {
     return null;
   }
-  const [instance] = mossInstances([{ ...icon, overgrowth }], pixelRatio, canvasHeight);
+  const [instance] = mossInstances([{ ...icon, overgrowth }], pixelRatio, canvasHeight, () => layer);
   return {
     ...instance,
     wither: smoothstep(0, SHRIVEL_WITHER_END, progress),
@@ -432,21 +450,27 @@ export function shrivelInstance(
 }
 
 /**
- * One frame of every shrivel: each one's instance at `timeMs`, and the
- * shrivels still running after it. A shrivel's clock starts on its first
- * frame; one with nothing left to draw has ended.
+ * One frame of every shrivel: each one's instance at `timeMs`, from the bake
+ * of the icon as last drawn, and the shrivels still running after it. A
+ * shrivel's clock starts on its first frame; one with nothing left to draw,
+ * or no bake, has ended.
  */
 export function shrivelFrame(
   shrivels: Shrivels,
   timeMs: number,
   pixelRatio: number,
   canvasHeight: number,
+  layerOf: LayerOf,
 ): { instances: MossInstance[]; running: Shrivels } {
   const instances: MossInstance[] = [];
   const running = new Map<ItemKey, Shrivel>();
   for (const [key, { icon, startMs }] of shrivels) {
     const start = startMs ?? timeMs;
-    const instance = shrivelInstance(icon, shrivelProgress(start, timeMs), pixelRatio, canvasHeight);
+    const layer = layerOf(icon);
+    const instance =
+      layer === undefined
+        ? null
+        : shrivelInstance(icon, shrivelProgress(start, timeMs), pixelRatio, canvasHeight, layer);
     if (instance !== null) {
       instances.push(instance);
       running.set(key, { icon, startMs: start });

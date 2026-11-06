@@ -42,6 +42,8 @@ import vertexSource from "./moss.vert.glsl?raw";
 
 const TILE = { y: 918, width: 56, height: 56 };
 
+const LAYER_ZERO = (): number => 0;
+
 function item(bundleId: string, x: number): DockItem {
   return { bundleId: bundleId as BundleId, rect: { x, ...TILE } };
 }
@@ -286,7 +288,7 @@ describe("step", () => {
 
 describe("mossInstances", () => {
   it("draws static moss unwithered", () => {
-    const [instance] = mossInstances([icon({ overgrowth: mossy(1), overgrown: true })], 2, 1964);
+    const [instance] = mossInstances([icon({ overgrowth: mossy(1), overgrown: true })], 2, 1964, LAYER_ZERO);
 
     expect(instance.wither).toBe(0);
   });
@@ -296,6 +298,7 @@ describe("mossInstances", () => {
       [icon({ overgrowth: mossy(1), overgrown: true }), icon({ overgrowth: mossy(0.9) })],
       2,
       1964,
+      LAYER_ZERO,
     );
 
     expect(overgrown.sprites).toEqual(spritesFor(3244016102));
@@ -303,11 +306,28 @@ describe("mossInstances", () => {
     expect(patchy.sprites).toEqual([]);
   });
 
+  it("gives each icon the layer of its bake, and leaves out an icon without one", () => {
+    const discord = icon();
+    const chess = icon({ key: "com.apple.Chess#0" as ItemKey, seed: fnv1a32("com.apple.Chess#0") });
+    const telegram = icon({ key: "ru.keepcoder.Telegram#0" as ItemKey, seed: fnv1a32("ru.keepcoder.Telegram#0") });
+    const layers = new Map<ItemKey, number>([
+      [discord.key, 3],
+      [telegram.key, 0],
+    ]);
+
+    const instances = mossInstances([discord, chess, telegram], 2, 1964, ({ key }) => layers.get(key));
+
+    expect(instances.map(({ seed, layer }) => [seed, layer])).toEqual([
+      [discord.seed, 3],
+      [telegram.seed, 0],
+    ]);
+  });
+
   it("puts each icon's art box in canvas device pixels, with its seed and overgrowth", () => {
     const tile = { x: 711, y: 918, width: 47, height: 59 };
     const icons = [icon({ tile, overgrowth: mossy(0.6) })];
 
-    const [instance] = mossInstances(icons, 2, 1964);
+    const [instance] = mossInstances(icons, 2, 1964, LAYER_ZERO);
 
     expect(instance.box).toEqual(toDeviceBox(artBox(tile), 2, 1964));
     expect(instance.seed).toBe(3244016102);
@@ -663,6 +683,7 @@ const layoutInstance: MossInstance = {
   hue: -0.5,
   wither: 0.25,
   sprites: [{ kind: "flower", x: 0.4, y: 0.2, size: 0.15 }],
+  layer: 3,
 };
 
 describe("INSTANCE_ATTRIBUTES", () => {
@@ -844,11 +865,11 @@ describe("shrivelInstance", () => {
   const overgrown = icon({ overgrowth: mossy(1), overgrown: true });
 
   function at(progress: number, from: MossyIcon = overgrown): MossInstance | null {
-    return shrivelInstance(from, progress, 2, 1964);
+    return shrivelInstance(from, progress, 2, 1964, 0);
   }
 
   it("starts from the icon as the canvas last drew it", () => {
-    expect(at(0)).toEqual(mossInstances([overgrown], 2, 1964)[0]);
+    expect(at(0)).toEqual(mossInstances([overgrown], 2, 1964, LAYER_ZERO)[0]);
   });
 
   it("leaves the icon no instance at progress 1, so it is clean", () => {
@@ -931,7 +952,7 @@ describe("shrivelInstance", () => {
 
   it("keeps the icon's tile, seed, hue and sprite kinds", () => {
     const instance = at(0.5);
-    const start = mossInstances([overgrown], 2, 1964)[0];
+    const start = mossInstances([overgrown], 2, 1964, LAYER_ZERO)[0];
 
     expect(instance?.box).toEqual(start.box);
     expect(instance?.seed).toBe(start.seed);
@@ -946,10 +967,23 @@ describe("shrivelFrame", () => {
   const discord = icon({ tile: { x: 760, ...TILE } });
 
   it("starts a shrivel's clock on its first frame and draws it there as last drawn", () => {
-    const { instances, running } = shrivelFrame(new Map([[chessKey, { icon: chess, startMs: null }]]), 5000, 2, 1964);
+    const { instances, running } = shrivelFrame(new Map([[chessKey, { icon: chess, startMs: null }]]), 5000, 2, 1964, LAYER_ZERO);
 
-    expect(instances).toEqual(mossInstances([chess], 2, 1964));
+    expect(instances).toEqual(mossInstances([chess], 2, 1964, LAYER_ZERO));
     expect([...running.values()]).toEqual([{ icon: chess, startMs: 5000 }]);
+  });
+
+  it("draws a shrivel from the bake of the icon as last drawn, and ends one with no bake", () => {
+    const shrivels = new Map([
+      [chessKey, { icon: chess, startMs: 1000 }],
+      [discord.key, { icon: discord, startMs: 1000 }],
+    ]);
+    const layerOf = ({ key, overgrowth }: MossyIcon) => (key === chessKey && overgrowth === 1 ? 5 : undefined);
+
+    const { instances, running } = shrivelFrame(shrivels, 1100, 2, 1964, layerOf);
+
+    expect(instances.map(({ layer }) => layer)).toEqual([5]);
+    expect([...running.keys()]).toEqual([chessKey]);
   });
 
   it("draws concurrent shrivels each at its own progress", () => {
@@ -958,9 +992,9 @@ describe("shrivelFrame", () => {
       [discord.key, { icon: discord, startMs: 1300 }],
     ]);
 
-    const { instances } = shrivelFrame(shrivels, 1300, 2, 1964);
+    const { instances } = shrivelFrame(shrivels, 1300, 2, 1964, LAYER_ZERO);
 
-    expect(instances).toEqual([shrivelInstance(chess, 0.5, 2, 1964), shrivelInstance(discord, 0, 2, 1964)]);
+    expect(instances).toEqual([shrivelInstance(chess, 0.5, 2, 1964, 0), shrivelInstance(discord, 0, 2, 1964, 0)]);
   });
 
   it("drops a shrivel at its end and draws nothing for it", () => {
@@ -969,9 +1003,9 @@ describe("shrivelFrame", () => {
       [discord.key, { icon: discord, startMs: 1300 }],
     ]);
 
-    const { instances, running } = shrivelFrame(shrivels, 1000 + SHRIVEL_MS, 2, 1964);
+    const { instances, running } = shrivelFrame(shrivels, 1000 + SHRIVEL_MS, 2, 1964, LAYER_ZERO);
 
-    expect(instances).toEqual([shrivelInstance(discord, 0.5, 2, 1964)]);
+    expect(instances).toEqual([shrivelInstance(discord, 0.5, 2, 1964, 0)]);
     expect([...running.keys()]).toEqual([discord.key]);
   });
 });

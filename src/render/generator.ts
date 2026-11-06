@@ -96,17 +96,18 @@ export function iconAnchors(seed: number, level: number): Anchor[] {
 interface Layer {
   color: string;
   size: number;
-  dx: number;
-  dy: number;
+  /** Up-left toward the light, in eighths of the anchor's radius, as the prototype has them. */
+  dxEighths: number;
+  dyEighths: number;
   circles: number;
 }
 
 const LAYERS: readonly Layer[] = [
-  { color: "#17381B", size: 1, dx: 0, dy: 0, circles: 5 },
-  { color: "#24521F", size: 0.9, dx: -0.6, dy: -1, circles: 5 },
-  { color: "#3E7E2F", size: 0.74, dx: -1.4, dy: -2.2, circles: 5 },
-  { color: "#6AAE45", size: 0.52, dx: -2.2, dy: -3.4, circles: 4 },
-  { color: "#A6DA6C", size: 0.28, dx: -2.8, dy: -4.2, circles: 3 },
+  { color: "#17381B", size: 1, dxEighths: 0, dyEighths: 0, circles: 5 },
+  { color: "#24521F", size: 0.9, dxEighths: -0.6, dyEighths: -1, circles: 5 },
+  { color: "#3E7E2F", size: 0.74, dxEighths: -1.4, dyEighths: -2.2, circles: 5 },
+  { color: "#6AAE45", size: 0.52, dxEighths: -2.2, dyEighths: -3.4, circles: 4 },
+  { color: "#A6DA6C", size: 0.28, dxEighths: -2.8, dyEighths: -4.2, circles: 3 },
 ];
 
 const OCCLUSION = {
@@ -201,8 +202,8 @@ export function mossShapes(
         const reach = distance * r * 0.55;
         return {
           kind: "circle",
-          x: x + Math.cos(angle) * reach + (layer.dx * r) / 8,
-          y: y + Math.sin(angle) * reach + (layer.dy * r) / 8,
+          x: x + Math.cos(angle) * reach + (layer.dxEighths * r) / 8,
+          y: y + Math.sin(angle) * reach + (layer.dyEighths * r) / 8,
           r: r * layer.size * size,
           paint: fill(layer.color),
         };

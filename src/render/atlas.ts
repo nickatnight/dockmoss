@@ -49,14 +49,15 @@ export interface AtlasPlan {
 export function planAtlas(atlas: Atlas, wanted: readonly BakeRequest[], side: number): AtlasPlan {
   const unique = [...new Map(wanted.map((request) => [request.key, request])).values()];
   const sameSide = atlas.side === side;
+  const previous = sameSide ? atlas : EMPTY_ATLAS;
   const kept = new Map<BakeKey, number>();
   for (const { key } of unique) {
-    const layer = sameSide ? atlas.layers.get(key) : undefined;
+    const layer = previous.layers.get(key);
     if (layer !== undefined) {
       kept.set(key, layer);
     }
   }
-  let capacity = Math.max(sameSide ? atlas.capacity : 0, MIN_LAYERS);
+  let capacity = Math.max(previous.capacity, MIN_LAYERS);
   while (capacity < unique.length) {
     capacity *= 2;
   }

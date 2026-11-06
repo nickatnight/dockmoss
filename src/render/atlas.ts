@@ -1,10 +1,10 @@
 import { type LevelStep, levelStep } from "./generator";
 import type { MossyIcon } from "./model";
 
-export const BAKE_POINTS = 128;
+export const MAX_MAGNIFIED_TILE_POINTS = 128;
 
 export function bakeSide(pixelRatio: number): number {
-  return Math.round(BAKE_POINTS * pixelRatio);
+  return Math.round(MAX_MAGNIFIED_TILE_POINTS * pixelRatio);
 }
 
 export type BakeKey = string & { readonly __brand: "BakeKey" };

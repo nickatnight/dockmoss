@@ -127,33 +127,53 @@ const STALKS = {
   share: 0.35,
 } as const;
 
+interface Cushion {
+  angle: number;
+  distance: number;
+  size: number;
+}
+
+interface Frond {
+  angle: number;
+  reach: number;
+  length: number;
+  light: boolean;
+}
+
+interface Stalk {
+  chance: number;
+  lean: number;
+  height: number;
+  bend: number;
+}
+
 interface AnchorDraws {
-  cushions: [number, number, number][][];
-  fronds: [number, number, number, boolean][];
-  stalk: [number, number, number, number];
+  cushions: Cushion[][];
+  fronds: Frond[];
+  stalk: Stalk;
 }
 
 function anchorDraws(seed: number, id: number): AnchorDraws {
   const random = mulberry32(seed * 100003 + id * 7919 + 1);
   const cushions = LAYERS.map((layer) =>
-    Array.from({ length: layer.circles }, (): [number, number, number] => [
-      random() * 6.283,
-      Math.sqrt(random()),
-      0.45 + 0.55 * random(),
-    ]),
+    Array.from({ length: layer.circles }, (): Cushion => ({
+      angle: random() * 6.283,
+      distance: Math.sqrt(random()),
+      size: 0.45 + 0.55 * random(),
+    })),
   );
-  const fronds = Array.from({ length: 4 }, (): [number, number, number, boolean] => [
-    -Math.PI * (0.1 + 0.8 * random()),
-    0.6 + 0.3 * random(),
-    2 + random() * 3,
-    random() < 0.5,
-  ]);
-  const stalk: [number, number, number, number] = [
-    random(),
-    random() - 0.5,
-    6 + random() * 4,
-    random() - 0.5,
-  ];
+  const fronds = Array.from({ length: 4 }, (): Frond => ({
+    angle: -Math.PI * (0.1 + 0.8 * random()),
+    reach: 0.6 + 0.3 * random(),
+    length: 2 + random() * 3,
+    light: random() < 0.5,
+  }));
+  const stalk: Stalk = {
+    chance: random(),
+    lean: random() - 0.5,
+    height: 6 + random() * 4,
+    bend: random() - 0.5,
+  };
   return { cushions, fronds, stalk };
 }
 
@@ -177,7 +197,7 @@ export function mossShapes(
   );
   const moss: Shape[] = LAYERS.flatMap((layer, layerIndex) =>
     anchors.flatMap(({ x, y, r }, index) =>
-      draws[index].cushions[layerIndex].map(([angle, distance, size]): Shape => {
+      draws[index].cushions[layerIndex].map(({ angle, distance, size }): Shape => {
         const reach = distance * r * 0.55;
         return {
           kind: "circle",
@@ -193,7 +213,7 @@ export function mossShapes(
     if (r < FRONDS.minRadius) {
       return;
     }
-    for (const [angle, reach, length, light] of draws[index].fronds) {
+    for (const { angle, reach, length, light } of draws[index].fronds) {
       const from: Point = [x + Math.cos(angle) * r * reach, y + Math.sin(angle) * r * reach];
       moss.push({
         kind: "path",
@@ -213,7 +233,7 @@ export function mossShapes(
   });
   if (stalkShare > 0) {
     anchors.forEach(({ x: anchorX, y: anchorY, r }, index) => {
-      const [chance, lean, height, bend] = draws[index].stalk;
+      const { chance, lean, height, bend } = draws[index].stalk;
       if (r < STALKS.minRadius || chance > stalkShare) {
         return;
       }

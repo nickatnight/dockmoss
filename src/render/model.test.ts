@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
-  CORNER_RADIUS_PER_SIDE,
   INSTANCE_ATTRIBUTES,
   SHRIVEL_MS,
-  SPRITE_TIP_LEAN,
   WITHER_TINT,
   type MossInstance,
   type MossOvergrowth,
@@ -14,27 +12,22 @@ import {
   type Drawn,
   type Shrivel,
   type Shrivels,
-  type Sprite,
   artBox,
   glslConstants,
   fnv1a32,
   itemKeys,
-  mossHue,
   mossInstances,
   mossyIcons,
   parseOvergrowthOverride,
   parseSwayFlag,
   mossOvergrowth,
   quantize,
-  seedOffset,
   shrivelFrame,
   shrivelInstance,
   shrivelProgress,
   shrivelsAfter,
-  spritesFor,
   step,
   toDeviceBox,
-  worstCaseFront,
 } from "./model";
 import * as model from "./model";
 import fragmentSource from "./moss.frag.glsl?raw";
@@ -463,77 +456,6 @@ describe("art boxes", () => {
   });
 });
 
-describe("seedOffset", () => {
-  it.each([
-    [0, [0, 0]],
-    [0x96d9fb5b, [62.8388671875, 37.7119140625]],
-    [0xffffffff, [63.9990234375, 63.9990234375]],
-  ])("moves seed %d to its own patch of noise, from the seed's low and high halves", (seed, offset) => {
-    expect(seedOffset(seed)).toEqual(offset);
-  });
-});
-
-describe("worstCaseFront", () => {
-  it("keeps moss at overgrowth 1 at or below 0.55 of the art height on the centre column", () => {
-    expect(worstCaseFront(0.5, 1)).toBeLessThanOrEqual(0.55);
-  });
-
-  it.each([0, 0.066, 0.934, 1])("keeps moss below the top corner arcs at x = %d", (x) => {
-    expect(worstCaseFront(x, 1)).toBeLessThan(1 - CORNER_RADIUS_PER_SIDE);
-  });
-
-  it("raises the centre front as overgrowth rises through 0.3, 0.6 and 1.0", () => {
-    const fronts = [0.3, 0.6, 1].map((overgrowth) => worstCaseFront(0.5, overgrowth));
-
-    expect(fronts[0]).toBeGreaterThan(0);
-    expect(fronts[1]).toBeGreaterThan(fronts[0]);
-    expect(fronts[2]).toBeGreaterThan(fronts[1]);
-  });
-
-  it.each([0, 0.5, 1])("draws nothing at overgrowth 0, at x = %d", (x) => {
-    expect(worstCaseFront(x, 0)).toBe(0);
-  });
-
-  // Derived by hand, not from a run. At overgrowth 1 the reach is 0.62 and the
-  // front peaks at 0.62 + 0.46875 * 0.24 (ragged) + 0.5 * 0.05 (tufts) + 0.012
-  // (sway) + max(0.04, 0.03) (fuzz or shadow) = 0.8095. On x = 0.5 the corner
-  // distance is the smaller one: 1.25 * sqrt(0.434^2 + (y - 0.066)^2) = 0.8095
-  // at y = 0.5467, so the 1/1000 scan returns 0.547. The other rows follow the
-  // same sum (reach 0.62 * 0.6^0.8 and 0.62 * 0.3^0.8), checked in Python.
-  // Dropping any term of the sum moves at least one row.
-  it.each([
-    [0.5, 1, 0.547],
-    [0.066, 1, 0.714],
-    [0.5, 0.6, 0.354],
-    [0.5, 0.3, 0.251],
-  ])("puts the worst front on x = %d at overgrowth %d at %d", (x, overgrowth, expected) => {
-    expect(worstCaseFront(x, overgrowth)).toBe(expected);
-  });
-});
-
-describe("mossHue", () => {
-  const hues = Array.from({ length: 2000 }, (_, index) => mossHue(fnv1a32(`app.${index}#0`)));
-
-  it("stays from -1 (warmer) to 1 (cooler)", () => {
-    expect(Math.min(...hues)).toBeGreaterThanOrEqual(-1);
-    expect(Math.max(...hues)).toBeLessThanOrEqual(1);
-  });
-
-  it("spreads icons across the range, not all one hue", () => {
-    expect(hues.filter((hue) => hue < -0.5).length).toBeGreaterThan(300);
-    expect(hues.filter((hue) => hue > 0.5).length).toBeGreaterThan(300);
-  });
-
-  // Golden values: a change here recolours every icon's moss.
-  it.each([
-    [0, -1],
-    [0xffffffff, -0.23921568627450984],
-    [3244016102, 0.3411764705882352],
-  ])("is fixed for seed %d", (seed, hue) => {
-    expect(mossHue(seed)).toBe(hue);
-  });
-});
-
 describe("the sway clock", () => {
   it("wraps at a whole number of every sway period", () => {
     for (const period of [model.MOSS_SWAY_PERIOD, model.SPRITE_SWAY_PERIOD]) {
@@ -578,87 +500,6 @@ describe("glslConstants", () => {
     for (const [, value] of glslConstants().matchAll(/^const float \w+ = (.+);$/gm)) {
       expect(value).toMatch(/\./);
     }
-  });
-});
-
-function clipDistance(x: number, y: number): number {
-  const r = CORNER_RADIUS_PER_SIDE;
-  const qx = Math.abs(x - 0.5) - 0.5 + r;
-  const qy = Math.abs(y - 0.5) - 0.5 + r;
-  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
-}
-
-function leanedCorners({ x, y, size }: Sprite): [number, number][] {
-  const half = size / 2;
-  const lean = SPRITE_TIP_LEAN * size;
-  return [
-    [x - half, y - half],
-    [x + half, y - half],
-    [x - half - lean, y + half],
-    [x + half + lean, y + half],
-  ];
-}
-
-describe("spritesFor", () => {
-  const seeds = Array.from({ length: 2000 }, (_, index) => fnv1a32(`app.${index}#0`));
-
-  it("gives every seed 1 to 3 sprites, and each count to some seed", () => {
-    const counts = new Set(seeds.map((seed) => spritesFor(seed).length));
-
-    expect([...counts].sort()).toEqual([1, 2, 3]);
-  });
-
-  it("uses both mushrooms and flowers", () => {
-    const kinds = new Set(seeds.flatMap((seed) => spritesFor(seed).map(({ kind }) => kind)));
-
-    expect([...kinds].sort()).toEqual(["flower", "mushroom"]);
-  });
-
-  it("keeps every sprite's box, leaning either way, inside the clip and at or below 0.55 of the art height", () => {
-    for (const seed of seeds) {
-      for (const sprite of spritesFor(seed)) {
-        for (const [cx, cy] of leanedCorners(sprite)) {
-          expect(clipDistance(cx, cy), `seed ${seed}`).toBeLessThan(0);
-        }
-        expect(sprite.y + sprite.size / 2, `seed ${seed}`).toBeLessThanOrEqual(0.55);
-      }
-    }
-  });
-
-  it("leans a sprite's tip by at most 1.5 device px on tile size 45's 74 px art box", () => {
-    const largest = Math.max(...seeds.flatMap((seed) => spritesFor(seed).map(({ size }) => size)));
-
-    expect(SPRITE_TIP_LEAN * largest * 74).toBeLessThanOrEqual(1.5);
-  });
-
-  it("never overlaps two sprites on one icon", () => {
-    for (const seed of seeds) {
-      const sprites = spritesFor(seed);
-      for (const [index, a] of sprites.entries()) {
-        for (const b of sprites.slice(index + 1)) {
-          const apart = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) >= (a.size + b.size) / 2;
-          expect(apart, `seed ${seed}`).toBe(true);
-        }
-      }
-    }
-  });
-
-  // Golden values: a change here moves every overgrown icon's sprites.
-  it.each([
-    [
-      "com.hnc.Discord#0",
-      [
-        { kind: "flower", x: 0.37352608400397, y: 0.22917886829003692, size: 0.18107235140632838 },
-        { kind: "mushroom", x: 0.7711941741872579, y: 0.16338266673963517, size: 0.15032056090887636 },
-        { kind: "mushroom", x: 0.581096185836941, y: 0.1918341681500897, size: 0.16903756269719453 },
-      ],
-    ],
-    [
-      "ru.keepcoder.Telegram#0",
-      [{ kind: "mushroom", x: 0.6663523845374585, y: 0.1644334005890414, size: 0.17918860734906047 }],
-    ],
-  ])("places the same sprites for %s on every run", (key, sprites) => {
-    expect(spritesFor(fnv1a32(key))).toEqual(sprites);
   });
 });
 

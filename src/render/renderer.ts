@@ -39,7 +39,7 @@ export interface MossRenderer extends FrameSink {
 export function createRenderer<Image>(options: RendererOptions<Image>): MossRenderer {
   let gl = options.createGl();
   let atlas = EMPTY_ATLAS;
-  const images = new Map<BakeKey, Image>();
+  const cells = new Map<BakeKey, { layer: number; image: Image }>();
   let items: DockItem[] = [];
   let growth: AppGrowth[] = [];
   let latest: MossyIcon[] = [];
@@ -66,9 +66,9 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       bakeSide(pixelRatio),
     );
     atlas = plan.atlas;
-    for (const key of images.keys()) {
+    for (const key of cells.keys()) {
       if (!atlas.layers.has(key)) {
-        images.delete(key);
+        cells.delete(key);
       }
     }
     const baked = plan.bakes.flatMap(({ request, layer }) => {
@@ -76,29 +76,17 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
       if (image === null) {
         return [];
       }
-      images.set(request.key, image);
-      return [{ layer, image }];
+      const cell = { layer, image };
+      cells.set(request.key, cell);
+      return [cell];
     });
     if (plan.reallocate) {
       target.allocate(atlas.capacity, atlas.side);
-      target.upload(
-        [...atlas.layers].flatMap(([key, layer]) => {
-          const image = images.get(key);
-          return image === undefined ? [] : [{ layer, image }];
-        }),
-      );
+      target.upload([...cells.values()]);
     } else if (baked.length > 0) {
       target.upload(baked);
     }
-    return (icon) => {
-      const { key } = bakeRequest(icon, pixelRatio);
-      return images.has(key) ? atlas.layers.get(key) : undefined;
-    };
-  }
-
-  function forgetBakes(): void {
-    atlas = EMPTY_ATLAS;
-    images.clear();
+    return (icon) => cells.get(bakeRequest(icon, pixelRatio).key)?.layer;
   }
 
   function frame(time: number): void {
@@ -164,7 +152,8 @@ export function createRenderer<Image>(options: RendererOptions<Image>): MossRend
     resize,
     contextLost() {
       gl = null;
-      forgetBakes();
+      atlas = EMPTY_ATLAS;
+      cells.clear();
       drawn = "unknown";
       shrivels = new Map();
       lastLoopFrameMs = null;

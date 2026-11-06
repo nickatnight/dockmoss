@@ -19,7 +19,7 @@ const vec3 REC709_LUMA = vec3(0.2126, 0.7152, 0.0722);
 void main() {
   vec2 uv = (gl_FragCoord.xy - v_box.xy) / v_box.zw;
   // A bake's rows run down from its top, GL's up from the bottom.
-  vec4 moss = texture(u_atlas, vec3(uv.x, 1.0 - uv.y, v_layer));
+  vec4 moss = texture(u_atlas, vec3(uv.x, 1.0 - uv.y, v_layer), MIP_LOD_BIAS);
 
   // A shrivel's front eases from above the bake down to its bottom edge.
   float front = v_remaining * (1.0 + SHRIVEL_FRONT_WIDTH);

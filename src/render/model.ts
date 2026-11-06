@@ -170,7 +170,7 @@ function glslFloat(value: number): string {
 
 /** The shader's constants, as GLSL `const` declarations, one per line. */
 export function glslConstants(): string {
-  const floats = { SHRIVEL_FRONT_WIDTH };
+  const floats = { MIP_LOD_BIAS, SHRIVEL_FRONT_WIDTH };
   const vectors = { WITHER_TINT };
   return [
     ...Object.entries(floats).map(([name, value]) => `const float ${name} = ${glslFloat(value)};`),
@@ -226,6 +226,13 @@ export function mossInstances(
 export const SHRIVEL_MS = 600;
 export const SHRIVEL_WITHER_END = 0.4;
 export const WITHER_TINT = [1, 0.74, 0.42] as const;
+/**
+ * Samples the atlas half a mip level sharper than the GPU would pick. At 0 the
+ * moss kept about 0.7 of the high-frequency detail of a bake made at the drawn
+ * size, resting and magnified, and read soft beside the icon; at -0.5 about
+ * 0.9; at -1 it went past the ideal at rest (aliasing). Job 017, tools/look/sharp.mjs.
+ */
+export const MIP_LOD_BIAS = -0.5;
 /** How soft a shrivel's front is, as a share of the bake's height. */
 export const SHRIVEL_FRONT_WIDTH = 0.06;
 

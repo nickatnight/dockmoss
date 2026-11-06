@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { LogicalRect } from "../ipc";
 import {
+  FLOWER_CENTRE,
   ICON_CORNER_RADIUS,
   ICON_UNITS,
   LEVEL_STEPS,
+  MUSHROOM_CAP,
+  MUSHROOM_SHADOW,
   OVERHANG_UNITS,
   TILE_UNITS,
   type Anchor,
@@ -353,10 +356,10 @@ describe("props", () => {
       return shape?.kind === "ellipse" ? [shape.x, shape.y] : [Number.NaN, Number.NaN];
     };
 
-    for (const color of ["#C8553D", "#E8833A"]) {
+    for (const color of [MUSHROOM_CAP, FLOWER_CENTRE]) {
       expect(width(low, color) / width(full, color)).toBeCloseTo(0.7, 6);
     }
-    expect(foot(low, "#17381B")).toEqual(foot(full, "#17381B"));
+    expect(foot(low, MUSHROOM_SHADOW)).toEqual(foot(full, MUSHROOM_SHADOW));
   });
 });
 

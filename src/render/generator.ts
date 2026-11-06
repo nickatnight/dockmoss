@@ -266,8 +266,12 @@ export function mossShapes(
 
 const degrees = (angle: number): number => (angle * Math.PI) / 180;
 
+export const MUSHROOM_SHADOW = "#17381B";
+export const MUSHROOM_CAP = "#C8553D";
+export const FLOWER_CENTRE = "#E8833A";
+
 const MUSHROOM: readonly Shape[] = [
-  { kind: "ellipse", x: 0, y: 0, rx: 7, ry: 2, rotation: 0, paint: fill("#17381B", 0.55) },
+  { kind: "ellipse", x: 0, y: 0, rx: 7, ry: 2, rotation: 0, paint: fill(MUSHROOM_SHADOW, 0.55) },
   {
     kind: "path",
     from: [-2.6, 0],
@@ -300,7 +304,7 @@ const MUSHROOM: readonly Shape[] = [
       { kind: "quad", control: [0, -16], to: [-10.5, -13.5] },
     ],
     closed: true,
-    paint: fill("#C8553D"),
+    paint: fill(MUSHROOM_CAP),
   },
   {
     kind: "path",
@@ -345,7 +349,7 @@ const FLOWER: readonly Shape[] = [
       paint: { kind: "fillAndStroke", fill: "#F7D54A", stroke: "#D9A92B", width: 0.3 },
     };
   }),
-  { kind: "circle", x: 0, y: -PETAL_CENTRE, r: 2, paint: fill("#E8833A") },
+  { kind: "circle", x: 0, y: -PETAL_CENTRE, r: 2, paint: fill(FLOWER_CENTRE) },
   { kind: "circle", x: -0.6, y: -PETAL_CENTRE - 0.6, r: 0.7, paint: fill("#F6B26B") },
 ];
 

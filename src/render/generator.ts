@@ -89,6 +89,14 @@ export interface Anchor {
 const ANCHOR_GROWTH_SPAN = 0.2;
 /** An anchor shows once it has this share of its size. */
 const ANCHOR_MIN_GROWTH = 0.04;
+/**
+ * The bottom row's thresholds: FIRST_ROW_START, plus up to 0.1 at random, plus
+ * FIRST_ROW_SPREAD per unit away from x = 30. The prototype's (0.08 and 1/220)
+ * left one tuft at level 0.25. These grow a thin strip along the whole bottom
+ * edge by then (look check round 1). Every other row keeps the prototype's.
+ */
+const FIRST_ROW_START = 0.04;
+const FIRST_ROW_SPREAD = 1 / 1000;
 
 /**
  * The moss anchors visible at `level`: rows along the bottom edge, the left and
@@ -107,13 +115,16 @@ export function iconAnchors(seed: number, level: number): Anchor[] {
       anchors.push({ id, x, y, r: r * growth });
     }
   };
-  // Five rows along the bottom, spreading out from the bottom left.
+  // Five rows along the bottom, spreading out from the bottom left, the first of them early.
   for (let row = 0; row < 5; row++) {
     for (let column = 0; column < 20; column++) {
       const x = -2 + column * 6 + random() * 3;
       const y = 111 - row * 7 + random() * 4 - 2;
       const r = 5.5 + random() * 3.5 + (row === 0 ? 1 : 0);
-      const threshold = 0.08 + row * 0.17 + random() * 0.1 + Math.abs(x - 30) / 220;
+      const threshold =
+        row === 0
+          ? FIRST_ROW_START + random() * 0.1 + Math.abs(x - 30) * FIRST_ROW_SPREAD
+          : 0.08 + row * 0.17 + random() * 0.1 + Math.abs(x - 30) / 220;
       add(x, y, r, threshold);
     }
   }

@@ -154,8 +154,8 @@ describe("drawScene", () => {
     ]);
   });
 
-  it("paints the prototype's seed at level 0.25 as the prototype does: 12 shadows, then 132 cushions and 8 fronds", () => {
-    const scene = mossScene({ seed: 4271, step: 6 as LevelStep, overgrown: false });
+  it("paints the prototype's seed at level 1 as the prototype does: 302 shadows, then 3,322 cushions, 536 fronds and 47 stalks", () => {
+    const scene = mossScene({ seed: 4271, step: 24 as LevelStep, overgrown: false });
     const context = new RecordingContext();
 
     drawScene(context, scene, 256);
@@ -165,10 +165,11 @@ describe("drawScene", () => {
     const count = (name: string, from: number, to: number): number =>
       names.slice(from, to).filter((other) => other === name).length;
     expect(names.slice(2, 6)).toEqual(["save", "beginPath", "roundRect", "clip"]);
-    expect(count("fill", 0, clipEnd)).toBe(12);
-    expect(count("fill", clipEnd, names.length)).toBe(132);
-    expect(count("stroke", clipEnd, names.length)).toBe(8);
-    expect(count("beginPath", clipEnd, names.length)).toBe(140);
+    expect(count("fill", 0, clipEnd)).toBe(302);
+    // Cushions and the stalks' capsules are filled, fronds and stalks stroked.
+    expect(count("fill", clipEnd, names.length)).toBe(3322 + 47);
+    expect(count("stroke", clipEnd, names.length)).toBe(536 + 47);
+    expect(count("beginPath", clipEnd, names.length)).toBe(3322 + 536 + 47 + 47);
     // Each shape in its own colour, in the scene's order.
     const colours = context.commands.flatMap(([name, value]) =>
       name === "fillStyle" || name === "strokeStyle" ? [value] : [],

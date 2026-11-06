@@ -94,14 +94,14 @@ function insideIcon(x: number, y: number): boolean {
   return Math.hypot(x - nearest(x), y - nearest(y)) <= ICON_CORNER_RADIUS;
 }
 
-/** How many of the icon's unit cells, inside its rounded rect and its top `rows`, have their centre under a moss circle. */
-function coveredCells(shapes: readonly Shape[], rows = ICON_UNITS): number {
+/** The icon's unit cells, row by row: 1 where a cell's centre is inside the rounded rect and under a moss circle. */
+function coverGrid(shapes: readonly Shape[]): Uint8Array {
   const covered = new Uint8Array(ICON_UNITS * ICON_UNITS);
   for (const { x, y, r } of circles(shapes)) {
     const fromColumn = Math.max(0, Math.floor(x - r));
     const toColumn = Math.min(ICON_UNITS - 1, Math.ceil(x + r));
     const fromRow = Math.max(0, Math.floor(y - r));
-    const toRow = Math.min(rows - 1, Math.ceil(y + r));
+    const toRow = Math.min(ICON_UNITS - 1, Math.ceil(y + r));
     for (let row = fromRow; row <= toRow; row++) {
       for (let column = fromColumn; column <= toColumn; column++) {
         if (Math.hypot(column + 0.5 - x, row + 0.5 - y) <= r && insideIcon(column + 0.5, row + 0.5)) {
@@ -110,7 +110,40 @@ function coveredCells(shapes: readonly Shape[], rows = ICON_UNITS): number {
       }
     }
   }
-  return covered.reduce((sum, cell) => sum + cell, 0);
+  return covered;
+}
+
+/** How many of the icon's unit cells in its top `rows` have moss. */
+function coveredCells(shapes: readonly Shape[], rows = ICON_UNITS): number {
+  return coverGrid(shapes)
+    .subarray(0, rows * ICON_UNITS)
+    .reduce((sum, cell) => sum + cell, 0);
+}
+
+/** The bottom edge: the icon's last 12 rows. */
+const EDGE_ROWS = 12;
+
+/** The share of the icon's columns along its bottom edge that have moss somewhere in that edge. */
+function bottomEdgeShare(shapes: readonly Shape[]): number {
+  const grid = coverGrid(shapes);
+  let columns = 0;
+  let mossy = 0;
+  for (let column = 0; column < ICON_UNITS; column++) {
+    const rows = Array.from({ length: EDGE_ROWS }, (_, index) => ICON_UNITS - 1 - index);
+    if (rows.some((row) => insideIcon(column + 0.5, row + 0.5))) {
+      columns++;
+      if (rows.some((row) => grid[row * ICON_UNITS + column] === 1)) {
+        mossy++;
+      }
+    }
+  }
+  return mossy / columns;
+}
+
+/** The highest row with moss, or ICON_UNITS for none. */
+function highestMossRow(shapes: readonly Shape[]): number {
+  const index = coverGrid(shapes).indexOf(1);
+  return index === -1 ? ICON_UNITS : Math.floor(index / ICON_UNITS);
 }
 
 describe("levelStep", () => {
@@ -133,18 +166,13 @@ describe("levelStep", () => {
 
 // Expected values come from running moss-prototype.js itself at the same seed and level.
 describe("iconAnchors, against the prototype", () => {
-  it.each([
-    [1, 151],
-    [0.75, 91],
-    [0.5, 37],
-    [0.25, 6],
-  ])("shows the prototype's anchors at level %d: %d of them", (level, count) => {
-    expect(iconAnchors(PROTOTYPE_SEED, level)).toHaveLength(count);
+  // Below level 1 the bottom row grows earlier than the prototype's (look check round 1).
+  it("shows the prototype's 151 anchors at level 1", () => {
+    expect(iconAnchors(PROTOTYPE_SEED, 1)).toHaveLength(151);
   });
 
-  it("places and sizes them as the prototype does", () => {
+  it("places and sizes them as the prototype does at level 1", () => {
     const full = iconAnchors(PROTOTYPE_SEED, 1);
-    const quarter = iconAnchors(PROTOTYPE_SEED, 0.25);
 
     expect(full[0]).toEqual({ id: 0, x: 0.25908533413894475, y: 109.71585649810731, r: 6.840293253771961 });
     expect(full[full.length - 1]).toEqual({
@@ -153,7 +181,6 @@ describe("iconAnchors, against the prototype", () => {
       y: 79.72674252092838,
       r: 5.920865388121456,
     });
-    expect(quarter[0]).toEqual({ id: 2, x: 12.655066722072661, y: 112.698844906874, r: 3.2188956178591703 });
   });
 });
 
@@ -167,34 +194,57 @@ describe("mossScene, against the prototype", () => {
     expect(strokes(scene.moss, "#8A5A2B")).toHaveLength(47);
   });
 
-  it("starts with the prototype's shadow, cushion, frond and stalk", () => {
-    const quarter = mossScene({ seed: PROTOTYPE_SEED, step: step(0.25), overgrown: false });
+  it("starts with the prototype's shadow, cushion, frond and stalk at level 1", () => {
     const full = mossScene({ seed: PROTOTYPE_SEED, step: step(1), overgrown: false });
 
-    expect(quarter.occlusion[0]).toEqual({
+    expect(full.occlusion[0]).toEqual({
       kind: "circle",
-      x: 13.655066722072661,
-      y: 114.198844906874,
-      r: 4.34550908410988,
+      x: 1.2590853341389447,
+      y: 111.21585649810731,
+      r: 9.234395892592147,
       paint: { kind: "fill", color: "#000", alpha: 0.07 },
     });
     // The prototype writes these to one decimal.
-    const [cushion] = circles(quarter.moss);
+    const [cushion] = circles(full.moss);
     expect(cushion.paint).toEqual({ kind: "fill", color: "#17381B", alpha: 1 });
     expect([cushion.x, cushion.y, cushion.r].map((value) => value.toFixed(1))).toEqual([
-      "14.0",
-      "112.6",
-      "2.7",
+      "3.0",
+      "107.4",
+      "5.2",
     ]);
 
-    const [frond] = strokes(quarter.moss, "#7DBE52");
-    expect(prototypePath(frond)).toBe("M14.2 110.4l-1.3 -1.7");
+    const [frond] = strokes(full.moss, "#A6DA6C");
+    expect(prototypePath(frond)).toBe("M2.9 104.2l2.0 -4.2");
 
     const [stalk] = strokes(full.moss, "#8A5A2B");
     expect(prototypePath(stalk)).toBe("M6.6 108.3q-1.4 -3.8 -2.1 -7.5");
     const capsule = full.moss[full.moss.indexOf(stalk) + 1];
     expect(capsule).toMatchObject({ kind: "ellipse", rx: 1.1, ry: 1.9, paint: { color: "#C98F45" } });
   });
+});
+
+// The prototype's bottom row left one tuft at level 0.25, over 27 to 37% of the
+// bottom edge's columns; its own level 0.5, which reads as a strip, covered 84 to
+// 92%. Look check round 1 asked for a thin strip at 0.25: most of the edge, at
+// least 80% of it, so a tuft fails by far, and none of it above the bottom quarter.
+const FUZZ_EDGE_SHARE = 0.8;
+const FUZZ_TOP_ROW = ICON_UNITS * 0.75;
+
+describe("Fuzz", () => {
+  it.each(SEEDS)("draws a strip along most of the bottom edge at level 0.25 (seed %d)", (seed) => {
+    const { moss } = mossScene({ seed, step: step(0.25), overgrown: false });
+
+    expect(bottomEdgeShare(moss)).toBeGreaterThanOrEqual(FUZZ_EDGE_SHARE);
+  });
+
+  it.each(SEEDS)(
+    "keeps that strip thin: nothing above the bottom quarter at level 0.25 (seed %d)",
+    (seed) => {
+      const { moss } = mossScene({ seed, step: step(0.25), overgrown: false });
+
+      expect(highestMossRow(moss)).toBeGreaterThanOrEqual(FUZZ_TOP_ROW);
+    },
+  );
 });
 
 describe("growth across the 24 steps", () => {

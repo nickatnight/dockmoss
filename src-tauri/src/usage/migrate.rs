@@ -333,13 +333,17 @@ fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Resu
     }
 }
 
-/// Old files larger than this are never compared; the new one is kept.
-const MAX_COMPARED_BYTES: u64 = 64 * 1024 * 1024;
+/// The launch log's read cap, the larger of the two files read back. Old
+/// files larger than this are never compared; the new one is kept.
+const MAX_COMPARED_BYTES: u64 = super::store::MAX_FILE_BYTES;
 
 /// Every byte of such a new file is also in the old one, so copying the old
-/// file again loses nothing.
+/// file again loses nothing. A new file that is already a whole JSON document
+/// is not a copy cut short, whatever the old file holds after it.
 fn is_interrupted_copy(new: &[u8], old: &[u8]) -> bool {
-    new.len() < old.len() && old.starts_with(new)
+    new.len() < old.len()
+        && old.starts_with(new)
+        && serde_json::from_slice::<serde_json::Value>(new).is_err()
 }
 
 fn interrupted_copy_at(old: &Path, new: &Path) -> io::Result<bool> {
@@ -1203,8 +1207,14 @@ mod tests {
 
     #[test]
     fn only_a_new_file_that_is_a_strict_start_of_the_old_one_is_an_interrupted_copy() {
-        let cases: [(&str, &[u8], &[u8], bool); 6] = [
+        let cases: [(&str, &[u8], &[u8], bool); 7] = [
             ("nothing copied yet", b"", b"{\"version\":1}", true),
+            (
+                "a complete document, with junk after it in the old file",
+                b"{\"version\":1}",
+                b"{\"version\":1}x",
+                false,
+            ),
             ("cut short", b"{\"vers", b"{\"version\":1}", true),
             (
                 "the whole file",

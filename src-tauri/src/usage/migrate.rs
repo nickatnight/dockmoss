@@ -225,37 +225,36 @@ fn move_old_data_with(
                 let moved = move_with(&old_dir.join(name), &new_dir.join(name), &link);
                 report.record(name, moved);
             }
-            Step::KeepNew(name)
-                if !new_dir_ready
-                    && interrupted_copy_at(&old_dir.join(name), &new_dir.join(name))
-                        .unwrap_or(false) =>
-            {
-                report.failed.push(name);
-                tracing::warn!(
-                    file = name,
-                    "an interrupted copy of this old data file is not redone: the app data folder is not usable; left in the old folder"
-                );
-            }
-            Step::KeepNew(name)
-                if interrupted_copy_at(&old_dir.join(name), &new_dir.join(name))
-                    .unwrap_or(false) =>
-            {
-                tracing::info!(
-                    file = name,
-                    "an interrupted copy of this old data file is redone"
-                );
-                let moved = fs::remove_file(new_dir.join(name)).map_or_else(
-                    |error| Moved::No(error.kind()),
-                    |()| move_with(&old_dir.join(name), &new_dir.join(name), &link),
-                );
-                report.record(name, moved);
-            }
             Step::KeepNew(name) => {
-                report.kept += 1;
-                tracing::info!(
-                    file = name,
-                    "the new app folder already has an entry with this name; the old file is left"
-                );
+                let (old, new) = (old_dir.join(name), new_dir.join(name));
+                let interrupted = interrupted_copy_at(&old, &new).unwrap_or(false);
+                match (interrupted, new_dir_ready) {
+                    (false, _) => {
+                        report.kept += 1;
+                        tracing::info!(
+                            file = name,
+                            "the new app folder already has an entry with this name; the old file is left"
+                        );
+                    }
+                    (true, false) => {
+                        report.failed.push(name);
+                        tracing::warn!(
+                            file = name,
+                            "an interrupted copy of this old data file is not redone: the app data folder is not usable; left in the old folder"
+                        );
+                    }
+                    (true, true) => {
+                        tracing::info!(
+                            file = name,
+                            "an interrupted copy of this old data file is redone"
+                        );
+                        let moved = fs::remove_file(&new).map_or_else(
+                            |error| Moved::No(error.kind()),
+                            |()| move_with(&old, &new, &link),
+                        );
+                        report.record(name, moved);
+                    }
+                }
             }
             Step::LeaveNotARegularFile(name) => {
                 report.skipped += 1;

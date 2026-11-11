@@ -127,6 +127,34 @@ impl MoveReport {
         }
     }
 
+    fn record(&mut self, name: &'static str, moved: Moved) {
+        match moved {
+            Moved::Yes => self.moved += 1,
+            Moved::Copied => {
+                self.moved += 1;
+                tracing::info!(
+                    file = name,
+                    "old data file moved by copy: this volume makes no hard links"
+                );
+            }
+            Moved::OldCopyLeft(kind) => {
+                self.moved += 1;
+                tracing::warn!(file = name, %kind, "old data file moved; its old copy was not removed");
+            }
+            Moved::NameTaken => {
+                self.kept += 1;
+                tracing::info!(
+                    file = name,
+                    "the new app folder took this name first; the old file is left"
+                );
+            }
+            Moved::No(kind) => {
+                self.failed.push(name);
+                tracing::warn!(file = name, %kind, "old data file not moved; left in the old folder");
+            }
+        }
+    }
+
     /// `info` when this start moved, found or removed something; a start
     /// with nothing left to do logs only at `debug`.
     pub fn worth_reporting(&self) -> bool {
@@ -161,6 +189,14 @@ pub fn old_data_dir(new_dir: &Path) -> Option<PathBuf> {
 /// `old_dir` if it is empty. Logs a `warn` naming each file left behind,
 /// never a path. Running it again finds nothing left to do.
 pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
+    move_old_data_with(old_dir, new_dir, |old, new| fs::hard_link(old, new))
+}
+
+fn move_old_data_with(
+    old_dir: &Path,
+    new_dir: &Path,
+    link: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> MoveReport {
     let new_dir_ready = private_dir(new_dir)
         .inspect_err(|error| {
             tracing::warn!(kind = %error.kind(), "app data folder not made private");
@@ -187,31 +223,24 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
                     "old data file not moved: the app data folder is not usable"
                 );
             }
-            Step::Move(name) => match move_file(&old_dir.join(name), &new_dir.join(name)) {
-                Moved::Yes => report.moved += 1,
-                Moved::Copied => {
-                    report.moved += 1;
-                    tracing::info!(
-                        file = name,
-                        "old data file moved by copy: this volume makes no hard links"
-                    );
-                }
-                Moved::OldCopyLeft(kind) => {
-                    report.moved += 1;
-                    tracing::warn!(file = name, %kind, "old data file moved; its old copy was not removed");
-                }
-                Moved::NameTaken => {
-                    report.kept += 1;
-                    tracing::info!(
-                        file = name,
-                        "the new app folder took this name first; the old file is left"
-                    );
-                }
-                Moved::No(kind) => {
-                    report.failed.push(name);
-                    tracing::warn!(file = name, %kind, "old data file not moved; left in the old folder");
-                }
-            },
+            Step::Move(name) => {
+                let moved = move_with(&old_dir.join(name), &new_dir.join(name), &link);
+                report.record(name, moved);
+            }
+            Step::KeepNew(name)
+                if new_dir_ready
+                    && interrupted_copy_at(&old_dir.join(name), &new_dir.join(name)) =>
+            {
+                tracing::info!(
+                    file = name,
+                    "an interrupted copy of this old data file is redone"
+                );
+                let moved = fs::remove_file(new_dir.join(name)).map_or_else(
+                    |error| Moved::No(error.kind()),
+                    |()| move_with(&old_dir.join(name), &new_dir.join(name), &link),
+                );
+                report.record(name, moved);
+            }
             Step::KeepNew(name) => {
                 report.kept += 1;
                 tracing::info!(
@@ -240,7 +269,7 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
     report
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Moved {
     Yes,
     Copied,
@@ -273,10 +302,6 @@ fn link_error(error: &io::Error) -> LinkError {
     }
 }
 
-fn move_file(old: &Path, new: &Path) -> Moved {
-    move_with(old, new, |old, new| fs::hard_link(old, new))
-}
-
 fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Result<()>) -> Moved {
     match link(old, new) {
         Ok(()) => match fs::remove_file(old) {
@@ -302,8 +327,44 @@ fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Resu
 /// even a name made after the plan (macOS's exclusive rename,
 /// `RENAME_EXCL`, is refused on exFAT too). A copy that fails removes the
 /// file it made, so the next start retries the move.
+/// Old files larger than this are never compared; the new one is kept.
+const MAX_COMPARED_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Every byte of such a new file is also in the old one, so copying the old
+/// file again loses nothing.
+fn is_interrupted_copy(new: &[u8], old: &[u8]) -> bool {
+    new.len() < old.len() && old.starts_with(new)
+}
+
+fn interrupted_copy_at(old: &Path, new: &Path) -> bool {
+    let regular_len = |path: &Path| {
+        fs::symlink_metadata(path)
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .map(|metadata| metadata.len())
+    };
+    let (Some(old_len), Some(new_len)) = (regular_len(old), regular_len(new)) else {
+        return false;
+    };
+    if new_len >= old_len || old_len > MAX_COMPARED_BYTES {
+        return false;
+    }
+    match (fs::read(new), fs::read(old)) {
+        (Ok(new), Ok(old)) => is_interrupted_copy(&new, &old),
+        _ => false,
+    }
+}
+
 fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
-    let mut source = fs::File::open(old)?;
+    // As the plan's `symlink_metadata` check: no link is followed, and a
+    // FIFO swapped in cannot block the open.
+    let mut source = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(old)?;
+    if !source.metadata()?.is_file() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
     let mut target = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -321,14 +382,13 @@ fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::Path;
 
-    use std::io;
-
     use super::{
         Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, OldFolder, Step,
-        link_error, move_old_data, move_with, plan_move,
+        is_interrupted_copy, link_error, move_old_data, move_old_data_with, move_with, plan_move,
     };
 
     fn listing(entries: &[(&'static str, Entry)]) -> Listing {
@@ -894,9 +954,10 @@ mod tests {
         write(&folders.old, "launch_log.json", "old");
         write(&folders.new, "launch_log.json", "taken");
 
-        let moved = super::move_file(
+        let moved = move_with(
             &folders.old.join("launch_log.json"),
             &folders.new.join("launch_log.json"),
+            |old, new| fs::hard_link(old, new),
         );
 
         assert!(matches!(moved, super::Moved::NameTaken));
@@ -1113,5 +1174,72 @@ mod tests {
         for (case, report, expected) in cases {
             assert_eq!(report.left_behind_data(), expected, "{case}");
         }
+    }
+
+    #[test]
+    fn only_a_new_file_that_is_a_strict_start_of_the_old_one_is_an_interrupted_copy() {
+        let cases: [(&str, &[u8], &[u8], bool); 6] = [
+            ("nothing copied yet", b"", b"{\"version\":1}", true),
+            ("cut short", b"{\"vers", b"{\"version\":1}", true),
+            (
+                "the whole file",
+                b"{\"version\":1}",
+                b"{\"version\":1}",
+                false,
+            ),
+            (
+                "a longer file",
+                b"{\"version\":1} ",
+                b"{\"version\":1}",
+                false,
+            ),
+            (
+                "a shorter file that differs",
+                b"{\"vX",
+                b"{\"version\":1}",
+                false,
+            ),
+            ("both empty", b"", b"", false),
+        ];
+        for (case, new, old, expected) in cases {
+            assert_eq!(is_interrupted_copy(new, old), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn a_copy_cut_short_by_a_crash_is_copied_again_at_the_next_start() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "the whole history");
+        write(&folders.new, "launch_log.json", "the whole");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!(read(&folders.new, "launch_log.json"), "the whole history");
+        assert!(!folders.old.join("launch_log.json").exists());
+        assert_eq!((report.moved, report.kept, report.failed.len()), (1, 0, 0));
+        assert_eq!(report.left_behind_data(), None);
+    }
+
+    #[test]
+    fn a_link_at_the_old_name_is_never_followed_by_the_copy() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "elsewhere", "not user data");
+        symlink(
+            folders.old.join("elsewhere"),
+            folders.old.join("launch_log.json"),
+        )
+        .expect("link");
+
+        let moved = move_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            cannot_link,
+        );
+
+        assert!(matches!(moved, Moved::No(_)), "{moved:?}");
+        assert!(!folders.new.join("launch_log.json").exists());
+        assert_eq!(read(&folders.old, "elsewhere"), "not user data");
     }
 }

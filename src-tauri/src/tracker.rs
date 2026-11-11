@@ -21,6 +21,9 @@ const REVEAL_EDGE: f64 = 4.0;
 const REVEAL_WAIT: Duration = Duration::from_secs(1);
 const LAUNCH_SETTLE: Duration = Duration::from_secs(1);
 const LAUNCH_HOLD_CAP: Duration = Duration::from_secs(2);
+/// One app's will-launch and did-launch arrive 35 to 60 ms apart (job 019's
+/// spike), so a launch this soon after the hold's start is the same app.
+const SAME_LAUNCH: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -273,7 +276,11 @@ pub struct Activity {
 
 impl Activity {
     pub fn app_launching(&mut self, at: Instant) {
-        if !self.holding_for_launch(at) {
+        let same_launch = self.holding_for_launch(at)
+            && self
+                .launch_hold_started
+                .is_some_and(|started| at.saturating_duration_since(started) < SAME_LAUNCH);
+        if !same_launch {
             self.launch_hold_started = Some(at);
         }
     }
@@ -1803,7 +1810,54 @@ mod tests {
     }
 
     #[test]
-    fn launches_during_a_hold_do_not_extend_it() {
+    fn a_later_launch_holds_until_two_seconds_after_its_own_notification() {
+        let step = |case, launches_ms: Vec<u64>, sent, at_ms, expected| LaunchStep {
+            case,
+            launches_ms,
+            sent,
+            at_ms,
+            expected,
+        };
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step("app A launches", vec![1000], true, 1100, PollRate::Fast),
+                step("A's lift ends", vec![], true, 1690, PollRate::Fast),
+                step(
+                    "app B launches 1.5 s after A, inside A's hold",
+                    vec![2500],
+                    true,
+                    2540,
+                    PollRate::Fast,
+                ),
+                step(
+                    "B's lift, past A's cap at 3000",
+                    vec![],
+                    true,
+                    3100,
+                    PollRate::Fast,
+                ),
+                step("the Dock keeps moving", vec![], true, 4000, PollRate::Fast),
+                step(
+                    "two seconds after B's notification",
+                    vec![],
+                    true,
+                    4500,
+                    PollRate::Fast,
+                ),
+                step(
+                    "past B's cap, though the Dock still moves",
+                    vec![],
+                    true,
+                    4501,
+                    PollRate::Slow,
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn one_apps_will_and_did_launch_count_as_one_launch() {
         let step = |case, launches_ms: Vec<u64>, sent, at_ms, expected| LaunchStep {
             case,
             launches_ms,
@@ -1815,26 +1869,24 @@ mod tests {
             PollRate::Slow,
             [
                 step(
-                    "will-launch, then did-launch for the same app",
+                    "will-launch, then did-launch 40 ms later",
                     vec![1000, 1040],
-                    true,
+                    false,
                     1050,
                     PollRate::Fast,
                 ),
-                step("the Dock moves", vec![], true, 1600, PollRate::Fast),
-                step("the Dock moves", vec![], true, 2200, PollRate::Fast),
                 step(
-                    "another app launches while the Dock still moves",
-                    vec![2500],
-                    true,
-                    2510,
+                    "one second after will-launch, nothing moving",
+                    vec![],
+                    false,
+                    2000,
                     PollRate::Fast,
                 ),
                 step(
-                    "two seconds after the first launch, not the last",
+                    "the hold settles from will-launch, not did-launch",
                     vec![],
-                    true,
-                    3001,
+                    false,
+                    2001,
                     PollRate::Slow,
                 ),
             ],
@@ -1842,19 +1894,26 @@ mod tests {
         run_launch_steps(
             PollRate::Slow,
             [
-                step("a launch", vec![1000], false, 1010, PollRate::Fast),
                 step(
-                    "a second launch inside the hold, nothing moving",
-                    vec![1900],
-                    false,
-                    1910,
+                    "will-launch, then did-launch 240 ms later",
+                    vec![1000, 1240],
+                    true,
+                    1250,
+                    PollRate::Fast,
+                ),
+                step("the Dock moves", vec![], true, 2500, PollRate::Fast),
+                step(
+                    "two seconds after will-launch",
+                    vec![],
+                    true,
+                    3000,
                     PollRate::Fast,
                 ),
                 step(
-                    "one second after the first launch: ended, not extended",
+                    "past the cap of will-launch: the pair cost one hold",
                     vec![],
-                    false,
-                    2001,
+                    true,
+                    3001,
                     PollRate::Slow,
                 ),
             ],

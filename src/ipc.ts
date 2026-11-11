@@ -32,7 +32,8 @@ export type ErrorKind =
   | "usage_stopped"
   | "invalid_settings"
   | "settings_not_saved"
-  | "login_item_not_changed";
+  | "login_item_not_changed"
+  | "login_status_unknown";
 
 export interface Thresholds {
   fuzz: number;

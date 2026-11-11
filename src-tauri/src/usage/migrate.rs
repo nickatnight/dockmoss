@@ -114,7 +114,6 @@ impl MoveReport {
         (!self.left_behind(name)).then(|| dir.join(name))
     }
 
-    /// Usage history first, then settings.
     pub fn left_behind_data(&self) -> Vec<LeftBehind> {
         [
             (LAUNCH_LOG_FILE, LeftBehind::UsageHistory),
@@ -333,13 +332,8 @@ fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Resu
     }
 }
 
-/// The launch log's read cap, the larger of the two files read back. Old
-/// files larger than this are never compared; the new one is kept.
 const MAX_COMPARED_BYTES: u64 = super::store::MAX_FILE_BYTES;
 
-/// Every byte of such a new file is also in the old one, so copying the old
-/// file again loses nothing. A new file that is already a whole JSON document
-/// is not a copy cut short, whatever the old file holds after it.
 fn is_interrupted_copy(new: &[u8], old: &[u8]) -> bool {
     new.len() < old.len()
         && old.starts_with(new)
@@ -363,8 +357,7 @@ fn interrupted_copy_at(old: &Path, new: &Path) -> io::Result<bool> {
     Ok(is_interrupted_copy(&new_bytes, &old_bytes))
 }
 
-/// As the plan's `symlink_metadata` check: no link is followed, a FIFO
-/// swapped in cannot block the open, and only a regular file is read.
+/// `O_NONBLOCK`, so a FIFO swapped in cannot block the open.
 fn open_regular(path: &Path) -> io::Result<fs::File> {
     let file = fs::OpenOptions::new()
         .read(true)
@@ -377,10 +370,7 @@ fn open_regular(path: &Path) -> io::Result<fs::File> {
     }
 }
 
-/// `create_new` refuses a name that exists, so the copy never replaces one,
-/// even a name made after the plan (macOS's exclusive rename,
-/// `RENAME_EXCL`, is refused on exFAT too). A copy that fails removes the
-/// file it made, so the next start retries the move.
+/// macOS's exclusive rename, `RENAME_EXCL`, is refused on exFAT too.
 fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
     copy_into_new_file_with(old, new, |source, target| {
         io::copy(source, target).map(drop)
@@ -1100,10 +1090,6 @@ mod tests {
         assert!(!folders.old.join("launch_log.json").exists());
     }
 
-    /// Another process creates the new name while the move runs. The move
-    /// may keep the old file or move it, but never replaces a file the
-    /// racer made. The race window is microseconds wide, so the test runs
-    /// the move many times; correct code can never fail it.
     #[test]
     fn on_a_volume_that_cannot_link_a_name_taken_during_the_move_is_never_replaced() {
         use std::sync::Arc;
@@ -1331,8 +1317,6 @@ mod tests {
         assert_eq!(report.left_behind_data(), vec![LeftBehind::UsageHistory]);
     }
 
-    /// Runs `move_with` on its own thread, so a copy that blocks fails the
-    /// test after 5 s instead of hanging the suite.
     fn move_within_5s(old: &Path, new: &Path) -> Moved {
         let (done, finished) = std::sync::mpsc::channel();
         let (from, to) = (old.to_path_buf(), new.to_path_buf());

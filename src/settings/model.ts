@@ -58,7 +58,6 @@ interface IpcFailed {
   error: { kind: "ipc_failed"; cause: unknown };
 }
 
-/** A throw or a rejection from `call` becomes an `ipc_failed` result. */
 async function settled<Arg, Result>(
   call: (arg: Arg) => Promise<Result>,
   arg: Arg,
@@ -115,8 +114,6 @@ function rejected(result: Outcome): boolean {
   return !result.ok && result.error.kind === "invalid_settings";
 }
 
-/** The change ran, but macOS did not say how it ended: the login card shows
- * its unknown state instead of the red notice, since a retry cannot help. */
 function statusUnknown(result: Outcome): boolean {
   return !result.ok && result.error.kind === "login_status_unknown";
 }
@@ -158,7 +155,6 @@ export function nextFeedback(
 }
 
 const TRY_AGAIN = "This change could not be saved. Try again.";
-/** No-break spaces keep the path on one line. */
 const LOGIN_ITEMS_PATH = "System\u00a0Settings\u00a0›\u00a0General\u00a0›\u00a0Login\u00a0Items";
 const CHECK_LOGIN_ITEMS = `macOS did not change launch at login. Check ${LOGIN_ITEMS_PATH}.`;
 
@@ -293,8 +289,6 @@ function loginNote(status: LoginStatus | null): string | null {
   }
 }
 
-/** Only the approval note reports a change's result; a failure has the red
- * notice. Announced again even when it already shows. */
 export function announceLoginNote(result: LaunchAtLoginResult): boolean {
   return result.ok ? result.status === "needsApproval" : statusUnknown(result);
 }
@@ -313,9 +307,7 @@ export function launchAtLoginBox(status: LoginStatus | null): {
 
 export interface LoginChangeDone {
   result: LaunchAtLoginResult;
-  /** The status macOS last reported; null when it did not say. */
   shown: LoginStatus | null;
-  /** False when a later change has overtaken this one: leave the box alone. */
   current: boolean;
 }
 

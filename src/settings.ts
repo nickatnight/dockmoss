@@ -259,7 +259,6 @@ async function start(): Promise<void> {
     });
   };
 
-  // An unknown status leaves the box disabled, so it needs no toggle.
   if (view.launchAtLogin !== null) {
     const toggleLogin = createLoginToggle(setLaunchAtLogin, view.launchAtLogin);
     page.launchAtLogin.addEventListener("change", () => {

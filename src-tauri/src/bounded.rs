@@ -26,9 +26,7 @@ pub fn read_within<T: Send + 'static>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AloneRead<T> {
     Answered(T),
-    /// It did not answer in time, or its thread did not start.
     NoAnswer,
-    /// An earlier read on the same slot is still running, so none started.
     Busy,
 }
 
@@ -129,7 +127,6 @@ mod tests {
             AloneRead::NoAnswer
         );
 
-        // Busy until the late read returns; the deadline only stops a hang.
         let deadline = Instant::now() + Duration::from_secs(10);
         let next = loop {
             match read_alone(&SLOT, BOUND, || 3) {

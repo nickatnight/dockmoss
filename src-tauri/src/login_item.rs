@@ -41,8 +41,6 @@ pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, No
     match (wanted, after.launch_at_login()) {
         (true, LaunchAtLogin::On) => Ok(LaunchAtLogin::On),
         (false, LaunchAtLogin::Off) => Ok(LaunchAtLogin::Off),
-        // Either way it is done: turned on, macOS registered it and only the
-        // user can approve it; turned off, it does not open at login.
         (_, LaunchAtLogin::NeedsApproval) => Ok(LaunchAtLogin::NeedsApproval),
         (true, LaunchAtLogin::Off) | (false, LaunchAtLogin::On) => Err(NotChanged),
     }
@@ -50,10 +48,7 @@ pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, No
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeFailed {
-    NotChanged {
-        after: LoginItemStatus,
-    },
-    /// The change ran, but the status read after it did not answer.
+    NotChanged { after: LoginItemStatus },
     StatusUnknown,
 }
 

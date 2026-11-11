@@ -22,9 +22,7 @@ const REVEAL_WAIT: Duration = Duration::from_secs(1);
 const LAUNCH_SETTLE: Duration = Duration::from_secs(1);
 const LAUNCH_HOLD_CAP: Duration = Duration::from_secs(2);
 /// One app's will-launch and did-launch arrived 35 to 158 ms apart on every
-/// app measured (job 019), so a launch this soon after the hold's start is
-/// taken as the same app. A slower did-launch renews the hold instead, which
-/// is bounded and follows a lift that is still bouncing.
+/// app measured (job 019).
 const SAME_LAUNCH: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,7 +164,6 @@ impl Tracker {
         Some(apps)
     }
 
-    /// The overlay's visibility as last ordered.
     pub fn overlay(&self) -> Visibility {
         self.ordered
     }
@@ -379,7 +376,6 @@ impl Activity {
     }
 }
 
-/// The first app launch of a wait, kept even when the wait is not cut short.
 #[derive(Debug, Default)]
 pub struct PendingLaunch(Option<Instant>);
 
@@ -392,8 +388,6 @@ impl PendingLaunch {
         self.0.take()
     }
 
-    /// After a wait, hands the launch to `activity`, so the next tick holds.
-    /// With the overlay hidden the Dock shows no lift, so the launch is dropped.
     pub fn hand_to(&mut self, activity: &mut Activity, overlay: Visibility) {
         if let Some(at) = self.take()
             && overlay == Visibility::Shown

@@ -180,7 +180,6 @@ input[type="number"][aria-invalid="true"] {
   margin-top: 0;
 }
 
-/* The note is the box's state, not a description of it. */
 #launch-at-login-note {
   color: var(--text);
 }

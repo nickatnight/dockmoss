@@ -183,7 +183,6 @@ fn set_launch_at_login_blocking(wanted: bool) -> Result<LaunchAtLogin, Error> {
     if let Err(error) = macos::login_item::set(wanted) {
         tracing::warn!(%error, wanted, "launch at login change refused");
     }
-    // The change itself cannot be abandoned, but the read after it can.
     let read = bounded::read_alone(
         &LOGIN_STATUS_READ,
         LOGIN_STATUS_TIMEOUT,

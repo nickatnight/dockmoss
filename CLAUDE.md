@@ -125,7 +125,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - **An app launch holds `Fast`** (job 019, Gate 1 Q1). The Dock posts nothing for the lift of a launching app's icon (about 690 ms), so with the pointer away from the Dock it was followed at 2 Hz.
   - `macos::workspace::on_app_launching` observes `NSWorkspace`'s will-launch and did-launch notifications on the main queue. Will-launch arrives about 36 ms into the lift and did-launch about 72 ms in (job 019's spike), and macOS does not post will-launch for every launch, so both count. For any regular app, pinned or not (a new tile shifts the others), `dock_tracker::watch_launches` sends `TrackerMessage::AppLaunching`.
   - `Activity::app_launching` starts a launch hold unless one is running: `Fast` until 1 s after the later of the launch and the last frame that moved (`LAUNCH_SETTLE`), never more than 2 s after the launch that started it (`LAUNCH_HOLD_CAP`). A launch during a hold does not extend it, so one launch costs at most 120 extra reads (about 100 measured).
-  - The message ends a long wait under the hover rule (`Woken::AppLaunch`), and `drain_inbox_until` keeps the first launch time even when the wait is not cut, so the next tick starts the hold.
+  - The message ends a long wait under the hover rule (`Woken::AppLaunch`), and `drain_inbox_until` records the first launch of the wait in a `tracker::PendingLaunch` even when the wait is not cut, so the next tick starts the hold.
 - Get the native window with `window.ns_window()` and cast it to `&NSWindow` inside `macos/overlay.rs` only.
 
 ## Tauri 2 conventions

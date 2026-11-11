@@ -248,10 +248,6 @@ impl DataDir {
     fn file(&self, name: &str) -> Option<PathBuf> {
         self.moved.file_in(&self.dir, name)
     }
-
-    fn left_behind(&self) -> Option<usage::LeftBehind> {
-        self.moved.left_behind_data()
-    }
 }
 
 fn moved_app_data_dir(app: &AppHandle) -> Option<DataDir> {
@@ -644,7 +640,7 @@ fn start_trust_and_tray(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let trust = macos::ax::request_trust();
     tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
-    let left_behind = data_dir.and_then(DataDir::left_behind);
+    let left_behind = data_dir.and_then(|data_dir| data_dir.moved.left_behind_data());
     tray::build(app, trust, left_behind)?;
     app.manage(TrustState::new(trust));
     spawn_trust_watcher(app.clone(), left_behind)?;

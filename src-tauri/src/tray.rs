@@ -4,27 +4,37 @@ use tauri::{AppHandle, Wry};
 
 use crate::macos;
 use crate::trust::Trust;
+use crate::usage::LeftBehind;
 
 pub const TRAY_ID: &str = "main";
 
 const QUIT_ID: &str = "quit";
 const GRANT_ID: &str = "grant-accessibility";
 const SETTINGS_ID: &str = "settings";
+const LEFT_BEHIND_ID: &str = "left-behind";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuEntry {
+    /// A disabled line: the session runs without data its move left behind.
+    LeftBehind(LeftBehind),
     GrantAccessibility,
     Settings,
     Separator,
     Quit,
 }
 
-pub fn build(app: &AppHandle, trust: Trust) -> Result<(), crate::Error> {
+/// `left_behind` is fixed for the session: the data move runs only at
+/// startup, and a later start retries it.
+pub fn build(
+    app: &AppHandle,
+    trust: Trust,
+    left_behind: Option<LeftBehind>,
+) -> Result<(), crate::Error> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tauri::include_image!("icons/tray.png"))
         .icon_as_template(true)
         .tooltip(tooltip(trust))
-        .menu(&menu(app, trust)?)
+        .menu(&menu(app, trust, left_behind)?)
         .on_menu_event(|app, event| match event.id().as_ref() {
             QUIT_ID => {
                 tracing::info!("quit requested from tray");
@@ -38,8 +48,12 @@ pub fn build(app: &AppHandle, trust: Trust) -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub fn show_trust(tray: &TrayIcon, trust: Trust) -> Result<(), crate::Error> {
-    tray.set_menu(Some(menu(tray.app_handle(), trust)?))?;
+pub fn show_trust(
+    tray: &TrayIcon,
+    trust: Trust,
+    left_behind: Option<LeftBehind>,
+) -> Result<(), crate::Error> {
+    tray.set_menu(Some(menu(tray.app_handle(), trust, left_behind)?))?;
     tray.set_tooltip(Some(tooltip(trust)))?;
     Ok(())
 }
@@ -51,22 +65,45 @@ fn tooltip(trust: Trust) -> &'static str {
     }
 }
 
-fn menu_entries(trust: Trust) -> &'static [MenuEntry] {
-    match trust {
-        Trust::Trusted => &[MenuEntry::Settings, MenuEntry::Separator, MenuEntry::Quit],
-        Trust::Untrusted => &[
-            MenuEntry::GrantAccessibility,
-            MenuEntry::Settings,
-            MenuEntry::Separator,
-            MenuEntry::Quit,
-        ],
+/// Names what is left, never where: the old folder's path holds the user's
+/// name.
+fn left_behind_text(left_behind: LeftBehind) -> &'static str {
+    match left_behind {
+        LeftBehind::UsageHistory => "Usage history is still in the old folder",
+        LeftBehind::Settings => "Settings are still in the old folder",
+        LeftBehind::UsageHistoryAndSettings => {
+            "Usage history and settings are still in the old folder"
+        }
     }
 }
 
-fn menu(app: &AppHandle, trust: Trust) -> tauri::Result<Menu<Wry>> {
+fn menu_entries(trust: Trust, left_behind: Option<LeftBehind>) -> Vec<MenuEntry> {
+    let notice = left_behind
+        .map(|left| [MenuEntry::LeftBehind(left), MenuEntry::Separator])
+        .into_iter()
+        .flatten();
+    let grant = (trust == Trust::Untrusted).then_some(MenuEntry::GrantAccessibility);
+    notice
+        .chain(grant)
+        .chain([MenuEntry::Settings, MenuEntry::Separator, MenuEntry::Quit])
+        .collect()
+}
+
+fn menu(
+    app: &AppHandle,
+    trust: Trust,
+    left_behind: Option<LeftBehind>,
+) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
-    for entry in menu_entries(trust) {
+    for entry in menu_entries(trust, left_behind) {
         match entry {
+            MenuEntry::LeftBehind(left) => menu.append(&MenuItem::with_id(
+                app,
+                LEFT_BEHIND_ID,
+                left_behind_text(left),
+                false,
+                None::<&str>,
+            )?)?,
             MenuEntry::GrantAccessibility => menu.append(&MenuItem::with_id(
                 app,
                 GRANT_ID,
@@ -107,8 +144,9 @@ fn show_accessibility_pane() {
 
 #[cfg(test)]
 mod tests {
-    use super::{MenuEntry, menu_entries, tooltip};
+    use super::{MenuEntry, left_behind_text, menu_entries, tooltip};
     use crate::trust::Trust;
+    use crate::usage::LeftBehind;
 
     #[test]
     fn tooltip_says_when_accessibility_access_is_missing() {
@@ -138,7 +176,57 @@ mod tests {
         ];
 
         for (trust, entries) in cases {
-            assert_eq!(menu_entries(trust), entries.as_slice(), "{trust:?}");
+            assert_eq!(menu_entries(trust, None), entries, "{trust:?}");
+        }
+    }
+
+    #[test]
+    fn data_left_in_the_old_folder_heads_the_menu_with_and_without_accessibility_access() {
+        let left = LeftBehind::UsageHistory;
+        let cases = [
+            (
+                Trust::Trusted,
+                vec![
+                    MenuEntry::LeftBehind(left),
+                    MenuEntry::Separator,
+                    MenuEntry::Settings,
+                    MenuEntry::Separator,
+                    MenuEntry::Quit,
+                ],
+            ),
+            (
+                Trust::Untrusted,
+                vec![
+                    MenuEntry::LeftBehind(left),
+                    MenuEntry::Separator,
+                    MenuEntry::GrantAccessibility,
+                    MenuEntry::Settings,
+                    MenuEntry::Separator,
+                    MenuEntry::Quit,
+                ],
+            ),
+        ];
+
+        for (trust, entries) in cases {
+            assert_eq!(menu_entries(trust, Some(left)), entries, "{trust:?}");
+        }
+    }
+
+    #[test]
+    fn the_notice_names_what_is_left_and_no_path() {
+        let cases = [
+            (
+                LeftBehind::UsageHistory,
+                "Usage history is still in the old folder",
+            ),
+            (LeftBehind::Settings, "Settings are still in the old folder"),
+            (
+                LeftBehind::UsageHistoryAndSettings,
+                "Usage history and settings are still in the old folder",
+            ),
+        ];
+        for (left, expected) in cases {
+            assert_eq!(left_behind_text(left), expected, "{left:?}");
         }
     }
 }

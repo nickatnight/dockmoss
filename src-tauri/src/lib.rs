@@ -86,11 +86,7 @@ pub fn run() {
             if let Some(path) = settings_path {
                 app.manage(SettingsPath(path));
             }
-            let trust = macos::ax::request_trust();
-            tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
-            tray::build(app.handle(), trust)?;
-            app.manage(TrustState::new(trust));
-            spawn_trust_watcher(app.handle().clone())?;
+            start_trust_and_tray(app.handle(), data_dir.as_ref())?;
             let display = primary_display(app.handle())?;
             let (inbox, messages) = mpsc::channel();
             let tracker_inbox = inbox.clone();
@@ -250,6 +246,11 @@ struct DataDir {
 impl DataDir {
     fn file(&self, name: &str) -> Option<PathBuf> {
         self.moved.file_in(&self.dir, name)
+    }
+
+    /// What this session runs without, for the tray to say.
+    fn left_behind(&self) -> Option<usage::LeftBehind> {
+        self.moved.left_behind_data()
     }
 }
 
@@ -637,7 +638,25 @@ mod launch_log_writer {
     }
 }
 
-fn spawn_trust_watcher(app: AppHandle) -> std::io::Result<()> {
+/// Checks Accessibility trust and builds the tray that shows it, and what the
+/// data move left behind; the watcher keeps both on the tray as trust changes.
+fn start_trust_and_tray(
+    app: &AppHandle,
+    data_dir: Option<&DataDir>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let trust = macos::ax::request_trust();
+    tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
+    let left_behind = data_dir.and_then(DataDir::left_behind);
+    tray::build(app, trust, left_behind)?;
+    app.manage(TrustState::new(trust));
+    spawn_trust_watcher(app.clone(), left_behind)?;
+    Ok(())
+}
+
+fn spawn_trust_watcher(
+    app: AppHandle,
+    left_behind: Option<usage::LeftBehind>,
+) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("ax-trust".into())
         .spawn(move || {
@@ -646,7 +665,7 @@ fn spawn_trust_watcher(app: AppHandle) -> std::io::Result<()> {
                 let state = app.state::<TrustState>();
                 if let Some(trust) = state.replace_if_changed(macos::ax::check_trust()) {
                     tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
-                    refresh_tray_on_main_thread(&app);
+                    refresh_tray_on_main_thread(&app, left_behind);
                 }
             }
         })?;
@@ -655,7 +674,7 @@ fn spawn_trust_watcher(app: AppHandle) -> std::io::Result<()> {
 
 /// The tray is looked up on the main thread because its handle is not
 /// thread-safe: cloning it elsewhere would race the clones Tauri makes there.
-fn refresh_tray_on_main_thread(app: &AppHandle) {
+fn refresh_tray_on_main_thread(app: &AppHandle, left_behind: Option<usage::LeftBehind>) {
     let main = app.clone();
     let scheduled = app.run_on_main_thread(move || {
         let Some(tray) = main.tray_by_id(tray::TRAY_ID) else {
@@ -663,7 +682,7 @@ fn refresh_tray_on_main_thread(app: &AppHandle) {
             return;
         };
         let trust = main.state::<TrustState>().current();
-        if let Err(error) = tray::show_trust(&tray, trust) {
+        if let Err(error) = tray::show_trust(&tray, trust, left_behind) {
             tracing::warn!(%error, "tray update after a trust change failed");
         }
     });

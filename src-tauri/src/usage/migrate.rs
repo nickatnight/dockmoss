@@ -78,6 +78,16 @@ pub enum OldFolder {
     Left,
 }
 
+/// User data a session runs without because its move failed: no usage
+/// tracking without the launch log, default settings that are not saved
+/// without the settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeftBehind {
+    UsageHistory,
+    Settings,
+    UsageHistoryAndSettings,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MoveReport {
     pub moved: usize,
@@ -104,6 +114,20 @@ impl MoveReport {
     /// session goes without it and the next start moves it.
     pub fn file_in(&self, dir: &Path, name: &str) -> Option<PathBuf> {
         (!self.left_behind(name)).then(|| dir.join(name))
+    }
+
+    /// What the user is told is still in the old folder. The `.corrupt` and
+    /// `.dropped` copies are never read back, so they are not mentioned.
+    pub fn left_behind_data(&self) -> Option<LeftBehind> {
+        match (
+            self.left_behind(LAUNCH_LOG_FILE),
+            self.left_behind(SETTINGS_FILE),
+        ) {
+            (true, true) => Some(LeftBehind::UsageHistoryAndSettings),
+            (true, false) => Some(LeftBehind::UsageHistory),
+            (false, true) => Some(LeftBehind::Settings),
+            (false, false) => None,
+        }
     }
 
     /// `info` when this start moved, found or removed something; a start
@@ -168,6 +192,13 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
             }
             Step::Move(name) => match move_file(&old_dir.join(name), &new_dir.join(name)) {
                 Moved::Yes => report.moved += 1,
+                Moved::Renamed => {
+                    report.moved += 1;
+                    tracing::info!(
+                        file = name,
+                        "old data file moved by rename: this volume makes no hard links"
+                    );
+                }
                 Moved::OldCopyLeft(kind) => {
                     report.moved += 1;
                     tracing::warn!(file = name, %kind, "old data file moved; its old copy was not removed");
@@ -212,8 +243,11 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
     report
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Moved {
     Yes,
+    /// Moved by `rename`, on a volume that cannot make hard links.
+    Renamed,
     /// The new name holds the data; the old name could not be removed, so the
     /// next start keeps the new file and leaves the old one.
     OldCopyLeft(io::ErrorKind),
@@ -222,16 +256,88 @@ enum Moved {
     No(io::ErrorKind),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkError {
+    NameTaken,
+    /// The volume makes no hard links at all, as exFAT and some network
+    /// volumes do.
+    CannotLink,
+    Other(io::ErrorKind),
+}
+
+/// std reports macOS's `ENOTSUP` as `Uncategorized`, not `Unsupported`
+/// (rustc 1.99), so the raw code is checked too.
+fn link_error(error: &io::Error) -> LinkError {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        LinkError::NameTaken
+    } else if error.kind() == io::ErrorKind::Unsupported
+        || matches!(error.raw_os_error(), Some(libc::ENOTSUP | libc::EOPNOTSUPP))
+    {
+        LinkError::CannotLink
+    } else {
+        LinkError::Other(error.kind())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewName {
+    Absent,
+    Taken,
+    Unreadable(io::ErrorKind),
+}
+
+fn new_name_at(path: &Path) -> NewName {
+    match fs::symlink_metadata(path) {
+        Ok(_) => NewName::Taken,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => NewName::Absent,
+        Err(error) => NewName::Unreadable(error.kind()),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AfterLink {
+    NameTaken,
+    Rename,
+    Failed(io::ErrorKind),
+}
+
+/// What a failed `hard_link` leads to. Only a volume that cannot link falls
+/// back to `rename`, and only when a fresh look finds the new name absent:
+/// `rename` replaces an existing name, and the move must never overwrite.
+/// `new_name` is looked at only in that case.
+fn after_failed_link(link: LinkError, new_name: impl FnOnce() -> NewName) -> AfterLink {
+    match link {
+        LinkError::NameTaken => AfterLink::NameTaken,
+        LinkError::Other(kind) => AfterLink::Failed(kind),
+        LinkError::CannotLink => match new_name() {
+            NewName::Absent => AfterLink::Rename,
+            NewName::Taken => AfterLink::NameTaken,
+            NewName::Unreadable(kind) => AfterLink::Failed(kind),
+        },
+    }
+}
+
 /// `hard_link` fails when the new name exists, so nothing is ever
-/// overwritten, as `rename` would.
+/// overwritten, as `rename` would. A volume without hard links falls back to
+/// `rename` into a name found absent (`after_failed_link`).
 fn move_file(old: &Path, new: &Path) -> Moved {
-    match fs::hard_link(old, new) {
+    move_with(old, new, |old, new| fs::hard_link(old, new))
+}
+
+fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Result<()>) -> Moved {
+    match link(old, new) {
         Ok(()) => match fs::remove_file(old) {
             Ok(()) => Moved::Yes,
             Err(error) => Moved::OldCopyLeft(error.kind()),
         },
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Moved::NameTaken,
-        Err(error) => Moved::No(error.kind()),
+        Err(error) => match after_failed_link(link_error(&error), || new_name_at(new)) {
+            AfterLink::NameTaken => Moved::NameTaken,
+            AfterLink::Failed(kind) => Moved::No(kind),
+            AfterLink::Rename => match fs::rename(old, new) {
+                Ok(()) => Moved::Renamed,
+                Err(error) => Moved::No(error.kind()),
+            },
+        },
     }
 }
 
@@ -241,8 +347,12 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::Path;
 
+    use std::cell::Cell;
+    use std::io;
+
     use super::{
-        Entry, Listing, MOVED_FILES, MoveReport, OldFolder, Step, move_old_data, plan_move,
+        AfterLink, Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, NewName,
+        OldFolder, Step, after_failed_link, link_error, move_old_data, move_with, plan_move,
     };
 
     fn listing(entries: &[(&'static str, Entry)]) -> Listing {
@@ -860,6 +970,172 @@ mod tests {
         ];
         for (case, report, name, expected) in cases {
             assert_eq!(report.file_in(dir, name), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn a_link_error_says_whether_the_name_is_taken_or_the_volume_cannot_link() {
+        let cases = [
+            (
+                "the name exists",
+                io::Error::from_raw_os_error(libc::EEXIST),
+                LinkError::NameTaken,
+            ),
+            (
+                "exFAT and other volumes without hard links: std calls ENOTSUP Uncategorized",
+                io::Error::from_raw_os_error(libc::ENOTSUP),
+                LinkError::CannotLink,
+            ),
+            (
+                "the socket-style spelling of the same answer",
+                io::Error::from_raw_os_error(libc::EOPNOTSUPP),
+                LinkError::CannotLink,
+            ),
+            (
+                "an error std already calls Unsupported",
+                io::Error::from(io::ErrorKind::Unsupported),
+                LinkError::CannotLink,
+            ),
+            (
+                "an immutable (uchg) file",
+                io::Error::from_raw_os_error(libc::EPERM),
+                LinkError::Other(io::ErrorKind::PermissionDenied),
+            ),
+            (
+                "another volume",
+                io::Error::from_raw_os_error(libc::EXDEV),
+                LinkError::Other(io::ErrorKind::CrossesDevices),
+            ),
+        ];
+        for (case, error, expected) in cases {
+            assert_eq!(link_error(&error), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn only_a_volume_that_cannot_link_falls_back_to_rename_and_only_into_an_absent_name() {
+        let denied = io::ErrorKind::PermissionDenied;
+        let cases = [
+            (
+                "cannot link, the new name is absent: rename",
+                LinkError::CannotLink,
+                NewName::Absent,
+                AfterLink::Rename,
+                1,
+            ),
+            (
+                "cannot link, the new name is taken: kept, never overwritten",
+                LinkError::CannotLink,
+                NewName::Taken,
+                AfterLink::NameTaken,
+                1,
+            ),
+            (
+                "cannot link, the new name cannot be read: failed",
+                LinkError::CannotLink,
+                NewName::Unreadable(denied),
+                AfterLink::Failed(denied),
+                1,
+            ),
+            (
+                "the link found the name taken: kept, without looking again",
+                LinkError::NameTaken,
+                NewName::Absent,
+                AfterLink::NameTaken,
+                0,
+            ),
+            (
+                "any other link error: failed, without looking again",
+                LinkError::Other(denied),
+                NewName::Absent,
+                AfterLink::Failed(denied),
+                0,
+            ),
+        ];
+        for (case, link, new_name, expected, looks) in cases {
+            let looked = Cell::new(0);
+
+            let after = after_failed_link(link, || {
+                looked.set(looked.get() + 1);
+                new_name
+            });
+
+            assert_eq!(after, expected, "{case}");
+            assert_eq!(looked.get(), looks, "{case}: looks at the new name");
+        }
+    }
+
+    fn cannot_link(_old: &Path, _new: &Path) -> io::Result<()> {
+        Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+    }
+
+    #[test]
+    fn on_a_volume_that_cannot_link_the_file_is_renamed_into_an_empty_name() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "history");
+
+        let moved = move_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            cannot_link,
+        );
+
+        assert_eq!(moved, Moved::Renamed);
+        assert_eq!(read(&folders.new, "launch_log.json"), "history");
+        assert!(!folders.old.join("launch_log.json").exists());
+    }
+
+    #[test]
+    fn on_a_volume_that_cannot_link_a_taken_name_is_kept_and_never_overwritten() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "old");
+        write(&folders.new, "launch_log.json", "taken");
+
+        let moved = move_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            cannot_link,
+        );
+
+        assert_eq!(moved, Moved::NameTaken);
+        assert_eq!(read(&folders.new, "launch_log.json"), "taken");
+        assert_eq!(read(&folders.old, "launch_log.json"), "old");
+    }
+
+    #[test]
+    fn the_user_hears_about_the_launch_log_or_settings_left_behind_only() {
+        let report = |failed: Vec<&'static str>| MoveReport {
+            failed,
+            old_folder: OldFolder::Left,
+            ..MoveReport::default()
+        };
+        let cases = [
+            ("nothing left behind", MoveReport::default(), None),
+            (
+                "the launch log",
+                report(vec!["launch_log.json"]),
+                Some(LeftBehind::UsageHistory),
+            ),
+            (
+                "the settings",
+                report(vec!["settings.json"]),
+                Some(LeftBehind::Settings),
+            ),
+            (
+                "both",
+                report(vec!["launch_log.json", "settings.json"]),
+                Some(LeftBehind::UsageHistoryAndSettings),
+            ),
+            (
+                "only copies that are never read back",
+                report(vec!["launch_log.json.corrupt", "launch_log.json.dropped"]),
+                None,
+            ),
+        ];
+        for (case, report, expected) in cases {
+            assert_eq!(report.left_behind_data(), expected, "{case}");
         }
     }
 }

@@ -1430,4 +1430,24 @@ mod tests {
             (Some(true), Some(false))
         );
     }
+
+    #[test]
+    fn a_link_at_the_old_name_is_never_followed_by_the_comparison() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "elsewhere", "the whole history");
+        symlink(
+            folders.old.join("elsewhere"),
+            folders.old.join("launch_log.json"),
+        )
+        .expect("link");
+        write(&folders.new, "launch_log.json", "the whole");
+
+        let interrupted = interrupted_copy_at(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+        );
+
+        assert!(interrupted.is_err(), "{interrupted:?}");
+    }
 }

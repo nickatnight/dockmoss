@@ -214,6 +214,32 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_login_change_reaches_the_page_with_its_own_kind() {
+        use crate::login_item::{ChangeFailed, LoginItemStatus};
+        let json =
+            |failed| serde_json::to_value(Error::from(failed)).expect("Error serializes to JSON");
+
+        assert_eq!(
+            (
+                json(ChangeFailed::NotChanged {
+                    after: LoginItemStatus::NotRegistered
+                }),
+                json(ChangeFailed::StatusUnknown),
+            ),
+            (
+                serde_json::json!({
+                    "kind": "login_item_not_changed",
+                    "message": "launch at login was not changed"
+                }),
+                serde_json::json!({
+                    "kind": "login_status_unknown",
+                    "message": "macOS did not report launch at login in time"
+                }),
+            )
+        );
+    }
+
+    #[test]
     fn error_kind_in_ipc_ts_lists_every_error_kind() {
         let errors = [
             Error::Tauri(tauri::Error::WindowNotFound),

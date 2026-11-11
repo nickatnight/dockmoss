@@ -1,0 +1,67 @@
+// Ported from dockmoss-marketing's src/lib/app-icon.ts at f77ccd1. The site's logo is this
+// function's output, so keep the two byte-identical.
+import { ICON_UNITS, type LevelStep, OVERHANG_UNITS, type SceneInput, TILE_UNITS, mossScene } from "../render/generator";
+import { fnv1a32 } from "../render/model";
+import { sceneSvg } from "./svg";
+
+/** The moss of a Dock item keyed `dockmoss#0` (`itemKeys`), part-grown, without props. */
+export const APP_ICON_MOSS: SceneInput = {
+  seed: fnv1a32("dockmoss#0"),
+  step: 16 as LevelStep,
+  overgrown: false,
+};
+
+const SIDE = 1024;
+const scale = SIDE / TILE_UNITS;
+const inset = OVERHANG_UNITS * scale;
+const iconSide = ICON_UNITS * scale;
+const px = (value: number) => Number(value.toFixed(4));
+
+/** The stone is drawn as the old logo drew it: an icon this side, at this origin. */
+const STONE_ORIGIN = 100;
+const STONE_SIDE = 824;
+const STONE_END = STONE_ORIGIN + STONE_SIDE;
+const STONE_RADIUS = 185;
+
+const STONE = `<g transform="translate(${px(inset)} ${px(inset)}) scale(${px(iconSide / STONE_SIDE)}) translate(-${STONE_ORIGIN} -${STONE_ORIGIN})">
+<rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}" fill="url(#stone)" filter="url(#drop)"/>
+<g clip-path="url(#tile)">
+<rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" fill="url(#sheen)"/>
+<circle cx="260" cy="230" r="5" fill="#FFFFFF" fill-opacity="0.16"/>
+<circle cx="330" cy="300" r="3" fill="#FFFFFF" fill-opacity="0.14"/>
+<circle cx="612" cy="210" r="4" fill="#000000" fill-opacity="0.08"/>
+<circle cx="700" cy="280" r="6" fill="#FFFFFF" fill-opacity="0.12"/>
+<circle cx="470" cy="360" r="3" fill="#000000" fill-opacity="0.08"/>
+<circle cx="760" cy="380" r="3" fill="#FFFFFF" fill-opacity="0.14"/>
+<circle cx="240" cy="410" r="3" fill="#000000" fill-opacity="0.08"/>
+<rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}" fill="none" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="6"/>
+</g>
+</g>`;
+
+const DEFS = `<defs>
+<linearGradient id="stone" x1="0" y1="${STONE_ORIGIN}" x2="0" y2="${STONE_END}" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#7C8994"/>
+<stop offset="1" stop-color="#5B6873"/>
+</linearGradient>
+<radialGradient id="sheen" cx="330" cy="170" r="620" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+<stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+</radialGradient>
+<clipPath id="tile">
+<rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}"/>
+</clipPath>
+<filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+<feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.3"/>
+</filter>
+</defs>`;
+
+/** The app icon: the stone tile, with the moss laid out as the overlay lays it on a Dock tile. */
+export function appIconSvg(moss: SceneInput = APP_ICON_MOSS): string {
+  const scene = sceneSvg(mossScene(moss));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIDE}" height="${SIDE}" viewBox="0 0 ${SIDE} ${SIDE}">
+${DEFS}
+${STONE}
+<g transform="scale(${px(scale)}) translate(${px(OVERHANG_UNITS)} ${px(OVERHANG_UNITS)})">${scene}</g>
+</svg>
+`;
+}

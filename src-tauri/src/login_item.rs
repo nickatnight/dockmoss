@@ -36,13 +36,14 @@ pub struct NotChanged;
 /// whether the call reported an error: unregistering an item that was never
 /// registered fails, yet ends where it was asked to.
 pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, NotChanged> {
-    let now = after.launch_at_login();
-    let as_asked = match now {
-        LaunchAtLogin::On => wanted,
-        LaunchAtLogin::Off => !wanted,
-        LaunchAtLogin::NeedsApproval => true,
-    };
-    if as_asked { Ok(now) } else { Err(NotChanged) }
+    match (wanted, after.launch_at_login()) {
+        (true, LaunchAtLogin::On) => Ok(LaunchAtLogin::On),
+        (false, LaunchAtLogin::Off) => Ok(LaunchAtLogin::Off),
+        // Either way it is done: turned on, macOS registered it and only the
+        // user can approve it; turned off, it does not open at login.
+        (_, LaunchAtLogin::NeedsApproval) => Ok(LaunchAtLogin::NeedsApproval),
+        (true, LaunchAtLogin::Off) | (false, LaunchAtLogin::On) => Err(NotChanged),
+    }
 }
 
 /// `tauri dev` runs a bare binary, which must never become a login item:

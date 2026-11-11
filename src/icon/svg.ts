@@ -1,4 +1,3 @@
-// Ported from dockmoss-marketing's src/lib/moss/svg.ts at f77ccd1, reduced to what the app icon uses.
 import { ICON_CORNER_RADIUS, ICON_UNITS, type MossScene, type Paint, type Point, type Shape } from "../render/generator";
 
 const CLIP_ID = "icon";
@@ -40,7 +39,6 @@ function shapeElement(shape: Shape): string {
   }
 }
 
-/** Shapes in draw order, neighbours with the same paint sharing one `<g>`. */
 export function shapesSvg(shapes: readonly Shape[]): string {
   let out = "";
   let open: string | null = null;
@@ -56,11 +54,6 @@ export function shapesSvg(shapes: readonly Shape[]): string {
   return open === null ? out : `${out}</g>`;
 }
 
-/**
- * A scene as SVG, drawn as `drawScene` in `bake.ts` draws it: the occlusion clipped to the
- * icon, then the moss, then the props. Coordinates are the icon's units, with
- * the icon's top-left corner at the origin.
- */
 export function sceneSvg(scene: MossScene): string {
   const occlusion =
     scene.occlusion.length === 0

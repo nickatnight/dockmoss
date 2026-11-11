@@ -5,14 +5,12 @@ import { fnv1a32 } from "../render/model";
 import { APP_ICON_MOSS, appIconMaster, appIconSvg } from "./app-icon";
 import { sceneSvg } from "./svg";
 
-/** Maps an x (or y) through an SVG transform list of uniform `translate`s and `scale`s. */
 function mapThrough(transform: string): (value: number) => number {
   const steps = [...transform.matchAll(/(translate|scale)\(([-\d.]+)(?: ([-\d.]+))?\)/g)].map(([, kind, a, b]) => {
     expect(b === undefined || b === a, `non-uniform ${kind} in ${transform}`).toBe(true);
     return { kind, by: Number(a) };
   });
   expect(steps.length).toBeGreaterThan(0);
-  // The rightmost step applies first.
   return (value) =>
     steps.reduceRight((at, { kind, by }) => (kind === "translate" ? at + by : at * by), value);
 }
@@ -21,7 +19,6 @@ function groupTransforms(svg: string): string[] {
   return [...svg.matchAll(/<g transform="([^"]+)">/g)].map(([, transform]) => transform);
 }
 
-/** Why a document is not well-formed XML, or [] when it is. Covers the subset the icon writes. */
 function xmlProblems(document: string): string[] {
   const problems: string[] = [];
   const body = document.replace(/<!--([\s\S]*?)-->/g, (_, text: string) => {
@@ -88,7 +85,6 @@ describe("the app icon", () => {
     const [stone] = groupTransforms(svg);
     expect(svg).toContain('<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#stone)"');
     const toCanvas = mapThrough(stone);
-    // 1024 × 0.79 = 808.96 px, inset (1024 − 808.96) / 2 = 107.52 px.
     expect(toCanvas(100)).toBeCloseTo(107.52, 1);
     expect(toCanvas(924)).toBeCloseTo(107.52 + 808.96, 1);
   });

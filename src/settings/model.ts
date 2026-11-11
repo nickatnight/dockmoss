@@ -53,12 +53,18 @@ export interface SettingsSaver {
   commit(change: SettingsChange): Promise<SaveSettingsResult>;
 }
 
-async function saveOrIpcFailed(
-  save: (settings: SettingsInput) => Promise<SaveSettingsResult>,
-  settings: SettingsInput,
-): Promise<SaveSettingsResult> {
+interface IpcFailed {
+  ok: false;
+  error: { kind: "ipc_failed"; cause: unknown };
+}
+
+/** A throw or a rejection from `call` becomes an `ipc_failed` result. */
+async function settled<Arg, Result>(
+  call: (arg: Arg) => Promise<Result>,
+  arg: Arg,
+): Promise<Result | IpcFailed> {
   try {
-    return await save(settings);
+    return await call(arg);
   } catch (cause: unknown) {
     return { ok: false, error: { kind: "ipc_failed", cause } };
   }
@@ -73,7 +79,7 @@ export function createSettingsSaver(
   return {
     commit(change) {
       const result = previous.then(async () => {
-        const outcome = await saveOrIpcFailed(save, nextSettings(saved, change));
+        const outcome = await settled(save, nextSettings(saved, change));
         if (outcome.ok) {
           saved = outcome.settings;
         }
@@ -292,17 +298,6 @@ export interface LoginChangeDone {
   result: LaunchAtLoginResult;
   /** What the box shows now, or null when a later change has overtaken this one. */
   shown: LoginStatus | null;
-}
-
-async function settled(
-  set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
-  wanted: boolean,
-): Promise<LaunchAtLoginResult> {
-  try {
-    return await set(wanted);
-  } catch (cause: unknown) {
-    return { ok: false, error: { kind: "ipc_failed", cause } };
-  }
 }
 
 export function createLoginToggle(

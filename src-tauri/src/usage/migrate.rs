@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use super::store::private_dir;
 
 const OLD_IDENTIFIER: &str = "com.dockmoss.app";
+const PRIVATE_FILE_MODE: u32 = 0o600;
 
 pub const LAUNCH_LOG_FILE: &str = "launch_log.json";
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -187,11 +189,11 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
             }
             Step::Move(name) => match move_file(&old_dir.join(name), &new_dir.join(name)) {
                 Moved::Yes => report.moved += 1,
-                Moved::Renamed => {
+                Moved::Copied => {
                     report.moved += 1;
                     tracing::info!(
                         file = name,
-                        "old data file moved by rename: this volume makes no hard links"
+                        "old data file moved by copy: this volume makes no hard links"
                     );
                 }
                 Moved::OldCopyLeft(kind) => {
@@ -241,7 +243,7 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
 #[derive(Debug, PartialEq, Eq)]
 enum Moved {
     Yes,
-    Renamed,
+    Copied,
     /// The new name holds the data; the old name could not be removed, so the
     /// next start keeps the new file and leaves the old one.
     OldCopyLeft(io::ErrorKind),
@@ -271,40 +273,6 @@ fn link_error(error: &io::Error) -> LinkError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NewName {
-    Absent,
-    Taken,
-    Unreadable(io::ErrorKind),
-}
-
-fn new_name_at(path: &Path) -> NewName {
-    match fs::symlink_metadata(path) {
-        Ok(_) => NewName::Taken,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => NewName::Absent,
-        Err(error) => NewName::Unreadable(error.kind()),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AfterLink {
-    NameTaken,
-    Rename,
-    Failed(io::ErrorKind),
-}
-
-fn after_failed_link(link: LinkError, new_name: impl FnOnce() -> NewName) -> AfterLink {
-    match link {
-        LinkError::NameTaken => AfterLink::NameTaken,
-        LinkError::Other(kind) => AfterLink::Failed(kind),
-        LinkError::CannotLink => match new_name() {
-            NewName::Absent => AfterLink::Rename,
-            NewName::Taken => AfterLink::NameTaken,
-            NewName::Unreadable(kind) => AfterLink::Failed(kind),
-        },
-    }
-}
-
 fn move_file(old: &Path, new: &Path) -> Moved {
     move_with(old, new, |old, new| fs::hard_link(old, new))
 }
@@ -315,15 +283,39 @@ fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Resu
             Ok(()) => Moved::Yes,
             Err(error) => Moved::OldCopyLeft(error.kind()),
         },
-        Err(error) => match after_failed_link(link_error(&error), || new_name_at(new)) {
-            AfterLink::NameTaken => Moved::NameTaken,
-            AfterLink::Failed(kind) => Moved::No(kind),
-            AfterLink::Rename => match fs::rename(old, new) {
-                Ok(()) => Moved::Renamed,
+        Err(error) => match link_error(&error) {
+            LinkError::NameTaken => Moved::NameTaken,
+            LinkError::Other(kind) => Moved::No(kind),
+            LinkError::CannotLink => match copy_into_new_file(old, new) {
+                Ok(()) => match fs::remove_file(old) {
+                    Ok(()) => Moved::Copied,
+                    Err(error) => Moved::OldCopyLeft(error.kind()),
+                },
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Moved::NameTaken,
                 Err(error) => Moved::No(error.kind()),
             },
         },
     }
+}
+
+/// `create_new` refuses a name that exists, so the copy never replaces one,
+/// even a name made after the plan (macOS's exclusive rename,
+/// `RENAME_EXCL`, is refused on exFAT too). A copy that fails removes the
+/// file it made, so the next start retries the move.
+fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
+    let mut source = fs::File::open(old)?;
+    let mut target = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(PRIVATE_FILE_MODE)
+        .open(new)?;
+    let copied = io::copy(&mut source, &mut target).and_then(|_| target.sync_all());
+    if copied.is_err()
+        && let Err(error) = fs::remove_file(new)
+    {
+        tracing::warn!(kind = %error.kind(), "partial copy of an old data file not removed");
+    }
+    copied
 }
 
 #[cfg(test)]
@@ -332,12 +324,11 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::Path;
 
-    use std::cell::Cell;
     use std::io;
 
     use super::{
-        AfterLink, Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, NewName,
-        OldFolder, Step, after_failed_link, link_error, move_old_data, move_with, plan_move,
+        Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, OldFolder, Step,
+        link_error, move_old_data, move_with, plan_move,
     };
 
     fn listing(entries: &[(&'static str, Entry)]) -> Listing {
@@ -997,65 +988,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn only_a_volume_that_cannot_link_falls_back_to_rename_and_only_into_an_absent_name() {
-        let denied = io::ErrorKind::PermissionDenied;
-        let cases = [
-            (
-                "cannot link, the new name is absent: rename",
-                LinkError::CannotLink,
-                NewName::Absent,
-                AfterLink::Rename,
-                1,
-            ),
-            (
-                "cannot link, the new name is taken: kept, never overwritten",
-                LinkError::CannotLink,
-                NewName::Taken,
-                AfterLink::NameTaken,
-                1,
-            ),
-            (
-                "cannot link, the new name cannot be read: failed",
-                LinkError::CannotLink,
-                NewName::Unreadable(denied),
-                AfterLink::Failed(denied),
-                1,
-            ),
-            (
-                "the link found the name taken: kept, without looking again",
-                LinkError::NameTaken,
-                NewName::Absent,
-                AfterLink::NameTaken,
-                0,
-            ),
-            (
-                "any other link error: failed, without looking again",
-                LinkError::Other(denied),
-                NewName::Absent,
-                AfterLink::Failed(denied),
-                0,
-            ),
-        ];
-        for (case, link, new_name, expected, looks) in cases {
-            let looked = Cell::new(0);
-
-            let after = after_failed_link(link, || {
-                looked.set(looked.get() + 1);
-                new_name
-            });
-
-            assert_eq!(after, expected, "{case}");
-            assert_eq!(looked.get(), looks, "{case}: looks at the new name");
-        }
-    }
-
     fn cannot_link(_old: &Path, _new: &Path) -> io::Result<()> {
         Err(io::Error::from_raw_os_error(libc::ENOTSUP))
     }
 
     #[test]
-    fn on_a_volume_that_cannot_link_the_file_is_renamed_into_an_empty_name() {
+    fn on_a_volume_that_cannot_link_the_file_is_copied_into_an_empty_name_and_kept_private() {
         let folders = folders();
         fs::create_dir(&folders.new).expect("new folder");
         write(&folders.old, "launch_log.json", "history");
@@ -1066,10 +1004,63 @@ mod tests {
             cannot_link,
         );
 
-        assert_eq!(moved, Moved::Renamed);
+        assert_eq!(moved, Moved::Copied);
         assert_eq!(read(&folders.new, "launch_log.json"), "history");
+        assert_eq!(mode(&folders.new.join("launch_log.json")), 0o600);
         assert!(!folders.old.join("launch_log.json").exists());
     }
+
+    /// Another process creates the new name while the move runs. The move
+    /// may keep the old file or move it, but never replaces a file the
+    /// racer made. The race window is microseconds wide, so the test runs
+    /// the move many times; correct code can never fail it.
+    #[test]
+    fn on_a_volume_that_cannot_link_a_name_taken_during_the_move_is_never_replaced() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let mut replaced = 0;
+        for _ in 0..RACE_RUNS {
+            let folders = folders();
+            fs::create_dir(&folders.new).expect("new folder");
+            write(&folders.old, "launch_log.json", "old");
+            let target = folders.new.join("launch_log.json");
+            let stop = Arc::new(AtomicBool::new(false));
+            let racer = {
+                let (stop, target) = (Arc::clone(&stop), target.clone());
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        if let Ok(mut file) = fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&target)
+                        {
+                            std::io::Write::write_all(&mut file, b"racer").expect("racer writes");
+                            return true;
+                        }
+                    }
+                    false
+                })
+            };
+
+            let moved = move_with(&folders.old.join("launch_log.json"), &target, cannot_link);
+            stop.store(true, Ordering::Relaxed);
+            let racer_made_it = racer.join().expect("racer thread");
+
+            if racer_made_it
+                && moved != Moved::NameTaken
+                && read(&folders.new, "launch_log.json") == "old"
+            {
+                replaced += 1;
+            }
+        }
+        assert_eq!(
+            replaced, 0,
+            "the move replaced the racer's file {replaced} times in {RACE_RUNS}"
+        );
+    }
+
+    const RACE_RUNS: usize = 500;
 
     #[test]
     fn on_a_volume_that_cannot_link_a_taken_name_is_kept_and_never_overwritten() {

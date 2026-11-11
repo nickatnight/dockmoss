@@ -23,19 +23,28 @@ pub fn read_within<T: Send + 'static>(
     replied.recv_timeout(timeout).ok()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum AloneRead<T> {
+    Answered(T),
+    /// It did not answer in time, or its thread did not start.
+    NoAnswer,
+    /// An earlier read on the same slot is still running, so none started.
+    Busy,
+}
+
 pub fn read_alone<T: Send + 'static>(
     slot: &'static AtomicBool,
     timeout: Duration,
     read: impl FnOnce() -> T + Send + 'static,
-) -> Option<T> {
+) -> AloneRead<T> {
     let Some(claim) = Claim::take(slot) else {
-        tracing::debug!("a bounded read is still running; not starting another");
-        return None;
+        return AloneRead::Busy;
     };
-    read_within(timeout, move || {
+    let answer = read_within(timeout, move || {
         let _held = claim;
         read()
-    })
+    });
+    answer.map_or(AloneRead::NoAnswer, AloneRead::Answered)
 }
 
 struct Claim(&'static AtomicBool);
@@ -59,7 +68,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
-    use super::{read_alone, read_within};
+    use super::{AloneRead, read_alone, read_within};
 
     const BOUND: Duration = Duration::from_millis(100);
 
@@ -90,23 +99,23 @@ mod tests {
     fn reads_that_answer_in_time_each_run_in_turn() {
         static SLOT: AtomicBool = AtomicBool::new(false);
 
-        assert_eq!(read_alone(&SLOT, BOUND, || 1), Some(1));
-        assert_eq!(read_alone(&SLOT, BOUND, || 2), Some(2));
+        assert_eq!(read_alone(&SLOT, BOUND, || 1), AloneRead::Answered(1));
+        assert_eq!(read_alone(&SLOT, BOUND, || 2), AloneRead::Answered(2));
     }
 
     #[test]
-    fn while_a_late_read_still_runs_another_call_gives_none_at_once_and_starts_no_read() {
+    fn while_a_late_read_still_runs_another_call_is_busy_at_once_and_starts_no_read() {
         static SLOT: AtomicBool = AtomicBool::new(false);
         static SECOND_RAN: AtomicBool = AtomicBool::new(false);
         assert_eq!(
             read_alone(&SLOT, BOUND, || std::thread::sleep(BOUND * 3)),
-            None
+            AloneRead::NoAnswer
         );
 
         let started = Instant::now();
         let second = read_alone(&SLOT, BOUND, || SECOND_RAN.store(true, Ordering::SeqCst));
 
-        assert_eq!(second, None);
+        assert_eq!(second, AloneRead::Busy);
         assert!(started.elapsed() < BOUND / 2, "{:?}", started.elapsed());
         std::thread::sleep(BOUND * 3);
         assert!(!SECOND_RAN.load(Ordering::SeqCst), "the second read ran");
@@ -117,11 +126,11 @@ mod tests {
         static SLOT: AtomicBool = AtomicBool::new(false);
         assert_eq!(
             read_alone(&SLOT, BOUND, || std::thread::sleep(BOUND * 2)),
-            None
+            AloneRead::NoAnswer
         );
 
         std::thread::sleep(BOUND * 2);
 
-        assert_eq!(read_alone(&SLOT, BOUND, || 3), Some(3));
+        assert_eq!(read_alone(&SLOT, BOUND, || 3), AloneRead::Answered(3));
     }
 }

@@ -9,7 +9,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::Error;
-use crate::bounded;
+use crate::bounded::{self, AloneRead};
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
 use crate::login_item::{self, LaunchAtLogin};
@@ -90,9 +90,13 @@ async fn launch_at_login() -> Option<LaunchAtLogin> {
     })
     .await;
     match waited {
-        Ok(Some(status)) => Some(status),
-        Ok(None) => {
+        Ok(AloneRead::Answered(status)) => Some(status),
+        Ok(AloneRead::NoAnswer) => {
             tracing::warn!("launch at login status not read in time");
+            None
+        }
+        Ok(AloneRead::Busy) => {
+            tracing::warn!("launch at login status not read: an earlier read has not answered");
             None
         }
         Err(error) => {

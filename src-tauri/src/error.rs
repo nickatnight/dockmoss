@@ -25,6 +25,17 @@ pub enum Error {
     LoginStatusUnknown,
 }
 
+impl From<crate::login_item::ChangeFailed> for Error {
+    fn from(failed: crate::login_item::ChangeFailed) -> Self {
+        match failed {
+            crate::login_item::ChangeFailed::NotChanged { .. } => {
+                Self::LoginItemNotChanged(crate::login_item::NotChanged)
+            }
+            crate::login_item::ChangeFailed::StatusUnknown => Self::LoginStatusUnknown,
+        }
+    }
+}
+
 impl Error {
     fn kind(&self) -> &'static str {
         match self {

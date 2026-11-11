@@ -2048,7 +2048,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_launch_handed_to_activity_holds_the_next_tick_once() {
+    fn each_launch_is_handed_over_once_and_one_dropped_while_hidden_blocks_no_later_launch() {
         let start = Instant::now();
         let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
         let mut activity = Activity::default();
@@ -2057,11 +2057,63 @@ mod tests {
 
         pending.record(at(1000));
         pending.hand_to(&mut activity, Visibility::Shown);
-        let held = activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010));
+        activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010));
+        activity.rate(PollRate::Slow, false, Some(FAR), false, at(3100));
+        pending.record(at(4000));
+        pending.hand_to(&mut activity, Visibility::Hidden);
+        pending.record(at(6000));
         pending.hand_to(&mut activity, Visibility::Shown);
-        let after = activity.rate(PollRate::Slow, false, Some(FAR), false, at(2500));
 
-        assert_eq!((held, after), (PollRate::Fast, PollRate::Slow));
+        assert_eq!(
+            activity.rate(PollRate::Slow, false, Some(FAR), false, at(6010)),
+            PollRate::Fast
+        );
+    }
+
+    #[test]
+    fn the_overlay_reads_as_last_ordered() {
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+
+        tracker.tick(Ok(vec![]), None);
+        let hidden = tracker.overlay();
+        tracker.order_failed();
+
+        assert_eq!(
+            (hidden, tracker.overlay()),
+            (Visibility::Hidden, Visibility::Shown)
+        );
+    }
+
+    #[test]
+    fn a_second_app_launched_just_past_the_pair_window_gets_its_own_cap() {
+        let step = |case, launches_ms: Vec<u64>, sent, at_ms, expected| LaunchStep {
+            case,
+            launches_ms,
+            sent,
+            at_ms,
+            expected,
+        };
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step("app A launches", vec![1000], true, 1010, PollRate::Fast),
+                step(
+                    "app B launches 300 ms after A",
+                    vec![1300],
+                    true,
+                    1310,
+                    PollRate::Fast,
+                ),
+                step(
+                    "the Dock still moves past A's cap",
+                    vec![],
+                    true,
+                    3100,
+                    PollRate::Fast,
+                ),
+                step("past B's cap", vec![], true, 3301, PollRate::Slow),
+            ],
+        );
     }
 
     #[test]

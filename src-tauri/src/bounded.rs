@@ -23,7 +23,7 @@ pub fn read_within<T: Send + 'static>(
     replied.recv_timeout(timeout).ok()
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AloneRead<T> {
     Answered(T),
     /// It did not answer in time, or its thread did not start.

@@ -412,8 +412,8 @@ mod tests {
 
     use super::{
         Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, OldFolder, Step,
-        copy_into_new_file_with, is_interrupted_copy, link_error, move_old_data,
-        move_old_data_with, move_with, plan_move,
+        copy_into_new_file_with, interrupted_copy_at, is_interrupted_copy, link_error,
+        move_old_data, move_old_data_with, move_with, plan_move,
     };
 
     fn listing(entries: &[(&'static str, Entry)]) -> Listing {
@@ -1319,5 +1319,86 @@ mod tests {
         assert_eq!((report.moved, report.kept), (0, 0));
         assert_eq!(report.failed, vec!["launch_log.json"]);
         assert_eq!(report.left_behind_data(), vec![LeftBehind::UsageHistory]);
+    }
+
+    /// Runs `move_with` on its own thread, so a copy that blocks fails the
+    /// test after 5 s instead of hanging the suite.
+    fn move_within_5s(old: &Path, new: &Path) -> Moved {
+        let (done, finished) = std::sync::mpsc::channel();
+        let (from, to) = (old.to_path_buf(), new.to_path_buf());
+        std::thread::spawn(move || done.send(move_with(&from, &to, cannot_link)));
+        finished
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the move returns instead of blocking on the FIFO")
+    }
+
+    fn mkfifo(path: &Path) {
+        let made = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success(), "mkfifo");
+    }
+
+    #[test]
+    fn a_fifo_at_the_old_name_is_refused_by_the_copy_without_blocking() {
+        use std::os::unix::fs::FileTypeExt;
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        let old = folders.old.join("launch_log.json");
+        let new = folders.new.join("launch_log.json");
+        mkfifo(&old);
+
+        let moved = move_within_5s(&old, &new);
+
+        assert!(matches!(moved, Moved::No(_)), "{moved:?}");
+        assert!(!new.exists());
+        let left = fs::symlink_metadata(&old).expect("the FIFO is left");
+        assert!(left.file_type().is_fifo());
+    }
+
+    #[test]
+    fn a_fifo_at_the_new_name_is_never_read_as_an_interrupted_copy() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "the whole history");
+        let new = folders.new.join("launch_log.json");
+        mkfifo(&new);
+        let (done, finished) = std::sync::mpsc::channel();
+        let (old, fifo) = (folders.old.join("launch_log.json"), new.clone());
+        std::thread::spawn(move || {
+            done.send(interrupted_copy_at(&old, &fifo).is_ok_and(|yes| yes))
+        });
+
+        let interrupted = finished
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the check returns instead of blocking on the FIFO");
+
+        assert!(!interrupted);
+    }
+
+    #[test]
+    fn a_link_at_the_new_name_is_kept_even_when_it_points_at_a_start_of_the_old_file() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        let history = "h".repeat(4096);
+        write(&folders.old, "launch_log.json", &history);
+        write(&folders.old, "elsewhere", "hh");
+        symlink(
+            folders.old.join("elsewhere"),
+            folders.new.join("launch_log.json"),
+        )
+        .expect("link");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!((report.moved, report.kept), (0, 1));
+        assert!(
+            fs::symlink_metadata(folders.new.join("launch_log.json"))
+                .expect("still there")
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(read(&folders.old, "launch_log.json"), history);
     }
 }

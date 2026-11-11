@@ -2,6 +2,8 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use crate::bounded::AloneRead;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginItemStatus {
     NotRegistered,
@@ -46,6 +48,27 @@ pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, No
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeFailed {
+    NotChanged {
+        after: LoginItemStatus,
+    },
+    /// The change ran, but the status read after it did not answer.
+    StatusUnknown,
+}
+
+pub fn after_change(
+    wanted: bool,
+    read: AloneRead<LoginItemStatus>,
+) -> Result<LaunchAtLogin, ChangeFailed> {
+    match read {
+        AloneRead::Answered(after) => {
+            outcome(wanted, after).map_err(|NotChanged| ChangeFailed::NotChanged { after })
+        }
+        AloneRead::NoAnswer | AloneRead::Busy => Err(ChangeFailed::StatusUnknown),
+    }
+}
+
 /// `tauri dev` runs a bare binary, which must never become a login item:
 /// only a path ending in `.app` is an app bundle.
 pub fn is_app_bundle(bundle_path: &Path) -> bool {
@@ -60,7 +83,11 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{LaunchAtLogin, LoginItemStatus, NotChanged, is_app_bundle, outcome};
+    use super::{
+        ChangeFailed, LaunchAtLogin, LoginItemStatus, NotChanged, after_change, is_app_bundle,
+        outcome,
+    };
+    use crate::bounded::AloneRead;
 
     #[test]
     fn each_status_shows_as_on_off_or_needs_approval() {
@@ -163,6 +190,47 @@ mod tests {
         ];
         for (path, expected) in cases {
             assert_eq!(is_app_bundle(Path::new(path)), expected, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_change_is_judged_by_the_read_after_it_and_a_missed_read_is_unknown() {
+        let cases = [
+            (
+                "on, read as enabled",
+                true,
+                AloneRead::Answered(LoginItemStatus::Enabled),
+                Ok(LaunchAtLogin::On),
+            ),
+            (
+                "on, read as still off",
+                true,
+                AloneRead::Answered(LoginItemStatus::NotRegistered),
+                Err(ChangeFailed::NotChanged {
+                    after: LoginItemStatus::NotRegistered,
+                }),
+            ),
+            (
+                "off, read as off",
+                false,
+                AloneRead::Answered(LoginItemStatus::NotRegistered),
+                Ok(LaunchAtLogin::Off),
+            ),
+            (
+                "the read did not answer in time",
+                true,
+                AloneRead::NoAnswer,
+                Err(ChangeFailed::StatusUnknown),
+            ),
+            (
+                "an earlier read is still stalled",
+                false,
+                AloneRead::Busy,
+                Err(ChangeFailed::StatusUnknown),
+            ),
+        ];
+        for (case, wanted, read, expected) in cases {
+            assert_eq!(after_change(wanted, read), expected, "{case}");
         }
     }
 }

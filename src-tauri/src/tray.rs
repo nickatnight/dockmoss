@@ -245,4 +245,13 @@ mod tests {
             assert_eq!(left_behind_text(left), expected, "{left:?}");
         }
     }
+
+    #[test]
+    fn each_left_behind_line_has_its_own_id() {
+        use super::left_behind_id;
+        assert_ne!(
+            left_behind_id(LeftBehind::UsageHistory),
+            left_behind_id(LeftBehind::Settings)
+        );
+    }
 }

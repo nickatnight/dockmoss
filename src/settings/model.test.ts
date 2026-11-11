@@ -842,7 +842,7 @@ describe("createLoginToggle", () => {
     await settle();
     calls[0]?.reply(ok(true));
 
-    expect(await done).toEqual({ result: ok(true), shown: "on", current: true });
+    expect(await done).toEqual({ result: ok(true), shown: "on", isLatestChange: true });
   });
 
   it("runs a second change only after the first has answered", async () => {
@@ -870,8 +870,8 @@ describe("createLoginToggle", () => {
     await settle();
     calls[1]?.reply(ok(false));
 
-    expect(await first).toEqual({ result: ok(true), shown: "on", current: false });
-    expect(await second).toEqual({ result: ok(false), shown: "off", current: true });
+    expect(await first).toEqual({ result: ok(true), shown: "on", isLatestChange: false });
+    expect(await second).toEqual({ result: ok(false), shown: "off", isLatestChange: true });
   });
 
   it("lets the last result set the box even when it fails", async () => {
@@ -885,8 +885,8 @@ describe("createLoginToggle", () => {
     await settle();
     calls[1]?.reply(notChanged);
 
-    expect((await first).current).toBe(false);
-    expect(await second).toEqual({ result: notChanged, shown: "on", current: true });
+    expect((await first).isLatestChange).toBe(false);
+    expect(await second).toEqual({ result: notChanged, shown: "on", isLatestChange: true });
   });
 
   it("gives a change that throws an ipc_failed result, and the box what macOS kept", async () => {
@@ -896,7 +896,7 @@ describe("createLoginToggle", () => {
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: "off",
-      current: true,
+      isLatestChange: true,
     });
   });
 
@@ -917,9 +917,9 @@ describe("createLoginToggle", () => {
     expect(await first).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: "off",
-      current: false,
+      isLatestChange: false,
     });
-    expect(await second).toEqual({ result: ok(false), shown: "off", current: true });
+    expect(await second).toEqual({ result: ok(false), shown: "off", isLatestChange: true });
     expect(wanted).toEqual([true, false]);
   });
 
@@ -932,7 +932,7 @@ describe("createLoginToggle", () => {
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: "off",
-      current: true,
+      isLatestChange: true,
     });
   });
 
@@ -950,9 +950,9 @@ describe("createLoginToggle", () => {
     expect(await first).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: "off",
-      current: false,
+      isLatestChange: false,
     });
-    expect(await second).toEqual({ result: ok(false), shown: "off", current: true });
+    expect(await second).toEqual({ result: ok(false), shown: "off", isLatestChange: true });
     expect(wanted).toEqual([true, false]);
   });
 
@@ -977,7 +977,7 @@ describe("createLoginToggle", () => {
     };
     const toggle = createLoginToggle(() => Promise.resolve(unknown), "needsApproval");
 
-    expect(await toggle(true)).toEqual({ result: unknown, shown: null, current: true });
+    expect(await toggle(true)).toEqual({ result: unknown, shown: null, isLatestChange: true });
   });
 
   it("sets the box again for a change made after the last one answered", async () => {

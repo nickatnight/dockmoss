@@ -263,11 +263,11 @@ async function start(): Promise<void> {
     const toggleLogin = createLoginToggle(setLaunchAtLogin, view.launchAtLogin);
     page.launchAtLogin.addEventListener("change", () => {
       const wanted = page.launchAtLogin.checked;
-      void toggleLogin(wanted).then(({ result, shown, current }) => {
+      void toggleLogin(wanted).then(({ result, shown, isLatestChange }) => {
         if (!result.ok) {
           console.error("launch at login not changed", result.error);
         }
-        if (current) {
+        if (isLatestChange) {
           showLoginBox(shown, announceLoginNote(result));
         }
         report({ field: "launchAtLogin", enabled: wanted }, result);

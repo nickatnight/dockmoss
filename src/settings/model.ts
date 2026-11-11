@@ -308,7 +308,7 @@ export function launchAtLoginBox(status: LoginStatus | null): {
 export interface LoginChangeDone {
   result: LaunchAtLoginResult;
   shown: LoginStatus | null;
-  current: boolean;
+  isLatestChange: boolean;
 }
 
 export function createLoginToggle(
@@ -324,7 +324,7 @@ export function createLoginToggle(
     const done = previous.then(async () => {
       const result = await settled(set, wanted);
       reported = launchAtLoginShown(reported, result);
-      return { result, shown: reported, current: thisChange === latest };
+      return { result, shown: reported, isLatestChange: thisChange === latest };
     });
     previous = done;
     return done;

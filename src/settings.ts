@@ -257,19 +257,22 @@ async function start(): Promise<void> {
     });
   };
 
-  const toggleLogin = createLoginToggle(setLaunchAtLogin);
-  page.launchAtLogin.addEventListener("change", () => {
-    const wanted = page.launchAtLogin.checked;
-    void toggleLogin(wanted).then(({ result, shown }) => {
-      if (!result.ok) {
-        console.error("launch at login not changed", result.error);
-      }
-      if (shown !== null) {
-        showLoginBox(shown);
-      }
-      report({ field: "launchAtLogin", enabled: wanted }, result);
+  // An unknown status leaves the box disabled, so it needs no toggle.
+  if (view.launchAtLogin !== null) {
+    const toggleLogin = createLoginToggle(setLaunchAtLogin, view.launchAtLogin);
+    page.launchAtLogin.addEventListener("change", () => {
+      const wanted = page.launchAtLogin.checked;
+      void toggleLogin(wanted).then(({ result, shown }) => {
+        if (!result.ok) {
+          console.error("launch at login not changed", result.error);
+        }
+        if (shown !== null) {
+          showLoginBox(shown);
+        }
+        report({ field: "launchAtLogin", enabled: wanted }, result);
+      });
     });
-  });
+  }
 
   for (const input of dayInputs) {
     input.addEventListener("change", () => commit(enteredThresholds()));

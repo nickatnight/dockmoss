@@ -753,25 +753,31 @@ describe("saveNotice", () => {
 
 describe("launchAtLoginShown", () => {
   it.each([
-    ["turned on", true, { ok: true, status: "on" }, "on"],
-    ["turned off", false, { ok: true, status: "off" }, "off"],
-    ["on, but macOS reports off", true, { ok: true, status: "off" }, "off"],
-    ["on, waiting for the user's approval", true, { ok: true, status: "needsApproval" }, "needsApproval"],
+    ["turned on", "off", { ok: true, status: "on" }, "on"],
+    ["turned off", "on", { ok: true, status: "off" }, "off"],
+    ["on, but macOS reports off", "off", { ok: true, status: "off" }, "off"],
+    ["on, waiting for the user's approval", "off", { ok: true, status: "needsApproval" }, "needsApproval"],
     [
       "on refused",
-      true,
+      "off",
       { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
       "off",
     ],
     [
       "off refused",
-      false,
+      "on",
       { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
       "on",
     ],
-    ["on, no reply", true, { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, "off"],
-  ] as const)("%s: the box shows what macOS ends in", (_case, wanted, result, expected) => {
-    expect(launchAtLoginShown(wanted, result)).toBe(expected);
+    ["on, no reply", "off", { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, "off"],
+    [
+      "a failed change from needs approval keeps needs approval",
+      "needsApproval",
+      { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
+      "needsApproval",
+    ],
+  ] as const)("%s: the box shows what macOS ends in", (_case, before, result, expected) => {
+    expect(launchAtLoginShown(before, result)).toBe(expected);
   });
 });
 
@@ -794,7 +800,7 @@ describe("createLoginToggle", () => {
 
   it("sets the box from a lone change's result", async () => {
     const { calls, set } = fakeSet();
-    const toggle = createLoginToggle(set);
+    const toggle = createLoginToggle(set, "off");
 
     const done = toggle(true);
     await settle();
@@ -805,7 +811,7 @@ describe("createLoginToggle", () => {
 
   it("runs a second change only after the first has answered", async () => {
     const { calls, set } = fakeSet();
-    const toggle = createLoginToggle(set);
+    const toggle = createLoginToggle(set, "off");
 
     void toggle(true);
     void toggle(false);
@@ -819,7 +825,7 @@ describe("createLoginToggle", () => {
 
   it("leaves the box alone for a result a later change has overtaken, and the last result sets it", async () => {
     const { calls, set } = fakeSet();
-    const toggle = createLoginToggle(set);
+    const toggle = createLoginToggle(set, "off");
 
     const first = toggle(true);
     const second = toggle(false);
@@ -834,7 +840,7 @@ describe("createLoginToggle", () => {
 
   it("lets the last result set the box even when it fails", async () => {
     const { calls, set } = fakeSet();
-    const toggle = createLoginToggle(set);
+    const toggle = createLoginToggle(set, "off");
 
     const first = toggle(true);
     const second = toggle(false);
@@ -849,7 +855,7 @@ describe("createLoginToggle", () => {
 
   it("gives a change that throws an ipc_failed result, and the box what macOS kept", async () => {
     const gone = new Error("bridge gone");
-    const toggle = createLoginToggle(() => Promise.reject(gone));
+    const toggle = createLoginToggle(() => Promise.reject(gone), "off");
 
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
@@ -866,7 +872,7 @@ describe("createLoginToggle", () => {
         throw gone;
       }
       return Promise.resolve(ok(change));
-    });
+    }, "off");
 
     const first = toggle(true);
     const second = toggle(false);
@@ -883,7 +889,7 @@ describe("createLoginToggle", () => {
     const gone = new Error("bridge gone");
     const toggle = createLoginToggle(() => {
       throw gone;
-    });
+    }, "off");
 
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
@@ -897,7 +903,7 @@ describe("createLoginToggle", () => {
     const toggle = createLoginToggle((change) => {
       wanted.push(change);
       return wanted.length === 1 ? Promise.reject(gone) : Promise.resolve(ok(change));
-    });
+    }, "off");
 
     const first = toggle(true);
     const second = toggle(false);
@@ -910,9 +916,23 @@ describe("createLoginToggle", () => {
     expect(wanted).toEqual([true, false]);
   });
 
+  it("keeps the approval note when a change made from needs approval fails", async () => {
+    const toggle = createLoginToggle(() => Promise.resolve(notChanged), "needsApproval");
+
+    expect((await toggle(true)).shown).toBe("needsApproval");
+  });
+
+  it("shows the status of the last change that went through when a later one fails", async () => {
+    const replies = [ok(true), notChanged];
+    const toggle = createLoginToggle(() => Promise.resolve(replies.shift() ?? notChanged), "off");
+
+    expect((await toggle(true)).shown).toBe("on");
+    expect((await toggle(false)).shown).toBe("on");
+  });
+
   it("sets the box again for a change made after the last one answered", async () => {
     const { calls, set } = fakeSet();
-    const toggle = createLoginToggle(set);
+    const toggle = createLoginToggle(set, "off");
 
     const first = toggle(true);
     await settle();

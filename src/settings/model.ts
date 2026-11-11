@@ -182,13 +182,10 @@ export function reannounced(
 }
 
 export function launchAtLoginShown(
-  wanted: boolean,
+  before: LoginStatus,
   result: LaunchAtLoginResult,
 ): LoginStatus {
-  if (result.ok) {
-    return result.status;
-  }
-  return wanted ? "off" : "on";
+  return result.ok ? result.status : before;
 }
 
 export interface ExclusionRow {
@@ -310,18 +307,18 @@ async function settled(
 
 export function createLoginToggle(
   set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
+  loaded: LoginStatus,
 ): (wanted: boolean) => Promise<LoginChangeDone> {
   let previous: Promise<unknown> = Promise.resolve();
   let latest = 0;
+  let reported = loaded;
   return (wanted) => {
     latest += 1;
     const thisChange = latest;
     const done = previous.then(async () => {
       const result = await settled(set, wanted);
-      return {
-        result,
-        shown: thisChange === latest ? launchAtLoginShown(wanted, result) : null,
-      };
+      reported = launchAtLoginShown(reported, result);
+      return { result, shown: thisChange === latest ? reported : null };
     });
     previous = done;
     return done;

@@ -365,6 +365,20 @@ impl Activity {
     }
 }
 
+/// The first app launch of a wait, kept even when the wait is not cut short.
+#[derive(Debug, Default)]
+pub struct PendingLaunch(Option<Instant>);
+
+impl PendingLaunch {
+    pub fn record(&mut self, at: Instant) {
+        self.0.get_or_insert(at);
+    }
+
+    pub fn take(&mut self) -> Option<Instant> {
+        self.0.take()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Woken {
     Due,
@@ -392,8 +406,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        Activity, PollRate, Tick, TickLog, Tracker, Visibility, Woken, awaits_reveal, changed,
-        dock_bounds, next_deadline, poll_rate,
+        Activity, PendingLaunch, PollRate, Tick, TickLog, Tracker, Visibility, Woken,
+        awaits_reveal, changed, dock_bounds, next_deadline, poll_rate,
     };
     use crate::bundle_id::BundleId;
     use crate::dock::{DockError, DockItem, RawDockChild};
@@ -1906,6 +1920,19 @@ mod tests {
 
             assert_eq!(read, expected, "{case}");
         }
+    }
+
+    #[test]
+    fn a_pending_launch_keeps_the_first_launch_until_taken() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut pending = PendingLaunch::default();
+
+        pending.record(at(10));
+        pending.record(at(40));
+
+        assert_eq!(pending.take(), Some(at(10)));
+        assert_eq!(pending.take(), None);
     }
 
     #[test]

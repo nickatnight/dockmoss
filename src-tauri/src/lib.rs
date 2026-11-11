@@ -700,7 +700,9 @@ mod dock_tracker {
     use crate::dock::{self, DockItem};
     use crate::geometry::Display;
     use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
-    use crate::tracker::{self, Activity, PollRate, Tick, TickLog, Tracker, Visibility, Woken};
+    use crate::tracker::{
+        self, Activity, PendingLaunch, PollRate, Tick, TickLog, Tracker, Visibility, Woken,
+    };
     use crate::trust::{Trust, TrustState};
     use crate::usage::DockApp;
     use crate::{OVERLAY_LABEL, macos, primary_display};
@@ -766,7 +768,7 @@ mod dock_tracker {
         let mut watcher = None;
         let mut rate = PollRate::Slow;
         let mut screen_changed = false;
-        let mut launched = None;
+        let mut launched = PendingLaunch::default();
         let mut deadline = Instant::now();
         loop {
             let started = Instant::now();
@@ -819,7 +821,7 @@ mod dock_tracker {
         tracker: &mut Tracker,
         watcher: &mut Option<Channel<Vec<DockItem>>>,
         screen_changed: &mut bool,
-        launched: &mut Option<Instant>,
+        launched: &mut PendingLaunch,
     ) -> Woken {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -835,7 +837,7 @@ mod dock_tracker {
                 }
                 Ok(TrackerMessage::AppLaunching) => {
                     let at = Instant::now();
-                    launched.get_or_insert(at);
+                    launched.record(at);
                     return Woken::AppLaunch { at };
                 }
                 Err(RecvTimeoutError::Timeout) => return Woken::Due,
@@ -982,7 +984,7 @@ mod dock_tracker {
         use crate::commands::TrackerMessage;
         use crate::dock::RawDockChild;
         use crate::geometry::{Display, ScreenRect};
-        use crate::tracker::{Tracker, Visibility, Woken};
+        use crate::tracker::{PendingLaunch, Tracker, Visibility, Woken};
 
         const PRIMARY_2X: Display = Display {
             physical_x: 0,
@@ -1017,7 +1019,7 @@ mod dock_tracker {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             let mut watcher = None;
             let mut screen_changed = false;
-            let mut launched = None;
+            let mut launched = PendingLaunch::default();
             let delay = Duration::from_millis(50);
 
             let started = Instant::now();
@@ -1051,7 +1053,7 @@ mod dock_tracker {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             let mut watcher = None;
             let mut screen_changed = false;
-            let mut launched = None;
+            let mut launched = PendingLaunch::default();
 
             let started = Instant::now();
             let woken = drain_inbox_until(
@@ -1083,7 +1085,7 @@ mod dock_tracker {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             let mut watcher = None;
             let mut screen_changed = false;
-            let mut launched = None;
+            let mut launched = PendingLaunch::default();
 
             let started = Instant::now();
             let woken = drain_inbox_until(
@@ -1098,9 +1100,10 @@ mod dock_tracker {
             let returned = Instant::now();
 
             assert!(matches!(woken, Woken::AppLaunch { at } if at >= started && at <= returned));
+            let kept = launched.take();
             assert!(
-                launched.is_some_and(|at| at >= started && at <= returned),
-                "{launched:?}"
+                kept.is_some_and(|at| at >= started && at <= returned),
+                "{kept:?}"
             );
             assert!(
                 started.elapsed() < Duration::from_secs(1),
@@ -1118,7 +1121,7 @@ mod dock_tracker {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             let mut watcher = None;
             let mut screen_changed = false;
-            let mut launched = None;
+            let mut launched = PendingLaunch::default();
             let deadline = Instant::now() + Duration::from_secs(5);
             drain_inbox_until(
                 deadline,
@@ -1128,7 +1131,7 @@ mod dock_tracker {
                 &mut screen_changed,
                 &mut launched,
             );
-            let first = launched;
+            let between = Instant::now();
             inbox
                 .send(TrackerMessage::AppLaunching)
                 .expect("the receiver is alive");
@@ -1142,8 +1145,7 @@ mod dock_tracker {
                 &mut launched,
             );
 
-            assert!(first.is_some());
-            assert_eq!(launched, first);
+            assert!(launched.take().is_some_and(|at| at < between));
         }
 
         #[test]
@@ -1157,7 +1159,7 @@ mod dock_tracker {
                 .expect("the receiver is alive");
             let mut watcher = None;
             let mut screen_changed = false;
-            let mut launched = None;
+            let mut launched = PendingLaunch::default();
 
             drain_inbox_until(
                 Instant::now() + Duration::from_millis(5),

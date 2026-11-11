@@ -53,6 +53,20 @@ export interface SettingsSaver {
   commit(change: SettingsChange): Promise<SaveSettingsResult>;
 }
 
+async function saveOrIpcFailed(
+  save: (settings: SettingsInput) => Promise<SaveSettingsResult>,
+  settings: SettingsInput,
+): Promise<SaveSettingsResult> {
+  try {
+    return await save(settings);
+  } catch (cause: unknown) {
+    return { ok: false, error: { kind: "ipc_failed", cause } };
+  }
+}
+
+/** Saves changes one at a time, in order, each built from what the last
+ * save stored. A `save` that throws, or returns a promise that rejects,
+ * gives an `ipc_failed` result, so a commit never rejects. */
 export function createSettingsSaver(
   initial: Settings,
   save: (settings: SettingsInput) => Promise<SaveSettingsResult>,
@@ -62,13 +76,13 @@ export function createSettingsSaver(
   return {
     commit(change) {
       const result = previous.then(async () => {
-        const outcome = await save(nextSettings(saved, change));
+        const outcome = await saveOrIpcFailed(save, nextSettings(saved, change));
         if (outcome.ok) {
           saved = outcome.settings;
         }
         return outcome;
       });
-      previous = result.catch(() => undefined);
+      previous = result;
       return result;
     },
   };

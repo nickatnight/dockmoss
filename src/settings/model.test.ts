@@ -301,21 +301,38 @@ describe("createSettingsSaver", () => {
     });
   });
 
-  it("keeps saving after a save throws", async () => {
+  it("gives a save that rejects an ipc_failed result, and keeps saving", async () => {
+    const gone = new Error("bridge gone");
     const calls: SettingsInput[] = [];
     const saver = createSettingsSaver(saved, (settings) => {
       calls.push(settings);
-      return calls.length === 1
-        ? Promise.reject(new Error("bridge gone"))
-        : Promise.resolve(stored(settings));
+      return calls.length === 1 ? Promise.reject(gone) : Promise.resolve(stored(settings));
     });
 
     const first = saver.commit({ field: "fastForward", speed: 10 });
     const second = saver.commit({ field: "fastForward", speed: 100 });
 
-    await expect(first).rejects.toThrow("bridge gone");
-    await expect(second).resolves.toMatchObject({ ok: true });
+    expect(await first).toEqual({ ok: false, error: { kind: "ipc_failed", cause: gone } });
+    expect(await second).toEqual({ ok: true, settings: { ...saved, fastForward: 100 } });
     expect(calls).toHaveLength(2);
+  });
+
+  it("gives a save that throws before it returns a promise an ipc_failed result, and keeps saving", async () => {
+    const gone = new Error("bridge gone");
+    const calls: SettingsInput[] = [];
+    const saver = createSettingsSaver(saved, (settings) => {
+      calls.push(settings);
+      if (calls.length === 1) {
+        throw gone;
+      }
+      return Promise.resolve(stored(settings));
+    });
+
+    const first = saver.commit({ field: "fastForward", speed: 10 });
+    const second = saver.commit({ field: "fastForward", speed: 100 });
+
+    expect(await first).toEqual({ ok: false, error: { kind: "ipc_failed", cause: gone } });
+    expect(await second).toEqual({ ok: true, settings: { ...saved, fastForward: 100 } });
   });
 });
 

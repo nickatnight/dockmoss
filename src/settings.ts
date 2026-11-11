@@ -243,24 +243,18 @@ async function start(): Promise<void> {
   /** `undo` puts the control back when Rust refuses the value outright, as
    * for an exclusion past the cap, which no retry can store. */
   const commit = (change: SettingsChange, undo?: () => void): void => {
-    saver
-      .commit(change)
-      .catch((error: unknown) => ({
-        ok: false as const,
-        error: { kind: "ipc_failed" as const, cause: error },
-      }))
-      .then((result) => {
-        if (!result.ok) {
-          console.error("settings not saved", result.error);
-        }
-        if (change.field === "thresholds") {
-          wrongDays = invalidDays(change.thresholds, view.limits);
-        }
-        report(change, result);
-        if (!result.ok && result.error.kind === "invalid_settings") {
-          undo?.();
-        }
-      });
+    void saver.commit(change).then((result) => {
+      if (!result.ok) {
+        console.error("settings not saved", result.error);
+      }
+      if (change.field === "thresholds") {
+        wrongDays = invalidDays(change.thresholds, view.limits);
+      }
+      report(change, result);
+      if (!result.ok && result.error.kind === "invalid_settings") {
+        undo?.();
+      }
+    });
   };
 
   const toggleLogin = createLoginToggle(setLaunchAtLogin);

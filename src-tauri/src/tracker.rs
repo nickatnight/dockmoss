@@ -268,18 +268,18 @@ pub struct Activity {
     last_moved: Option<Instant>,
     last_sent: Option<Instant>,
     resting: bool,
-    launch_hold: Option<Instant>,
+    launch_hold_started: Option<Instant>,
 }
 
 impl Activity {
     pub fn app_launching(&mut self, at: Instant) {
         if !self.holding_for_launch(at) {
-            self.launch_hold = Some(at);
+            self.launch_hold_started = Some(at);
         }
     }
 
     fn holding_for_launch(&self, now: Instant) -> bool {
-        self.launch_hold.is_some_and(|since| {
+        self.launch_hold_started.is_some_and(|since| {
             let settles_from = self.last_sent.map_or(since, |sent| sent.max(since));
             now.saturating_duration_since(since) <= LAUNCH_HOLD_CAP
                 && now.saturating_duration_since(settles_from) <= LAUNCH_SETTLE
@@ -312,7 +312,7 @@ impl Activity {
         self.resting = near && !moving;
         let launching = self.holding_for_launch(now);
         if !launching {
-            self.launch_hold = None;
+            self.launch_hold_started = None;
         }
         if (near && moving) || launching {
             PollRate::Fast

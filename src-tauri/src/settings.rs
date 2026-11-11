@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 
 use crate::bundle_id::BundleId;
 use crate::growth::{self, FastForward, GrowthError, Overgrowth, Thresholds};
+use crate::login_item::LaunchAtLogin;
 use crate::usage::{self, DistinctDockApps, DockApp};
 
 pub const MAX_EXCLUSIONS: usize = 256;
@@ -238,14 +239,14 @@ pub struct SettingsView {
     settings: Settings,
     limits: Limits,
     dock_apps: Option<Vec<DockAppName>>,
-    launch_at_login: Option<bool>,
+    launch_at_login: Option<LaunchAtLogin>,
 }
 
 impl SettingsView {
     pub fn new(
         settings: Settings,
         dock: Option<&DistinctDockApps>,
-        launch_at_login: Option<bool>,
+        launch_at_login: Option<LaunchAtLogin>,
     ) -> Self {
         let dock_apps = dock
             .map(|dock| dock.iter().map(DockAppName::new).collect::<Vec<_>>())
@@ -452,6 +453,7 @@ mod tests {
     };
     use crate::bundle_id::BundleId;
     use crate::growth::{FastForward, GrowthError, Overgrowth, Thresholds};
+    use crate::login_item::LaunchAtLogin;
     use crate::usage::{DistinctDockApps, DockApp};
 
     fn object(value: Value) -> Map<String, Value> {
@@ -881,7 +883,7 @@ mod tests {
         let view = SettingsView::new(
             Settings::default(),
             Some(&DistinctDockApps::new(&dock)),
-            Some(true),
+            Some(LaunchAtLogin::On),
         );
 
         let json = serde_json::to_value(&view).expect("SettingsView serializes");
@@ -894,7 +896,7 @@ mod tests {
                     { "bundleId": "com.apple.Safari", "name": "Safari" },
                     { "bundleId": "com.apple.Chess", "name": "Chess" },
                 ],
-                "launchAtLogin": true,
+                "launchAtLogin": "on",
             })
         );
         assert!(!json.to_string().contains("someone"), "{json}");
@@ -914,11 +916,23 @@ mod tests {
     }
 
     #[test]
+    fn a_login_item_waiting_for_approval_is_sent_as_needs_approval() {
+        let view = SettingsView::new(
+            Settings::default(),
+            None,
+            Some(LaunchAtLogin::NeedsApproval),
+        );
+
+        let json = serde_json::to_value(&view).expect("SettingsView serializes");
+        assert_eq!(json["launchAtLogin"], json!("needsApproval"));
+    }
+
+    #[test]
     fn an_empty_dock_list_is_unknown_because_a_readable_dock_always_holds_finder() {
         let view = SettingsView::new(
             Settings::default(),
             Some(&DistinctDockApps::new(&[])),
-            Some(false),
+            Some(LaunchAtLogin::Off),
         );
 
         let json = serde_json::to_value(&view).expect("SettingsView serializes");

@@ -11,7 +11,7 @@ use crate::Error;
 use crate::bounded;
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
-use crate::login_item;
+use crate::login_item::{self, LaunchAtLogin};
 use crate::macos;
 use crate::settings::{self, NotSaved, Settings, SettingsView};
 use crate::usage::{self, AppGrowth, DistinctDockApps};
@@ -81,15 +81,15 @@ pub async fn get_settings(
 
 /// `None` when `ServiceManagement` does not answer in time, so Settings opens
 /// anyway, with only the launch at login box left disabled.
-async fn launch_at_login() -> Option<bool> {
+async fn launch_at_login() -> Option<LaunchAtLogin> {
     let waited = tauri::async_runtime::spawn_blocking(|| {
         bounded::read_within(LOGIN_STATUS_TIMEOUT, || {
-            macos::login_item::status().opens_at_login()
+            macos::login_item::status().launch_at_login()
         })
     })
     .await;
     match waited {
-        Ok(Some(opens_at_login)) => Some(opens_at_login),
+        Ok(Some(status)) => Some(status),
         Ok(None) => {
             tracing::warn!("launch at login status not read in time");
             None
@@ -169,15 +169,15 @@ fn apply_to_growth(app: &AppHandle, saved: &MutexGuard<'_, Settings>) {
     }
 }
 
-/// Turns launch at login on or off and returns whether the app now opens at
-/// login, as macOS reports it after the change. `login_item_not_changed` when
-/// macOS did not end in the state asked for.
+/// Turns launch at login on or off and returns the status macOS reports after
+/// the change: on, off, or waiting for the user's approval.
+/// `login_item_not_changed` when macOS did not end in the state asked for.
 #[tauri::command]
-pub async fn set_launch_at_login(enabled: bool) -> Result<bool, Error> {
+pub async fn set_launch_at_login(enabled: bool) -> Result<LaunchAtLogin, Error> {
     tauri::async_runtime::spawn_blocking(move || set_launch_at_login_blocking(enabled)).await?
 }
 
-fn set_launch_at_login_blocking(wanted: bool) -> Result<bool, Error> {
+fn set_launch_at_login_blocking(wanted: bool) -> Result<LaunchAtLogin, Error> {
     if let Err(error) = macos::login_item::set(wanted) {
         tracing::warn!(%error, wanted, "launch at login change refused");
     }
@@ -185,6 +185,6 @@ fn set_launch_at_login_blocking(wanted: bool) -> Result<bool, Error> {
     let now = login_item::outcome(wanted, after).inspect_err(|_| {
         tracing::warn!(wanted, ?after, "launch at login not changed");
     })?;
-    tracing::info!(launch_at_login = now, "launch at login set");
+    tracing::info!(launch_at_login = ?now, "launch at login set");
     Ok(now)
 }

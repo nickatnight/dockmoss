@@ -5,6 +5,7 @@ import type {
   ErrorKind,
   FastForward,
   LaunchAtLoginResult,
+  LoginStatus,
   SaveSettingsResult,
   Settings,
   SettingsInput,
@@ -77,12 +78,16 @@ export interface Feedback {
   thresholdError: boolean;
   exclusionLimit: boolean;
   unsaved: readonly string[];
+  /** The last login change failed because macOS did not change the item,
+   * which a retry does not fix. */
+  loginNotChanged: boolean;
 }
 
 export const NO_FEEDBACK: Feedback = {
   thresholdError: false,
   exclusionLimit: false,
   unsaved: [],
+  loginNotChanged: false,
 };
 
 function changedControl(change: PageChange): string {
@@ -101,6 +106,10 @@ export function nextFeedback(
   result: Outcome,
 ): Feedback {
   const control = changedControl(change);
+  const loginNotChanged =
+    change.field === "launchAtLogin"
+      ? !result.ok && result.error.kind === "login_item_not_changed"
+      : feedback.loginNotChanged;
   if (result.ok) {
     return {
       thresholdError:
@@ -108,6 +117,7 @@ export function nextFeedback(
       exclusionLimit:
         change.field === "excluded" ? false : feedback.exclusionLimit,
       unsaved: feedback.unsaved.filter((other) => other !== control),
+      loginNotChanged,
     };
   }
   if (rejected(result) && change.field === "thresholds") {
@@ -122,7 +132,28 @@ export function nextFeedback(
     ...feedback,
     thresholdError: !thresholdsPassedRules && feedback.thresholdError,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
+    loginNotChanged,
   };
+}
+
+const TRY_AGAIN = "This change could not be saved. Try again.";
+const CHECK_LOGIN_ITEMS =
+  "macOS didn't change this. Check System Settings › General › Login Items.";
+
+/** The save notice's text, or null when nothing failed. "Try again" only
+ * for what a retry can fix; a login item macOS did not change points to
+ * System Settings instead. */
+export function saveNotice(feedback: Feedback): string | null {
+  const retryable = feedback.unsaved.filter(
+    (control) => !(control === "launchAtLogin" && feedback.loginNotChanged),
+  );
+  const loginNotChanged =
+    feedback.loginNotChanged && feedback.unsaved.includes("launchAtLogin");
+  const sentences = [
+    ...(retryable.length > 0 ? [TRY_AGAIN] : []),
+    ...(loginNotChanged ? [CHECK_LOGIN_ITEMS] : []),
+  ];
+  return sentences.length > 0 ? sentences.join(" ") : null;
 }
 
 /** Which messages to announce again: setting an alert to the text it already
@@ -144,11 +175,16 @@ export function reannounced(
   };
 }
 
+/** The status the box shows after a change: what macOS reported, or, when
+ * the change failed, the state it was changed from. */
 export function launchAtLoginShown(
   wanted: boolean,
   result: LaunchAtLoginResult,
-): boolean {
-  return result.ok ? result.enabled : !wanted;
+): LoginStatus {
+  if (result.ok) {
+    return result.status;
+  }
+  return wanted ? "off" : "on";
 }
 
 export interface ExclusionRow {
@@ -227,25 +263,34 @@ export function toFastForward(value: string): FastForward | null {
   return FAST_FORWARD_SPEEDS.find((speed) => String(speed) === value) ?? null;
 }
 
-export function launchAtLoginBox(status: boolean | null): {
+function loginNote(status: LoginStatus | null): string | null {
+  switch (status) {
+    case null:
+      return "macOS did not say whether this is on. To ask again, close and reopen Settings.";
+    case "needsApproval":
+      return "DockMoss needs your approval in System Settings › General › Login Items.";
+    case "on":
+    case "off":
+      return null;
+  }
+}
+
+export function launchAtLoginBox(status: LoginStatus | null): {
   checked: boolean;
   disabled: boolean;
   note: string | null;
 } {
   return {
-    checked: status === true,
+    checked: status === "on",
     disabled: status === null,
-    note:
-      status === null
-        ? "macOS did not say whether this is on. To ask again, close and reopen Settings."
-        : null,
+    note: loginNote(status),
   };
 }
 
 export interface LoginChangeDone {
   result: LaunchAtLoginResult;
   /** What the box shows now, or null when a later change has overtaken this one. */
-  shown: boolean | null;
+  shown: LoginStatus | null;
 }
 
 async function settled(

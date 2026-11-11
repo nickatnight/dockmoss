@@ -68,12 +68,16 @@ export interface DockAppName {
   name: string;
 }
 
+/** Mirrors `login_item::LaunchAtLogin`. Only "on" opens DockMoss at login;
+ * "needsApproval" waits for the user in System Settings. */
+export type LoginStatus = "on" | "off" | "needsApproval";
+
 export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
   dockApps: DockAppName[] | null;
   /** From macOS; null when it did not answer in time. */
-  launchAtLogin: boolean | null;
+  launchAtLogin: LoginStatus | null;
 }
 
 export interface CommandError {
@@ -145,7 +149,7 @@ export async function saveSettings(
 }
 
 export type LaunchAtLoginResult =
-  | { ok: true; enabled: boolean }
+  | { ok: true; status: LoginStatus }
   | {
       ok: false;
       error:
@@ -153,13 +157,13 @@ export type LaunchAtLoginResult =
         | { kind: "ipc_failed"; cause: unknown };
     };
 
-/** Turns launch at login on or off. `enabled` is what macOS reports after. */
+/** Turns launch at login on or off. `status` is what macOS reports after. */
 export async function setLaunchAtLogin(
   enabled: boolean,
 ): Promise<LaunchAtLoginResult> {
   try {
-    const now = await invoke<boolean>("set_launch_at_login", { enabled });
-    return { ok: true, enabled: now };
+    const status = await invoke<LoginStatus>("set_launch_at_login", { enabled });
+    return { ok: true, status };
   } catch (error) {
     if (isCommandError(error) && error.kind === "login_item_not_changed") {
       return { ok: false, error: { kind: error.kind, message: error.message } };

@@ -2,6 +2,7 @@ import {
   getSettings,
   saveSettings,
   setLaunchAtLogin,
+  type LoginStatus,
   type SettingsView,
 } from "./ipc";
 import {
@@ -15,6 +16,7 @@ import {
   launchAtLoginBox,
   nextFeedback,
   reannounced,
+  saveNotice,
   thresholdMessage,
   toFastForward,
   type DayField,
@@ -190,17 +192,20 @@ function showFeedback(
       page.days[field].removeAttribute("aria-invalid");
     }
   }
-  showSaveError(
-    feedback.unsaved.length > 0
-      ? "This change could not be saved. Try again."
-      : null,
-    again.saveNotice,
-  );
+  showSaveError(saveNotice(feedback), again.saveNotice);
 }
 
 function showSaveError(message: string | null, again = false): void {
   page.saveError.hidden = message === null;
   setAlert(page.saveError, message ?? "", again);
+}
+
+function showLoginBox(status: LoginStatus | null): void {
+  const box = launchAtLoginBox(status);
+  page.launchAtLogin.checked = box.checked;
+  page.launchAtLogin.disabled = box.disabled;
+  page.launchAtLoginNote.textContent = box.note;
+  page.launchAtLoginNote.hidden = box.note === null;
 }
 
 function enteredThresholds(): SettingsChange {
@@ -221,11 +226,7 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
   page.intensity.disabled = false;
-  const loginBox = launchAtLoginBox(view.launchAtLogin);
-  page.launchAtLogin.checked = loginBox.checked;
-  page.launchAtLogin.disabled = loginBox.disabled;
-  page.launchAtLoginNote.textContent = loginBox.note;
-  page.launchAtLoginNote.hidden = loginBox.note === null;
+  showLoginBox(view.launchAtLogin);
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const messages = {
@@ -270,7 +271,7 @@ async function start(): Promise<void> {
         console.error("launch at login not changed", result.error);
       }
       if (shown !== null) {
-        page.launchAtLogin.checked = shown;
+        showLoginBox(shown);
       }
       report({ field: "launchAtLogin", enabled: wanted }, result);
     });

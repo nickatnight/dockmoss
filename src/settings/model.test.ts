@@ -22,8 +22,11 @@ import {
   nextFeedback,
   nextSettings,
   reannounced,
+  saveNotice,
   thresholdMessage,
   toFastForward,
+  type Outcome,
+  type PageChange,
 } from "./model";
 
 const id = (value: string): BundleId => value as BundleId;
@@ -342,7 +345,12 @@ describe("nextFeedback", () => {
   it("shows the threshold message for rejected thresholds, and no save notice", () => {
     const feedback = nextFeedback(NO_FEEDBACK, fuzz1, invalid);
 
-    expect(feedback).toEqual({ thresholdError: true, exclusionLimit: false, unsaved: [] });
+    expect(feedback).toEqual({
+      thresholdError: true,
+      exclusionLimit: false,
+      unsaved: [],
+      loginNotChanged: false,
+    });
   });
 
   it("clears the threshold message on a valid threshold save", () => {
@@ -367,6 +375,7 @@ describe("nextFeedback", () => {
       thresholdError: false,
       exclusionLimit: false,
       unsaved: ["thresholds"],
+      loginNotChanged: false,
     });
   });
 
@@ -389,6 +398,7 @@ describe("nextFeedback", () => {
       thresholdError: true,
       exclusionLimit: false,
       unsaved: ["intensityPercent"],
+      loginNotChanged: false,
     });
   });
 
@@ -403,6 +413,7 @@ describe("nextFeedback", () => {
       thresholdError: false,
       exclusionLimit: false,
       unsaved: ["thresholds"],
+      loginNotChanged: false,
     });
   });
 
@@ -419,6 +430,7 @@ describe("nextFeedback", () => {
       thresholdError: true,
       exclusionLimit: false,
       unsaved: ["intensityPercent"],
+      loginNotChanged: false,
     });
   });
 
@@ -427,6 +439,7 @@ describe("nextFeedback", () => {
       thresholdError: false,
       exclusionLimit: true,
       unsaved: [],
+      loginNotChanged: false,
     });
   });
 
@@ -449,6 +462,7 @@ describe("nextFeedback", () => {
       thresholdError: true,
       exclusionLimit: true,
       unsaved: ["intensityPercent"],
+      loginNotChanged: false,
     });
   });
 
@@ -464,6 +478,7 @@ describe("nextFeedback", () => {
       thresholdError: false,
       exclusionLimit: false,
       unsaved: ["fastForward"],
+      loginNotChanged: false,
     });
   });
 
@@ -617,28 +632,37 @@ describe("launch at login feedback", () => {
     ok: false,
     error: { kind: "ipc_failed", cause: "gone" },
   };
-  const turnedOn: LaunchAtLoginResult = { ok: true, enabled: true };
+  const turnedOn: LaunchAtLoginResult = { ok: true, status: "on" };
   const notSaved: SaveSettingsResult = {
     ok: false,
     error: { kind: "settings_not_saved", message: "settings could not be saved" },
   };
 
   it.each([
-    ["login_item_not_changed", notChanged],
-    ["ipc_failed", ipcFailed],
-  ])("shows the save notice after %s, and no field message", (_kind, result) => {
-    expect(nextFeedback(NO_FEEDBACK, turnOn, result)).toEqual({
-      thresholdError: false,
-      exclusionLimit: false,
-      unsaved: ["launchAtLogin"],
-    });
-  });
+    ["login_item_not_changed", notChanged, true],
+    ["ipc_failed", ipcFailed, false],
+  ] as const)(
+    "shows the save notice after %s, and no field message",
+    (_kind, result, loginNotChanged) => {
+      expect(nextFeedback(NO_FEEDBACK, turnOn, result)).toEqual({
+        thresholdError: false,
+        exclusionLimit: false,
+        unsaved: ["launchAtLogin"],
+        loginNotChanged,
+      });
+    },
+  );
 
   it("clears its own notice once a change goes through, and no other control's", () => {
     const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
     const bothFailed = nextFeedback(failed, intensity, notSaved);
 
-    expect(nextFeedback(bothFailed, turnOn, turnedOn).unsaved).toEqual(["intensityPercent"]);
+    expect(nextFeedback(bothFailed, turnOn, turnedOn)).toEqual({
+      thresholdError: false,
+      exclusionLimit: false,
+      unsaved: ["intensityPercent"],
+      loginNotChanged: false,
+    });
   });
 
   it("re-announces the save notice when it fails again while the notice shows", () => {
@@ -647,33 +671,98 @@ describe("launch at login feedback", () => {
     expect(reannounced(failed, turnOn, notChanged).saveNotice).toBe(true);
     expect(reannounced(NO_FEEDBACK, turnOn, notChanged).saveNotice).toBe(false);
   });
+
+  it("keeps what macOS said about the login item while another control fails", () => {
+    const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
+
+    expect(nextFeedback(failed, intensity, notSaved).loginNotChanged).toBe(true);
+  });
+});
+
+describe("saveNotice", () => {
+  const tryAgain = "This change could not be saved. Try again.";
+  const checkLoginItems =
+    "macOS didn't change this. Check System Settings › General › Login Items.";
+  const turnOn = { field: "launchAtLogin", enabled: true } as const;
+  const intensity = { field: "intensityPercent", percent: 40 } as const;
+  const notChanged: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "login_item_not_changed", message: "launch at login was not changed" },
+  };
+  const ipcFailed: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "ipc_failed", cause: "gone" },
+  };
+  const notSaved: SaveSettingsResult = {
+    ok: false,
+    error: { kind: "settings_not_saved", message: "settings could not be saved" },
+  };
+  const turnedOn: LaunchAtLoginResult = { ok: true, status: "on" };
+  const after = (...steps: [PageChange, Outcome][]) =>
+    steps.reduce((feedback, [change, result]) => nextFeedback(feedback, change, result), NO_FEEDBACK);
+
+  it.each([
+    ["nothing failed", after(), null],
+    ["a setting was not saved: a retry can work", after([intensity, notSaved]), tryAgain],
+    [
+      "the login change never reached Rust: a retry can work",
+      after([turnOn, ipcFailed]),
+      tryAgain,
+    ],
+    [
+      "macOS did not change the login item: a retry cannot fix it",
+      after([turnOn, notChanged]),
+      checkLoginItems,
+    ],
+    [
+      "both: each sentence once",
+      after([turnOn, notChanged], [intensity, notSaved]),
+      `${tryAgain} ${checkLoginItems}`,
+    ],
+    [
+      "the login item failed again, this time over IPC",
+      after([turnOn, notChanged], [turnOn, ipcFailed]),
+      tryAgain,
+    ],
+    [
+      "the login item went through after failing",
+      after([turnOn, notChanged], [turnOn, turnedOn]),
+      null,
+    ],
+  ] as const)("%s", (_case, feedback, expected) => {
+    expect(saveNotice(feedback)).toBe(expected);
+  });
 });
 
 describe("launchAtLoginShown", () => {
   it.each([
-    ["turned on", true, { ok: true, enabled: true }, true],
-    ["turned off", false, { ok: true, enabled: false }, false],
-    ["on, but macOS reports off", true, { ok: true, enabled: false }, false],
+    ["turned on", true, { ok: true, status: "on" }, "on"],
+    ["turned off", false, { ok: true, status: "off" }, "off"],
+    ["on, but macOS reports off", true, { ok: true, status: "off" }, "off"],
+    ["on, waiting for the user's approval", true, { ok: true, status: "needsApproval" }, "needsApproval"],
     [
       "on refused",
       true,
       { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
-      false,
+      "off",
     ],
     [
       "off refused",
       false,
       { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
-      true,
+      "on",
     ],
-    ["on, no reply", true, { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, false],
+    ["on, no reply", true, { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, "off"],
   ] as const)("%s: the box shows what macOS ends in", (_case, wanted, result, expected) => {
     expect(launchAtLoginShown(wanted, result)).toBe(expected);
   });
 });
 
 describe("createLoginToggle", () => {
-  const ok = (enabled: boolean): LaunchAtLoginResult => ({ ok: true, enabled });
+  const ok = (enabled: boolean): LaunchAtLoginResult => ({
+    ok: true,
+    status: enabled ? "on" : "off",
+  });
   const notChanged: LaunchAtLoginResult = {
     ok: false,
     error: { kind: "login_item_not_changed", message: "launch at login was not changed" },
@@ -694,7 +783,7 @@ describe("createLoginToggle", () => {
     await settle();
     calls[0]?.reply(ok(true));
 
-    expect(await done).toEqual({ result: ok(true), shown: true });
+    expect(await done).toEqual({ result: ok(true), shown: "on" });
   });
 
   it("runs a second change only after the first has answered", async () => {
@@ -723,7 +812,7 @@ describe("createLoginToggle", () => {
     calls[1]?.reply(ok(false));
 
     expect(await first).toEqual({ result: ok(true), shown: null });
-    expect(await second).toEqual({ result: ok(false), shown: false });
+    expect(await second).toEqual({ result: ok(false), shown: "off" });
   });
 
   it("lets the last result set the box even when it fails", async () => {
@@ -738,7 +827,7 @@ describe("createLoginToggle", () => {
     calls[1]?.reply(notChanged);
 
     expect((await first).shown).toBeNull();
-    expect(await second).toEqual({ result: notChanged, shown: true });
+    expect(await second).toEqual({ result: notChanged, shown: "on" });
   });
 
   it("gives a change that throws an ipc_failed result, and the box what macOS kept", async () => {
@@ -747,7 +836,7 @@ describe("createLoginToggle", () => {
 
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
-      shown: false,
+      shown: "off",
     });
   });
 
@@ -769,7 +858,7 @@ describe("createLoginToggle", () => {
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: null,
     });
-    expect(await second).toEqual({ result: ok(false), shown: false });
+    expect(await second).toEqual({ result: ok(false), shown: "off" });
     expect(wanted).toEqual([true, false]);
   });
 
@@ -781,7 +870,7 @@ describe("createLoginToggle", () => {
 
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
-      shown: false,
+      shown: "off",
     });
   });
 
@@ -800,7 +889,7 @@ describe("createLoginToggle", () => {
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: null,
     });
-    expect(await second).toEqual({ result: ok(false), shown: false });
+    expect(await second).toEqual({ result: ok(false), shown: "off" });
     expect(wanted).toEqual([true, false]);
   });
 
@@ -811,19 +900,28 @@ describe("createLoginToggle", () => {
     const first = toggle(true);
     await settle();
     calls[0]?.reply(ok(true));
-    expect((await first).shown).toBe(true);
+    expect((await first).shown).toBe("on");
 
     const second = toggle(false);
     await settle();
     calls[1]?.reply(ok(false));
-    expect((await second).shown).toBe(false);
+    expect((await second).shown).toBe("off");
   });
 });
 
 describe("launchAtLoginBox", () => {
   it.each([
-    ["on", true, { checked: true, disabled: false, note: null }],
-    ["off", false, { checked: false, disabled: false, note: null }],
+    ["on", "on", { checked: true, disabled: false, note: null }],
+    ["off", "off", { checked: false, disabled: false, note: null }],
+    [
+      "waiting for the user's approval: off, and the note says where to approve it",
+      "needsApproval",
+      {
+        checked: false,
+        disabled: false,
+        note: "DockMoss needs your approval in System Settings › General › Login Items.",
+      },
+    ],
     [
       "unknown: macOS did not answer in time, and the note says why",
       null,

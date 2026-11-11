@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use serde::Serialize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginItemStatus {
     NotRegistered,
@@ -8,9 +10,23 @@ pub enum LoginItemStatus {
     NotFound,
 }
 
+/// What the Settings box shows. Only `On` opens the app at login;
+/// `NeedsApproval` is registered but waits for the user in System Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LaunchAtLogin {
+    On,
+    Off,
+    NeedsApproval,
+}
+
 impl LoginItemStatus {
-    pub fn opens_at_login(self) -> bool {
-        self == Self::Enabled
+    pub fn launch_at_login(self) -> LaunchAtLogin {
+        match self {
+            Self::Enabled => LaunchAtLogin::On,
+            Self::RequiresApproval => LaunchAtLogin::NeedsApproval,
+            Self::NotRegistered | Self::NotFound => LaunchAtLogin::Off,
+        }
     }
 }
 
@@ -18,15 +34,19 @@ impl LoginItemStatus {
 #[error("launch at login was not changed")]
 pub struct NotChanged;
 
-/// Whether the app now opens at login, judged by the status read after the
-/// change, not by whether the call reported an error: unregistering an item
-/// that was never registered fails, yet ends where it was asked to.
-pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<bool, NotChanged> {
-    if after.opens_at_login() == wanted {
-        Ok(wanted)
-    } else {
-        Err(NotChanged)
-    }
+/// The status after a change, judged by the status read after it, not by
+/// whether the call reported an error: unregistering an item that was never
+/// registered fails, yet ends where it was asked to. An item waiting for
+/// approval is not an error either way: turned on, only the user can approve
+/// it; turned off, it does not open at login.
+pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, NotChanged> {
+    let now = after.launch_at_login();
+    let as_asked = match now {
+        LaunchAtLogin::On => wanted,
+        LaunchAtLogin::Off => !wanted,
+        LaunchAtLogin::NeedsApproval => true,
+    };
+    if as_asked { Ok(now) } else { Err(NotChanged) }
 }
 
 /// `tauri dev` runs a bare binary, which must never become a login item:
@@ -41,25 +61,51 @@ pub fn is_app_bundle(bundle_path: &Path) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{LoginItemStatus, NotChanged, is_app_bundle, outcome};
+    use serde_json::json;
+
+    use super::{LaunchAtLogin, LoginItemStatus, NotChanged, is_app_bundle, outcome};
 
     #[test]
-    fn only_an_enabled_item_opens_at_login() {
+    fn each_status_shows_as_on_off_or_needs_approval() {
         let cases = [
-            (LoginItemStatus::NotRegistered, false),
-            (LoginItemStatus::Enabled, true),
-            (LoginItemStatus::RequiresApproval, false),
-            (LoginItemStatus::NotFound, false),
+            (LoginItemStatus::NotRegistered, LaunchAtLogin::Off),
+            (LoginItemStatus::Enabled, LaunchAtLogin::On),
+            (
+                LoginItemStatus::RequiresApproval,
+                LaunchAtLogin::NeedsApproval,
+            ),
+            (LoginItemStatus::NotFound, LaunchAtLogin::Off),
         ];
         for (status, expected) in cases {
-            assert_eq!(status.opens_at_login(), expected, "{status:?}");
+            assert_eq!(status.launch_at_login(), expected, "{status:?}");
         }
     }
 
     #[test]
-    fn a_change_succeeds_only_when_macos_ends_in_the_state_asked_for() {
+    fn the_webview_gets_the_status_as_a_camel_case_string() {
         let cases = [
-            ("on, now enabled", true, LoginItemStatus::Enabled, Ok(true)),
+            (LaunchAtLogin::On, json!("on")),
+            (LaunchAtLogin::Off, json!("off")),
+            (LaunchAtLogin::NeedsApproval, json!("needsApproval")),
+        ];
+        for (status, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(status).expect("LaunchAtLogin serializes"),
+                expected,
+                "{status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_change_succeeds_when_macos_ends_as_asked_or_waits_for_approval() {
+        let cases = [
+            (
+                "on, now enabled",
+                true,
+                LoginItemStatus::Enabled,
+                Ok(LaunchAtLogin::On),
+            ),
             (
                 "on, still off",
                 true,
@@ -67,10 +113,10 @@ mod tests {
                 Err(NotChanged),
             ),
             (
-                "on, waiting for approval",
+                "on, waiting for the user's approval",
                 true,
                 LoginItemStatus::RequiresApproval,
-                Err(NotChanged),
+                Ok(LaunchAtLogin::NeedsApproval),
             ),
             (
                 "on, not an app bundle",
@@ -82,13 +128,13 @@ mod tests {
                 "off, now off",
                 false,
                 LoginItemStatus::NotRegistered,
-                Ok(false),
+                Ok(LaunchAtLogin::Off),
             ),
             (
                 "off, never registered",
                 false,
                 LoginItemStatus::NotFound,
-                Ok(false),
+                Ok(LaunchAtLogin::Off),
             ),
             (
                 "off, still enabled",
@@ -97,10 +143,10 @@ mod tests {
                 Err(NotChanged),
             ),
             (
-                "off, waiting for approval",
+                "off, still waiting for approval",
                 false,
                 LoginItemStatus::RequiresApproval,
-                Ok(false),
+                Ok(LaunchAtLogin::NeedsApproval),
             ),
         ];
         for (case, wanted, after, expected) in cases {

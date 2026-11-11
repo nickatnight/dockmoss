@@ -7,7 +7,7 @@ use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
-    NSWorkspaceDidTerminateApplicationNotification,
+    NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceWillLaunchApplicationNotification,
 };
 use objc2_foundation::{NSNotification, NSOperationQueue, NSString, NSURL};
 
@@ -102,6 +102,33 @@ pub fn on_app_activated(
         move |app| on_activated(super::app::active_app(app)),
         mtm,
     );
+}
+
+/// macOS does not post will-launch for every launch, so both are observed.
+pub fn on_app_launching(
+    on_launching: impl Fn(RunningApp) + Send + Sync + 'static,
+    mtm: MainThreadMarker,
+) {
+    let on_launching = Arc::new(on_launching);
+    for name in launch_notification_names() {
+        let on_launching = Arc::clone(&on_launching);
+        observe(name, move |app| on_launching(running_app(app)), mtm);
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "the notification names are AppKit extern statics"
+)]
+fn launch_notification_names() -> [&'static NSString; 2] {
+    // SAFETY: the names are immutable NSString constants that AppKit
+    // initialises before any Rust code runs.
+    unsafe {
+        [
+            NSWorkspaceWillLaunchApplicationNotification,
+            NSWorkspaceDidLaunchApplicationNotification,
+        ]
+    }
 }
 
 /// Calls `on_app` on the main thread with the application of each workspace

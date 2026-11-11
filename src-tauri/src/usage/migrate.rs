@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use super::store::private_dir;
 
 const OLD_IDENTIFIER: &str = "com.dockmoss.app";
+const PRIVATE_FILE_MODE: u32 = 0o600;
 
 pub const LAUNCH_LOG_FILE: &str = "launch_log.json";
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -78,6 +80,12 @@ pub enum OldFolder {
     Left,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeftBehind {
+    UsageHistory,
+    Settings,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MoveReport {
     pub moved: usize,
@@ -104,6 +112,45 @@ impl MoveReport {
     /// session goes without it and the next start moves it.
     pub fn file_in(&self, dir: &Path, name: &str) -> Option<PathBuf> {
         (!self.left_behind(name)).then(|| dir.join(name))
+    }
+
+    pub fn left_behind_data(&self) -> Vec<LeftBehind> {
+        [
+            (LAUNCH_LOG_FILE, LeftBehind::UsageHistory),
+            (SETTINGS_FILE, LeftBehind::Settings),
+        ]
+        .into_iter()
+        .filter(|&(name, _)| self.left_behind(name))
+        .map(|(_, left)| left)
+        .collect()
+    }
+
+    fn record(&mut self, name: &'static str, moved: Moved) {
+        match moved {
+            Moved::Yes => self.moved += 1,
+            Moved::Copied => {
+                self.moved += 1;
+                tracing::info!(
+                    file = name,
+                    "old data file moved by copy: this volume makes no hard links"
+                );
+            }
+            Moved::OldCopyLeft(kind) => {
+                self.moved += 1;
+                tracing::warn!(file = name, %kind, "old data file moved; its old copy was not removed");
+            }
+            Moved::NameTaken => {
+                self.kept += 1;
+                tracing::info!(
+                    file = name,
+                    "the new app folder took this name first; the old file is left"
+                );
+            }
+            Moved::No(kind) => {
+                self.failed.push(name);
+                tracing::warn!(file = name, %kind, "old data file not moved; left in the old folder");
+            }
+        }
     }
 
     /// `info` when this start moved, found or removed something; a start
@@ -140,6 +187,14 @@ pub fn old_data_dir(new_dir: &Path) -> Option<PathBuf> {
 /// `old_dir` if it is empty. Logs a `warn` naming each file left behind,
 /// never a path. Running it again finds nothing left to do.
 pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
+    move_old_data_with(old_dir, new_dir, |old, new| fs::hard_link(old, new))
+}
+
+fn move_old_data_with(
+    old_dir: &Path,
+    new_dir: &Path,
+    link: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> MoveReport {
     let new_dir_ready = private_dir(new_dir)
         .inspect_err(|error| {
             tracing::warn!(kind = %error.kind(), "app data folder not made private");
@@ -166,30 +221,40 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
                     "old data file not moved: the app data folder is not usable"
                 );
             }
-            Step::Move(name) => match move_file(&old_dir.join(name), &new_dir.join(name)) {
-                Moved::Yes => report.moved += 1,
-                Moved::OldCopyLeft(kind) => {
-                    report.moved += 1;
-                    tracing::warn!(file = name, %kind, "old data file moved; its old copy was not removed");
-                }
-                Moved::NameTaken => {
-                    report.kept += 1;
-                    tracing::info!(
-                        file = name,
-                        "the new app folder took this name first; the old file is left"
-                    );
-                }
-                Moved::No(kind) => {
-                    report.failed.push(name);
-                    tracing::warn!(file = name, %kind, "old data file not moved; left in the old folder");
-                }
-            },
+            Step::Move(name) => {
+                let moved = move_with(&old_dir.join(name), &new_dir.join(name), &link);
+                report.record(name, moved);
+            }
             Step::KeepNew(name) => {
-                report.kept += 1;
-                tracing::info!(
-                    file = name,
-                    "the new app folder already has an entry with this name; the old file is left"
-                );
+                let (old, new) = (old_dir.join(name), new_dir.join(name));
+                let interrupted = interrupted_copy_at(&old, &new).unwrap_or(false);
+                match (interrupted, new_dir_ready) {
+                    (false, _) => {
+                        report.kept += 1;
+                        tracing::info!(
+                            file = name,
+                            "the new app folder already has an entry with this name; the old file is left"
+                        );
+                    }
+                    (true, false) => {
+                        report.failed.push(name);
+                        tracing::warn!(
+                            file = name,
+                            "an interrupted copy of this old data file is not redone: the app data folder is not usable; left in the old folder"
+                        );
+                    }
+                    (true, true) => {
+                        tracing::info!(
+                            file = name,
+                            "an interrupted copy of this old data file is redone"
+                        );
+                        let moved = fs::remove_file(&new).map_or_else(
+                            |error| Moved::No(error.kind()),
+                            |()| move_with(&old, &new, &link),
+                        );
+                        report.record(name, moved);
+                    }
+                }
             }
             Step::LeaveNotARegularFile(name) => {
                 report.skipped += 1;
@@ -212,8 +277,10 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
     report
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Moved {
     Yes,
+    Copied,
     /// The new name holds the data; the old name could not be removed, so the
     /// next start keeps the new file and leaves the old one.
     OldCopyLeft(io::ErrorKind),
@@ -222,27 +289,124 @@ enum Moved {
     No(io::ErrorKind),
 }
 
-/// `hard_link` fails when the new name exists, so nothing is ever
-/// overwritten, as `rename` would.
-fn move_file(old: &Path, new: &Path) -> Moved {
-    match fs::hard_link(old, new) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkError {
+    NameTaken,
+    CannotLink,
+    Other(io::ErrorKind),
+}
+
+/// std reports macOS's `ENOTSUP` as `Uncategorized`, not `Unsupported`
+/// (rustc 1.99), so the raw code is checked too.
+fn link_error(error: &io::Error) -> LinkError {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        LinkError::NameTaken
+    } else if error.kind() == io::ErrorKind::Unsupported
+        || error.raw_os_error() == Some(libc::ENOTSUP)
+    {
+        LinkError::CannotLink
+    } else {
+        LinkError::Other(error.kind())
+    }
+}
+
+fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Result<()>) -> Moved {
+    match link(old, new) {
         Ok(()) => match fs::remove_file(old) {
             Ok(()) => Moved::Yes,
             Err(error) => Moved::OldCopyLeft(error.kind()),
         },
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Moved::NameTaken,
-        Err(error) => Moved::No(error.kind()),
+        Err(error) => match link_error(&error) {
+            LinkError::NameTaken => Moved::NameTaken,
+            LinkError::Other(kind) => Moved::No(kind),
+            LinkError::CannotLink => match copy_into_new_file(old, new) {
+                Ok(()) => match fs::remove_file(old) {
+                    Ok(()) => Moved::Copied,
+                    Err(error) => Moved::OldCopyLeft(error.kind()),
+                },
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Moved::NameTaken,
+                Err(error) => Moved::No(error.kind()),
+            },
+        },
     }
+}
+
+const MAX_COMPARED_BYTES: u64 = super::store::MAX_FILE_BYTES;
+
+fn is_interrupted_copy(new: &[u8], old: &[u8]) -> bool {
+    new.len() < old.len()
+        && old.starts_with(new)
+        && serde_json::from_slice::<serde_json::Value>(new).is_err()
+}
+
+fn interrupted_copy_at(old: &Path, new: &Path) -> io::Result<bool> {
+    let old_file = open_regular(old)?;
+    let new_file = open_regular(new)?;
+    let (old_len, new_len) = (old_file.metadata()?.len(), new_file.metadata()?.len());
+    if new_len >= old_len || old_len > MAX_COMPARED_BYTES {
+        return Ok(false);
+    }
+    let (mut new_bytes, mut old_bytes) = (Vec::new(), Vec::new());
+    new_file
+        .take(MAX_COMPARED_BYTES)
+        .read_to_end(&mut new_bytes)?;
+    old_file
+        .take(MAX_COMPARED_BYTES)
+        .read_to_end(&mut old_bytes)?;
+    Ok(is_interrupted_copy(&new_bytes, &old_bytes))
+}
+
+/// `O_NONBLOCK`, so a FIFO swapped in cannot block the open.
+fn open_regular(path: &Path) -> io::Result<fs::File> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    if file.metadata()?.is_file() {
+        Ok(file)
+    } else {
+        Err(io::ErrorKind::InvalidInput.into())
+    }
+}
+
+/// macOS's exclusive rename, `RENAME_EXCL`, is refused on exFAT too.
+fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
+    copy_into_new_file_with(old, new, |source, target| {
+        io::copy(source, target).map(drop)
+    })
+}
+
+fn copy_into_new_file_with(
+    old: &Path,
+    new: &Path,
+    copy: impl FnOnce(&mut fs::File, &mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut source = open_regular(old)?;
+    let mut target = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(PRIVATE_FILE_MODE)
+        .open(new)?;
+    let copied = copy(&mut source, &mut target).and_then(|()| target.sync_all());
+    if copied.is_err()
+        && let Err(error) = fs::remove_file(new)
+    {
+        tracing::warn!(kind = %error.kind(), "partial copy of an old data file not removed");
+    }
+    copied
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::Path;
 
     use super::{
-        Entry, Listing, MOVED_FILES, MoveReport, OldFolder, Step, move_old_data, plan_move,
+        Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, OldFolder, Step,
+        copy_into_new_file_with, interrupted_copy_at, is_interrupted_copy, link_error,
+        move_old_data, move_old_data_with, move_with, plan_move,
     };
 
     fn listing(entries: &[(&'static str, Entry)]) -> Listing {
@@ -808,9 +972,10 @@ mod tests {
         write(&folders.old, "launch_log.json", "old");
         write(&folders.new, "launch_log.json", "taken");
 
-        let moved = super::move_file(
+        let moved = move_with(
             &folders.old.join("launch_log.json"),
             &folders.new.join("launch_log.json"),
+            |old, new| fs::hard_link(old, new),
         );
 
         assert!(matches!(moved, super::Moved::NameTaken));
@@ -861,5 +1026,411 @@ mod tests {
         for (case, report, name, expected) in cases {
             assert_eq!(report.file_in(dir, name), expected, "{case}");
         }
+    }
+
+    #[test]
+    fn a_link_error_says_whether_the_name_is_taken_or_the_volume_cannot_link() {
+        let cases = [
+            (
+                "the name exists",
+                io::Error::from_raw_os_error(libc::EEXIST),
+                LinkError::NameTaken,
+            ),
+            (
+                "exFAT and other volumes without hard links: std calls ENOTSUP Uncategorized",
+                io::Error::from_raw_os_error(libc::ENOTSUP),
+                LinkError::CannotLink,
+            ),
+            (
+                "the socket-style spelling of the same answer",
+                io::Error::from_raw_os_error(libc::EOPNOTSUPP),
+                LinkError::CannotLink,
+            ),
+            (
+                "an error std already calls Unsupported",
+                io::Error::from(io::ErrorKind::Unsupported),
+                LinkError::CannotLink,
+            ),
+            (
+                "an immutable (uchg) file",
+                io::Error::from_raw_os_error(libc::EPERM),
+                LinkError::Other(io::ErrorKind::PermissionDenied),
+            ),
+            (
+                "another volume",
+                io::Error::from_raw_os_error(libc::EXDEV),
+                LinkError::Other(io::ErrorKind::CrossesDevices),
+            ),
+        ];
+        for (case, error, expected) in cases {
+            assert_eq!(link_error(&error), expected, "{case}");
+        }
+    }
+
+    fn cannot_link(_old: &Path, _new: &Path) -> io::Result<()> {
+        Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+    }
+
+    #[test]
+    fn on_a_volume_that_cannot_link_the_file_is_copied_into_an_empty_name_and_kept_private() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "history");
+
+        let moved = move_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            cannot_link,
+        );
+
+        assert_eq!(moved, Moved::Copied);
+        assert_eq!(read(&folders.new, "launch_log.json"), "history");
+        assert_eq!(mode(&folders.new.join("launch_log.json")), 0o600);
+        assert!(!folders.old.join("launch_log.json").exists());
+    }
+
+    #[test]
+    fn on_a_volume_that_cannot_link_a_name_taken_during_the_move_is_never_replaced() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let mut replaced = 0;
+        for _ in 0..RACE_RUNS {
+            let folders = folders();
+            fs::create_dir(&folders.new).expect("new folder");
+            write(&folders.old, "launch_log.json", "old");
+            let target = folders.new.join("launch_log.json");
+            let stop = Arc::new(AtomicBool::new(false));
+            let racer = {
+                let (stop, target) = (Arc::clone(&stop), target.clone());
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        if let Ok(mut file) = fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&target)
+                        {
+                            std::io::Write::write_all(&mut file, b"racer").expect("racer writes");
+                            return true;
+                        }
+                    }
+                    false
+                })
+            };
+
+            let moved = move_with(&folders.old.join("launch_log.json"), &target, cannot_link);
+            stop.store(true, Ordering::Relaxed);
+            let racer_made_it = racer.join().expect("racer thread");
+
+            if racer_made_it
+                && moved != Moved::NameTaken
+                && read(&folders.new, "launch_log.json") == "old"
+            {
+                replaced += 1;
+            }
+        }
+        assert_eq!(
+            replaced, 0,
+            "the move replaced the racer's file {replaced} times in {RACE_RUNS}"
+        );
+    }
+
+    const RACE_RUNS: usize = 500;
+
+    #[test]
+    fn on_a_volume_that_cannot_link_a_taken_name_is_kept_and_never_overwritten() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "old");
+        write(&folders.new, "launch_log.json", "taken");
+
+        let moved = move_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            cannot_link,
+        );
+
+        assert_eq!(moved, Moved::NameTaken);
+        assert_eq!(read(&folders.new, "launch_log.json"), "taken");
+        assert_eq!(read(&folders.old, "launch_log.json"), "old");
+    }
+
+    #[test]
+    fn the_user_hears_about_the_launch_log_or_settings_left_behind_only() {
+        let report = |failed: Vec<&'static str>| MoveReport {
+            failed,
+            old_folder: OldFolder::Left,
+            ..MoveReport::default()
+        };
+        let cases = [
+            ("nothing left behind", MoveReport::default(), vec![]),
+            (
+                "the launch log",
+                report(vec!["launch_log.json"]),
+                vec![LeftBehind::UsageHistory],
+            ),
+            (
+                "the settings",
+                report(vec!["settings.json"]),
+                vec![LeftBehind::Settings],
+            ),
+            (
+                "both, usage history first, whatever order they failed in",
+                report(vec!["settings.json", "launch_log.json"]),
+                vec![LeftBehind::UsageHistory, LeftBehind::Settings],
+            ),
+            (
+                "only copies that are never read back",
+                report(vec!["launch_log.json.corrupt", "launch_log.json.dropped"]),
+                vec![],
+            ),
+        ];
+        for (case, report, expected) in cases {
+            assert_eq!(report.left_behind_data(), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn only_a_new_file_that_is_a_strict_start_of_the_old_one_is_an_interrupted_copy() {
+        let cases: [(&str, &[u8], &[u8], bool); 7] = [
+            ("nothing copied yet", b"", b"{\"version\":1}", true),
+            (
+                "a complete document, with junk after it in the old file",
+                b"{\"version\":1}",
+                b"{\"version\":1}x",
+                false,
+            ),
+            ("cut short", b"{\"vers", b"{\"version\":1}", true),
+            (
+                "the whole file",
+                b"{\"version\":1}",
+                b"{\"version\":1}",
+                false,
+            ),
+            (
+                "a longer file",
+                b"{\"version\":1} ",
+                b"{\"version\":1}",
+                false,
+            ),
+            (
+                "a shorter file that differs",
+                b"{\"vX",
+                b"{\"version\":1}",
+                false,
+            ),
+            ("both empty", b"", b"", false),
+        ];
+        for (case, new, old, expected) in cases {
+            assert_eq!(is_interrupted_copy(new, old), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn a_copy_cut_short_by_a_crash_is_copied_again_at_the_next_start() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "the whole history");
+        write(&folders.new, "launch_log.json", "the whole");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!(read(&folders.new, "launch_log.json"), "the whole history");
+        assert!(!folders.old.join("launch_log.json").exists());
+        assert_eq!((report.moved, report.kept, report.failed.len()), (1, 0, 0));
+        assert_eq!(report.left_behind_data(), vec![]);
+    }
+
+    #[test]
+    fn a_link_at_the_old_name_is_never_followed_by_the_copy() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "elsewhere", "not user data");
+        symlink(
+            folders.old.join("elsewhere"),
+            folders.old.join("launch_log.json"),
+        )
+        .expect("link");
+
+        let moved = move_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            cannot_link,
+        );
+
+        assert!(matches!(moved, Moved::No(_)), "{moved:?}");
+        assert!(!folders.new.join("launch_log.json").exists());
+        assert_eq!(read(&folders.old, "elsewhere"), "not user data");
+    }
+
+    #[test]
+    fn a_copy_that_fails_part_way_leaves_no_file_under_the_new_name() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "the whole history");
+
+        let copied = copy_into_new_file_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            |_, target| {
+                io::Write::write_all(target, b"the wh")?;
+                Err(io::Error::other("the volume went away"))
+            },
+        );
+
+        assert!(copied.is_err());
+        assert!(!folders.new.join("launch_log.json").exists());
+        assert_eq!(read(&folders.old, "launch_log.json"), "the whole history");
+    }
+
+    #[test]
+    fn on_a_volume_that_cannot_link_the_whole_move_copies_every_file_and_reports_nothing_left() {
+        let folders = folders();
+        write(&folders.old, "launch_log.json", "history");
+        write(&folders.old, "settings.json", "settings");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!((report.moved, report.kept, report.failed.len()), (2, 0, 0));
+        assert_eq!(report.old_folder, OldFolder::Removed);
+        assert_eq!(report.left_behind_data(), vec![]);
+        assert_eq!(read(&folders.new, "launch_log.json"), "history");
+        assert_eq!(read(&folders.new, "settings.json"), "settings");
+    }
+
+    #[test]
+    fn with_the_new_folder_unusable_an_interrupted_copy_is_left_behind_not_kept() {
+        let folders = folders();
+        let elsewhere = folders.old.parent().expect("root").join("elsewhere");
+        fs::create_dir(&elsewhere).expect("elsewhere");
+        write(&elsewhere, "launch_log.json", "the whole");
+        symlink(&elsewhere, &folders.new).expect("new folder is a link");
+        write(&folders.old, "launch_log.json", "the whole history");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!(read(&elsewhere, "launch_log.json"), "the whole");
+        assert_eq!(read(&folders.old, "launch_log.json"), "the whole history");
+        assert_eq!((report.moved, report.kept), (0, 0));
+        assert_eq!(report.failed, vec!["launch_log.json"]);
+        assert_eq!(report.left_behind_data(), vec![LeftBehind::UsageHistory]);
+    }
+
+    fn move_within_5s(old: &Path, new: &Path) -> Moved {
+        let (done, finished) = std::sync::mpsc::channel();
+        let (from, to) = (old.to_path_buf(), new.to_path_buf());
+        std::thread::spawn(move || done.send(move_with(&from, &to, cannot_link)));
+        finished
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the move returns instead of blocking on the FIFO")
+    }
+
+    fn mkfifo(path: &Path) {
+        let made = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success(), "mkfifo");
+    }
+
+    #[test]
+    fn a_fifo_at_the_old_name_is_refused_by_the_copy_without_blocking() {
+        use std::os::unix::fs::FileTypeExt;
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        let old = folders.old.join("launch_log.json");
+        let new = folders.new.join("launch_log.json");
+        mkfifo(&old);
+
+        let moved = move_within_5s(&old, &new);
+
+        assert!(matches!(moved, Moved::No(_)), "{moved:?}");
+        assert!(!new.exists());
+        let left = fs::symlink_metadata(&old).expect("the FIFO is left");
+        assert!(left.file_type().is_fifo());
+    }
+
+    #[test]
+    fn a_fifo_at_the_new_name_is_never_read_as_an_interrupted_copy() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "the whole history");
+        let new = folders.new.join("launch_log.json");
+        mkfifo(&new);
+        let (done, finished) = std::sync::mpsc::channel();
+        let (old, fifo) = (folders.old.join("launch_log.json"), new.clone());
+        std::thread::spawn(move || {
+            done.send(interrupted_copy_at(&old, &fifo).is_ok_and(|yes| yes))
+        });
+
+        let interrupted = finished
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the check returns instead of blocking on the FIFO");
+
+        assert!(!interrupted);
+    }
+
+    #[test]
+    fn a_link_at_the_new_name_is_kept_even_when_it_points_at_a_start_of_the_old_file() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        let history = "h".repeat(4096);
+        write(&folders.old, "launch_log.json", &history);
+        write(&folders.old, "elsewhere", "hh");
+        symlink(
+            folders.old.join("elsewhere"),
+            folders.new.join("launch_log.json"),
+        )
+        .expect("link");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!((report.moved, report.kept), (0, 1));
+        assert!(
+            fs::symlink_metadata(folders.new.join("launch_log.json"))
+                .expect("still there")
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(read(&folders.old, "launch_log.json"), history);
+    }
+
+    #[test]
+    fn an_old_file_over_the_launch_logs_read_cap_is_never_compared() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        let cap = usize::try_from(crate::usage::store::MAX_FILE_BYTES).expect("cap fits usize");
+        write(&folders.old, "at_cap", &"h".repeat(cap));
+        write(&folders.old, "over_cap", &"h".repeat(cap + 1));
+        write(&folders.new, "short", "hh");
+        let short = folders.new.join("short");
+
+        assert_eq!(
+            (
+                interrupted_copy_at(&folders.old.join("at_cap"), &short).ok(),
+                interrupted_copy_at(&folders.old.join("over_cap"), &short).ok(),
+            ),
+            (Some(true), Some(false))
+        );
+    }
+
+    #[test]
+    fn a_link_at_the_old_name_is_never_followed_by_the_comparison() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "elsewhere", "the whole history");
+        symlink(
+            folders.old.join("elsewhere"),
+            folders.old.join("launch_log.json"),
+        )
+        .expect("link");
+        write(&folders.new, "launch_log.json", "the whole");
+
+        let interrupted = interrupted_copy_at(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+        );
+
+        assert!(interrupted.is_err(), "{interrupted:?}");
     }
 }

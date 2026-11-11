@@ -176,6 +176,14 @@ input[type="number"][aria-invalid="true"] {
   margin-top: 4px;
 }
 
+.check > .hint + .hint:empty {
+  margin-top: 0;
+}
+
+#launch-at-login-note {
+  color: var(--text);
+}
+
 .speeds {
   display: flex;
   gap: 20px;
@@ -272,7 +280,8 @@ input[type="range"]:focus-visible {
 
 fieldset:disabled,
 .group:has(> .slider > input:disabled),
-.check:has(> input:disabled) > :is(input, label) {
+.check[data-login="loading"],
+.check[data-login="unknown"] > :is(input, label) {
   opacity: 0.6;
 }
 

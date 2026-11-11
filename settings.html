@@ -10,7 +10,7 @@
     <main>
       <p id="save-error" class="notice" role="alert" hidden></p>
 
-      <div class="group check">
+      <div id="launch-at-login-card" class="group check" data-login="loading">
         <input
           id="launch-at-login"
           type="checkbox"
@@ -21,7 +21,7 @@
         <p id="launch-at-login-hint" class="hint">
           Open DockMoss when you log in to your Mac.
         </p>
-        <p id="launch-at-login-note" class="hint" hidden></p>
+        <p id="launch-at-login-note" class="hint" role="status"></p>
       </div>
 
       <fieldset id="stages" class="group" disabled>

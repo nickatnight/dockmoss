@@ -1,3 +1,4 @@
+use objc2::rc::autoreleasepool;
 use objc2_foundation::{NSBundle, NSError};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
@@ -29,11 +30,15 @@ impl RedactedNsError {
     }
 }
 
+pub fn status() -> LoginItemStatus {
+    autoreleasepool(|_| status_in_pool())
+}
+
 #[expect(
     unsafe_code,
     reason = "the ServiceManagement bindings mark every SMAppService method unsafe"
 )]
-pub fn status() -> LoginItemStatus {
+fn status_in_pool() -> LoginItemStatus {
     // SAFETY: `mainAppService` takes no arguments and returns a retained
     // object for this app's own bundle.
     let service = unsafe { SMAppService::mainAppService() };
@@ -48,11 +53,15 @@ pub fn status() -> LoginItemStatus {
     }
 }
 
+pub fn set(open_at_login: bool) -> Result<(), LoginItemError> {
+    autoreleasepool(|_| set_in_pool(open_at_login))
+}
+
 #[expect(
     unsafe_code,
     reason = "the ServiceManagement bindings mark every SMAppService method unsafe"
 )]
-pub fn set(open_at_login: bool) -> Result<(), LoginItemError> {
+fn set_in_pool(open_at_login: bool) -> Result<(), LoginItemError> {
     let bundle_path = NSBundle::mainBundle().bundlePath().to_string();
     if !is_app_bundle(std::path::Path::new(&bundle_path)) {
         return Err(LoginItemError::NotAnAppBundle);

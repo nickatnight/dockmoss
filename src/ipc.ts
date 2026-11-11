@@ -32,7 +32,8 @@ export type ErrorKind =
   | "usage_stopped"
   | "invalid_settings"
   | "settings_not_saved"
-  | "login_item_not_changed";
+  | "login_item_not_changed"
+  | "login_status_unknown";
 
 export interface Thresholds {
   fuzz: number;
@@ -68,12 +69,14 @@ export interface DockAppName {
   name: string;
 }
 
+export type LoginStatus = "on" | "off" | "needsApproval";
+
 export interface SettingsView {
   settings: Settings;
   limits: SettingsLimits;
   dockApps: DockAppName[] | null;
   /** From macOS; null when it did not answer in time. */
-  launchAtLogin: boolean | null;
+  launchAtLogin: LoginStatus | null;
 }
 
 export interface CommandError {
@@ -144,26 +147,32 @@ export async function saveSettings(
   }
 }
 
-export type LaunchAtLoginResult =
-  | { ok: true; enabled: boolean }
-  | {
-      ok: false;
-      error:
-        | { kind: "login_item_not_changed"; message: string }
-        | { kind: "ipc_failed"; cause: unknown };
-    };
+export type LaunchAtLoginError =
+  | { kind: "login_item_not_changed"; message: string }
+  | { kind: "login_status_unknown"; message: string }
+  | { kind: "ipc_failed"; cause: unknown };
 
-/** Turns launch at login on or off. `enabled` is what macOS reports after. */
+export type LaunchAtLoginResult =
+  | { ok: true; status: LoginStatus }
+  | { ok: false; error: LaunchAtLoginError };
+
+export function launchAtLoginError(error: unknown): LaunchAtLoginError {
+  if (
+    isCommandError(error) &&
+    (error.kind === "login_item_not_changed" || error.kind === "login_status_unknown")
+  ) {
+    return { kind: error.kind, message: error.message };
+  }
+  return { kind: "ipc_failed", cause: error };
+}
+
 export async function setLaunchAtLogin(
   enabled: boolean,
 ): Promise<LaunchAtLoginResult> {
   try {
-    const now = await invoke<boolean>("set_launch_at_login", { enabled });
-    return { ok: true, enabled: now };
+    const status = await invoke<LoginStatus>("set_launch_at_login", { enabled });
+    return { ok: true, status };
   } catch (error) {
-    if (isCommandError(error) && error.kind === "login_item_not_changed") {
-      return { ok: false, error: { kind: error.kind, message: error.message } };
-    }
-    return { ok: false, error: { kind: "ipc_failed", cause: error } };
+    return { ok: false, error: launchAtLoginError(error) };
   }
 }

@@ -2,10 +2,12 @@ import {
   getSettings,
   saveSettings,
   setLaunchAtLogin,
+  type LoginStatus,
   type SettingsView,
 } from "./ipc";
 import {
   NO_FEEDBACK,
+  announceLoginNote,
   createLoginToggle,
   createSettingsSaver,
   enteredDays,
@@ -15,6 +17,7 @@ import {
   launchAtLoginBox,
   nextFeedback,
   reannounced,
+  saveNotice,
   thresholdMessage,
   toFastForward,
   type DayField,
@@ -40,6 +43,7 @@ const page = {
   saveError: byId("save-error", HTMLParagraphElement),
   launchAtLogin: byId("launch-at-login", HTMLInputElement),
   launchAtLoginNote: byId("launch-at-login-note", HTMLParagraphElement),
+  launchAtLoginCard: byId("launch-at-login-card", HTMLDivElement),
   groups: [
     byId("stages", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
@@ -190,17 +194,20 @@ function showFeedback(
       page.days[field].removeAttribute("aria-invalid");
     }
   }
-  showSaveError(
-    feedback.unsaved.length > 0
-      ? "This change could not be saved. Try again."
-      : null,
-    again.saveNotice,
-  );
+  showSaveError(saveNotice(feedback), again.saveNotice);
 }
 
 function showSaveError(message: string | null, again = false): void {
   page.saveError.hidden = message === null;
   setAlert(page.saveError, message ?? "", again);
+}
+
+function showLoginBox(status: LoginStatus | null, announce = false): void {
+  const box = launchAtLoginBox(status);
+  page.launchAtLogin.checked = box.checked;
+  page.launchAtLogin.disabled = box.disabled;
+  setAlert(page.launchAtLoginNote, box.note ?? "", announce);
+  page.launchAtLoginCard.dataset.login = status ?? "unknown";
 }
 
 function enteredThresholds(): SettingsChange {
@@ -221,11 +228,7 @@ async function start(): Promise<void> {
     group.disabled = false;
   }
   page.intensity.disabled = false;
-  const loginBox = launchAtLoginBox(view.launchAtLogin);
-  page.launchAtLogin.checked = loginBox.checked;
-  page.launchAtLogin.disabled = loginBox.disabled;
-  page.launchAtLoginNote.textContent = loginBox.note;
-  page.launchAtLoginNote.hidden = loginBox.note === null;
+  showLoginBox(view.launchAtLogin);
 
   const saver = createSettingsSaver(view.settings, saveSettings);
   const messages = {
@@ -242,39 +245,35 @@ async function start(): Promise<void> {
   /** `undo` puts the control back when Rust refuses the value outright, as
    * for an exclusion past the cap, which no retry can store. */
   const commit = (change: SettingsChange, undo?: () => void): void => {
-    saver
-      .commit(change)
-      .catch((error: unknown) => ({
-        ok: false as const,
-        error: { kind: "ipc_failed" as const, cause: error },
-      }))
-      .then((result) => {
-        if (!result.ok) {
-          console.error("settings not saved", result.error);
-        }
-        if (change.field === "thresholds") {
-          wrongDays = invalidDays(change.thresholds, view.limits);
-        }
-        report(change, result);
-        if (!result.ok && result.error.kind === "invalid_settings") {
-          undo?.();
-        }
-      });
+    void saver.commit(change).then((result) => {
+      if (!result.ok) {
+        console.error("settings not saved", result.error);
+      }
+      if (change.field === "thresholds") {
+        wrongDays = invalidDays(change.thresholds, view.limits);
+      }
+      report(change, result);
+      if (!result.ok && result.error.kind === "invalid_settings") {
+        undo?.();
+      }
+    });
   };
 
-  const toggleLogin = createLoginToggle(setLaunchAtLogin);
-  page.launchAtLogin.addEventListener("change", () => {
-    const wanted = page.launchAtLogin.checked;
-    void toggleLogin(wanted).then(({ result, shown }) => {
-      if (!result.ok) {
-        console.error("launch at login not changed", result.error);
-      }
-      if (shown !== null) {
-        page.launchAtLogin.checked = shown;
-      }
-      report({ field: "launchAtLogin", enabled: wanted }, result);
+  if (view.launchAtLogin !== null) {
+    const toggleLogin = createLoginToggle(setLaunchAtLogin, view.launchAtLogin);
+    page.launchAtLogin.addEventListener("change", () => {
+      const wanted = page.launchAtLogin.checked;
+      void toggleLogin(wanted).then(({ result, shown, isLatestChange }) => {
+        if (!result.ok) {
+          console.error("launch at login not changed", result.error);
+        }
+        if (isLatestChange) {
+          showLoginBox(shown, announceLoginNote(result));
+        }
+        report({ field: "launchAtLogin", enabled: wanted }, result);
+      });
     });
-  });
+  }
 
   for (const input of dayInputs) {
     input.addEventListener("change", () => commit(enteredThresholds()));

@@ -5,6 +5,7 @@ import type {
   ErrorKind,
   FastForward,
   LaunchAtLoginResult,
+  LoginStatus,
   SaveSettingsResult,
   Settings,
   SettingsInput,
@@ -52,6 +53,22 @@ export interface SettingsSaver {
   commit(change: SettingsChange): Promise<SaveSettingsResult>;
 }
 
+interface IpcFailed {
+  ok: false;
+  error: { kind: "ipc_failed"; cause: unknown };
+}
+
+async function settled<Arg, Result>(
+  call: (arg: Arg) => Promise<Result>,
+  arg: Arg,
+): Promise<Result | IpcFailed> {
+  try {
+    return await call(arg);
+  } catch (cause: unknown) {
+    return { ok: false, error: { kind: "ipc_failed", cause } };
+  }
+}
+
 export function createSettingsSaver(
   initial: Settings,
   save: (settings: SettingsInput) => Promise<SaveSettingsResult>,
@@ -61,13 +78,13 @@ export function createSettingsSaver(
   return {
     commit(change) {
       const result = previous.then(async () => {
-        const outcome = await save(nextSettings(saved, change));
+        const outcome = await settled(save, nextSettings(saved, change));
         if (outcome.ok) {
           saved = outcome.settings;
         }
         return outcome;
       });
-      previous = result.catch(() => undefined);
+      previous = result;
       return result;
     },
   };
@@ -77,12 +94,14 @@ export interface Feedback {
   thresholdError: boolean;
   exclusionLimit: boolean;
   unsaved: readonly string[];
+  loginNotChanged: boolean;
 }
 
 export const NO_FEEDBACK: Feedback = {
   thresholdError: false,
   exclusionLimit: false,
   unsaved: [],
+  loginNotChanged: false,
 };
 
 function changedControl(change: PageChange): string {
@@ -95,19 +114,28 @@ function rejected(result: Outcome): boolean {
   return !result.ok && result.error.kind === "invalid_settings";
 }
 
+function statusUnknown(result: Outcome): boolean {
+  return !result.ok && result.error.kind === "login_status_unknown";
+}
+
 export function nextFeedback(
   feedback: Feedback,
   change: PageChange,
   result: Outcome,
 ): Feedback {
   const control = changedControl(change);
-  if (result.ok) {
+  const loginNotChanged =
+    change.field === "launchAtLogin"
+      ? !result.ok && result.error.kind === "login_item_not_changed"
+      : feedback.loginNotChanged;
+  if (result.ok || statusUnknown(result)) {
     return {
       thresholdError:
         change.field === "thresholds" ? false : feedback.thresholdError,
       exclusionLimit:
         change.field === "excluded" ? false : feedback.exclusionLimit,
       unsaved: feedback.unsaved.filter((other) => other !== control),
+      loginNotChanged,
     };
   }
   if (rejected(result) && change.field === "thresholds") {
@@ -122,7 +150,25 @@ export function nextFeedback(
     ...feedback,
     thresholdError: !thresholdsPassedRules && feedback.thresholdError,
     unsaved: [...new Set([...feedback.unsaved, control])].sort(),
+    loginNotChanged,
   };
+}
+
+const TRY_AGAIN = "This change could not be saved. Try again.";
+const LOGIN_ITEMS_PATH = "System\u00a0Settings\u00a0›\u00a0General\u00a0›\u00a0Login\u00a0Items";
+const CHECK_LOGIN_ITEMS = `macOS did not change launch at login. Check ${LOGIN_ITEMS_PATH}.`;
+
+export function saveNotice(feedback: Feedback): string | null {
+  const retryable = feedback.unsaved.filter(
+    (control) => !(control === "launchAtLogin" && feedback.loginNotChanged),
+  );
+  const loginNotChanged =
+    feedback.loginNotChanged && feedback.unsaved.includes("launchAtLogin");
+  const sentences = [
+    ...(retryable.length > 0 ? [TRY_AGAIN] : []),
+    ...(loginNotChanged ? [CHECK_LOGIN_ITEMS] : []),
+  ];
+  return sentences.length > 0 ? sentences.join(" ") : null;
 }
 
 /** Which messages to announce again: setting an alert to the text it already
@@ -136,7 +182,8 @@ export function reannounced(
     rejected(result) &&
     (change.field === "thresholds" || change.field === "excluded");
   return {
-    saveNotice: before.unsaved.length > 0 && !result.ok && !rejectedInPlace,
+    saveNotice:
+      before.unsaved.length > 0 && !result.ok && !rejectedInPlace && !statusUnknown(result),
     threshold:
       before.thresholdError && change.field === "thresholds" && rejected(result),
     exclusionLimit:
@@ -145,10 +192,13 @@ export function reannounced(
 }
 
 export function launchAtLoginShown(
-  wanted: boolean,
+  before: LoginStatus | null,
   result: LaunchAtLoginResult,
-): boolean {
-  return result.ok ? result.enabled : !wanted;
+): LoginStatus | null {
+  if (result.ok) {
+    return result.status;
+  }
+  return statusUnknown(result) ? null : before;
 }
 
 export interface ExclusionRow {
@@ -227,51 +277,56 @@ export function toFastForward(value: string): FastForward | null {
   return FAST_FORWARD_SPEEDS.find((speed) => String(speed) === value) ?? null;
 }
 
-export function launchAtLoginBox(status: boolean | null): {
+function loginNote(status: LoginStatus | null): string | null {
+  switch (status) {
+    case null:
+      return "macOS did not say whether this is on. To ask again, close and reopen Settings.";
+    case "needsApproval":
+      return `DockMoss needs your approval in ${LOGIN_ITEMS_PATH}.`;
+    case "on":
+    case "off":
+      return null;
+  }
+}
+
+export function announceLoginNote(result: LaunchAtLoginResult): boolean {
+  return result.ok ? result.status === "needsApproval" : statusUnknown(result);
+}
+
+export function launchAtLoginBox(status: LoginStatus | null): {
   checked: boolean;
   disabled: boolean;
   note: string | null;
 } {
   return {
-    checked: status === true,
+    checked: status === "on",
     disabled: status === null,
-    note:
-      status === null
-        ? "macOS did not say whether this is on. To ask again, close and reopen Settings."
-        : null,
+    note: loginNote(status),
   };
 }
 
 export interface LoginChangeDone {
   result: LaunchAtLoginResult;
-  /** What the box shows now, or null when a later change has overtaken this one. */
-  shown: boolean | null;
+  shown: LoginStatus | null;
+  isLatestChange: boolean;
 }
 
-/** Runs launch at login changes one at a time, in order. Only the latest
- * change's result sets the box; every result still reports. A `set` that
- * throws gives an `ipc_failed` result. */
 export function createLoginToggle(
   set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
+  loaded: LoginStatus,
 ): (wanted: boolean) => Promise<LoginChangeDone> {
   let previous: Promise<unknown> = Promise.resolve();
   let latest = 0;
+  let reported: LoginStatus | null = loaded;
   return (wanted) => {
     latest += 1;
     const thisChange = latest;
     const done = previous.then(async () => {
-      const result = await set(wanted).catch(
-        (cause: unknown): LaunchAtLoginResult => ({
-          ok: false,
-          error: { kind: "ipc_failed", cause },
-        }),
-      );
-      return {
-        result,
-        shown: thisChange === latest ? launchAtLoginShown(wanted, result) : null,
-      };
+      const result = await settled(set, wanted);
+      reported = launchAtLoginShown(reported, result);
+      return { result, shown: reported, isLatestChange: thisChange === latest };
     });
-    previous = done.catch(() => undefined);
+    previous = done;
     return done;
   };
 }

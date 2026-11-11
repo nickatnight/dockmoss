@@ -21,6 +21,19 @@ pub enum Error {
     SettingsNotSaved(#[from] crate::settings::NotSaved),
     #[error(transparent)]
     LoginItemNotChanged(#[from] crate::login_item::NotChanged),
+    #[error("macOS did not report launch at login in time")]
+    LoginStatusUnknown,
+}
+
+impl From<crate::login_item::ChangeFailed> for Error {
+    fn from(failed: crate::login_item::ChangeFailed) -> Self {
+        match failed {
+            crate::login_item::ChangeFailed::NotChanged { .. } => {
+                Self::LoginItemNotChanged(crate::login_item::NotChanged)
+            }
+            crate::login_item::ChangeFailed::StatusUnknown => Self::LoginStatusUnknown,
+        }
+    }
 }
 
 impl Error {
@@ -35,6 +48,7 @@ impl Error {
             Self::InvalidSettings(_) => "invalid_settings",
             Self::SettingsNotSaved(_) => "settings_not_saved",
             Self::LoginItemNotChanged(_) => "login_item_not_changed",
+            Self::LoginStatusUnknown => "login_status_unknown",
         }
     }
 }
@@ -186,6 +200,46 @@ mod tests {
     }
 
     #[test]
+    fn a_login_status_read_that_misses_its_bound_has_its_own_kind() {
+        let json =
+            serde_json::to_value(Error::LoginStatusUnknown).expect("Error serializes to JSON");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "kind": "login_status_unknown",
+                "message": "macOS did not report launch at login in time"
+            })
+        );
+    }
+
+    #[test]
+    fn a_failed_login_change_reaches_the_page_with_its_own_kind() {
+        use crate::login_item::{ChangeFailed, LoginItemStatus};
+        let json =
+            |failed| serde_json::to_value(Error::from(failed)).expect("Error serializes to JSON");
+
+        assert_eq!(
+            (
+                json(ChangeFailed::NotChanged {
+                    after: LoginItemStatus::NotRegistered
+                }),
+                json(ChangeFailed::StatusUnknown),
+            ),
+            (
+                serde_json::json!({
+                    "kind": "login_item_not_changed",
+                    "message": "launch at login was not changed"
+                }),
+                serde_json::json!({
+                    "kind": "login_status_unknown",
+                    "message": "macOS did not report launch at login in time"
+                }),
+            )
+        );
+    }
+
+    #[test]
     fn error_kind_in_ipc_ts_lists_every_error_kind() {
         let errors = [
             Error::Tauri(tauri::Error::WindowNotFound),
@@ -197,6 +251,7 @@ mod tests {
             Error::InvalidSettings(crate::settings::SettingsError::Intensity),
             Error::SettingsNotSaved(crate::settings::NotSaved::new(std::io::Error::other("x"))),
             Error::LoginItemNotChanged(crate::login_item::NotChanged),
+            Error::LoginStatusUnknown,
         ];
         for error in &errors {
             // A new variant must be added here and to `errors`; the `declared`
@@ -210,7 +265,8 @@ mod tests {
                 | Error::UsageStopped
                 | Error::InvalidSettings(_)
                 | Error::SettingsNotSaved(_)
-                | Error::LoginItemNotChanged(_) => {}
+                | Error::LoginItemNotChanged(_)
+                | Error::LoginStatusUnknown => {}
             }
         }
         let rust: std::collections::BTreeSet<&str> = errors.iter().map(Error::kind).collect();

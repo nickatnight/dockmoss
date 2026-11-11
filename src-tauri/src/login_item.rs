@@ -1,5 +1,9 @@
 use std::path::Path;
 
+use serde::Serialize;
+
+use crate::bounded::AloneRead;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginItemStatus {
     NotRegistered,
@@ -8,9 +12,21 @@ pub enum LoginItemStatus {
     NotFound,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LaunchAtLogin {
+    On,
+    Off,
+    NeedsApproval,
+}
+
 impl LoginItemStatus {
-    pub fn opens_at_login(self) -> bool {
-        self == Self::Enabled
+    pub fn launch_at_login(self) -> LaunchAtLogin {
+        match self {
+            Self::Enabled => LaunchAtLogin::On,
+            Self::RequiresApproval => LaunchAtLogin::NeedsApproval,
+            Self::NotRegistered | Self::NotFound => LaunchAtLogin::Off,
+        }
     }
 }
 
@@ -18,14 +34,45 @@ impl LoginItemStatus {
 #[error("launch at login was not changed")]
 pub struct NotChanged;
 
-/// Whether the app now opens at login, judged by the status read after the
-/// change, not by whether the call reported an error: unregistering an item
-/// that was never registered fails, yet ends where it was asked to.
-pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<bool, NotChanged> {
-    if after.opens_at_login() == wanted {
-        Ok(wanted)
-    } else {
-        Err(NotChanged)
+/// The status after a change, judged by the status read after it, not by
+/// whether the call reported an error: unregistering an item that was never
+/// registered fails, yet ends where it was asked to.
+pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, NotChanged> {
+    match (wanted, after.launch_at_login()) {
+        (true, status) if status.is_registered() => Ok(status),
+        (false, status) if !status.opens_at_login() => Ok(status),
+        _ => Err(NotChanged),
+    }
+}
+
+impl LaunchAtLogin {
+    /// An item waiting for the user's approval is registered: only the user
+    /// can take it further.
+    fn is_registered(self) -> bool {
+        matches!(self, Self::On | Self::NeedsApproval)
+    }
+
+    /// An item waiting for the user's approval does not open at login.
+    fn opens_at_login(self) -> bool {
+        matches!(self, Self::On)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeFailed {
+    NotChanged { after: LoginItemStatus },
+    StatusUnknown,
+}
+
+pub fn after_change(
+    wanted: bool,
+    read: AloneRead<LoginItemStatus>,
+) -> Result<LaunchAtLogin, ChangeFailed> {
+    match read {
+        AloneRead::Answered(after) => {
+            outcome(wanted, after).map_err(|NotChanged| ChangeFailed::NotChanged { after })
+        }
+        AloneRead::NoAnswer | AloneRead::Busy => Err(ChangeFailed::StatusUnknown),
     }
 }
 
@@ -41,25 +88,55 @@ pub fn is_app_bundle(bundle_path: &Path) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{LoginItemStatus, NotChanged, is_app_bundle, outcome};
+    use serde_json::json;
+
+    use super::{
+        ChangeFailed, LaunchAtLogin, LoginItemStatus, NotChanged, after_change, is_app_bundle,
+        outcome,
+    };
+    use crate::bounded::AloneRead;
 
     #[test]
-    fn only_an_enabled_item_opens_at_login() {
+    fn each_status_shows_as_on_off_or_needs_approval() {
         let cases = [
-            (LoginItemStatus::NotRegistered, false),
-            (LoginItemStatus::Enabled, true),
-            (LoginItemStatus::RequiresApproval, false),
-            (LoginItemStatus::NotFound, false),
+            (LoginItemStatus::NotRegistered, LaunchAtLogin::Off),
+            (LoginItemStatus::Enabled, LaunchAtLogin::On),
+            (
+                LoginItemStatus::RequiresApproval,
+                LaunchAtLogin::NeedsApproval,
+            ),
+            (LoginItemStatus::NotFound, LaunchAtLogin::Off),
         ];
         for (status, expected) in cases {
-            assert_eq!(status.opens_at_login(), expected, "{status:?}");
+            assert_eq!(status.launch_at_login(), expected, "{status:?}");
         }
     }
 
     #[test]
-    fn a_change_succeeds_only_when_macos_ends_in_the_state_asked_for() {
+    fn the_webview_gets_the_status_as_a_camel_case_string() {
         let cases = [
-            ("on, now enabled", true, LoginItemStatus::Enabled, Ok(true)),
+            (LaunchAtLogin::On, json!("on")),
+            (LaunchAtLogin::Off, json!("off")),
+            (LaunchAtLogin::NeedsApproval, json!("needsApproval")),
+        ];
+        for (status, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(status).expect("LaunchAtLogin serializes"),
+                expected,
+                "{status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_change_succeeds_when_macos_ends_as_asked_or_waits_for_approval() {
+        let cases = [
+            (
+                "on, now enabled",
+                true,
+                LoginItemStatus::Enabled,
+                Ok(LaunchAtLogin::On),
+            ),
             (
                 "on, still off",
                 true,
@@ -67,10 +144,10 @@ mod tests {
                 Err(NotChanged),
             ),
             (
-                "on, waiting for approval",
+                "on, waiting for the user's approval",
                 true,
                 LoginItemStatus::RequiresApproval,
-                Err(NotChanged),
+                Ok(LaunchAtLogin::NeedsApproval),
             ),
             (
                 "on, not an app bundle",
@@ -82,13 +159,13 @@ mod tests {
                 "off, now off",
                 false,
                 LoginItemStatus::NotRegistered,
-                Ok(false),
+                Ok(LaunchAtLogin::Off),
             ),
             (
                 "off, never registered",
                 false,
                 LoginItemStatus::NotFound,
-                Ok(false),
+                Ok(LaunchAtLogin::Off),
             ),
             (
                 "off, still enabled",
@@ -97,10 +174,10 @@ mod tests {
                 Err(NotChanged),
             ),
             (
-                "off, waiting for approval",
+                "off, still waiting for approval",
                 false,
                 LoginItemStatus::RequiresApproval,
-                Ok(false),
+                Ok(LaunchAtLogin::NeedsApproval),
             ),
         ];
         for (case, wanted, after, expected) in cases {
@@ -120,6 +197,47 @@ mod tests {
         ];
         for (path, expected) in cases {
             assert_eq!(is_app_bundle(Path::new(path)), expected, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_change_is_judged_by_the_read_after_it_and_a_missed_read_is_unknown() {
+        let cases = [
+            (
+                "on, read as enabled",
+                true,
+                AloneRead::Answered(LoginItemStatus::Enabled),
+                Ok(LaunchAtLogin::On),
+            ),
+            (
+                "on, read as still off",
+                true,
+                AloneRead::Answered(LoginItemStatus::NotRegistered),
+                Err(ChangeFailed::NotChanged {
+                    after: LoginItemStatus::NotRegistered,
+                }),
+            ),
+            (
+                "off, read as off",
+                false,
+                AloneRead::Answered(LoginItemStatus::NotRegistered),
+                Ok(LaunchAtLogin::Off),
+            ),
+            (
+                "the read did not answer in time",
+                true,
+                AloneRead::NoAnswer,
+                Err(ChangeFailed::StatusUnknown),
+            ),
+            (
+                "an earlier read is still stalled",
+                false,
+                AloneRead::Busy,
+                Err(ChangeFailed::StatusUnknown),
+            ),
+        ];
+        for (case, wanted, read, expected) in cases {
+            assert_eq!(after_change(wanted, read), expected, "{case}");
         }
     }
 }

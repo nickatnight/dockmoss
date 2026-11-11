@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -8,22 +9,24 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::Error;
-use crate::bounded;
+use crate::bounded::{self, AloneRead};
 use crate::dock::DockItem;
 use crate::launch_log_writer::{LaunchLogInbox, WriterMessage};
-use crate::login_item;
+use crate::login_item::{self, LaunchAtLogin};
 use crate::macos;
 use crate::settings::{self, NotSaved, Settings, SettingsView};
 use crate::usage::{self, AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 const LOGIN_STATUS_TIMEOUT: Duration = Duration::from_millis(500);
+static LOGIN_STATUS_READ: AtomicBool = AtomicBool::new(false);
 
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
     ScreenParametersChanged,
     OverlayOrderFailed,
     DockHoverChanged,
+    AppLaunching,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);
@@ -79,19 +82,21 @@ pub async fn get_settings(
     Ok(SettingsView::new(settings, dock.as_ref(), launch_at_login))
 }
 
-/// `None` when `ServiceManagement` does not answer in time, so Settings opens
-/// anyway, with only the launch at login box left disabled.
-async fn launch_at_login() -> Option<bool> {
+async fn launch_at_login() -> Option<LaunchAtLogin> {
     let waited = tauri::async_runtime::spawn_blocking(|| {
-        bounded::read_within(LOGIN_STATUS_TIMEOUT, || {
-            macos::login_item::status().opens_at_login()
+        bounded::read_alone(&LOGIN_STATUS_READ, LOGIN_STATUS_TIMEOUT, || {
+            macos::login_item::status().launch_at_login()
         })
     })
     .await;
     match waited {
-        Ok(Some(opens_at_login)) => Some(opens_at_login),
-        Ok(None) => {
+        Ok(AloneRead::Answered(status)) => Some(status),
+        Ok(AloneRead::NoAnswer) => {
             tracing::warn!("launch at login status not read in time");
+            None
+        }
+        Ok(AloneRead::Busy) => {
+            tracing::warn!("launch at login status not read: an earlier read has not answered");
             None
         }
         Err(error) => {
@@ -169,22 +174,27 @@ fn apply_to_growth(app: &AppHandle, saved: &MutexGuard<'_, Settings>) {
     }
 }
 
-/// Turns launch at login on or off and returns whether the app now opens at
-/// login, as macOS reports it after the change. `login_item_not_changed` when
-/// macOS did not end in the state asked for.
 #[tauri::command]
-pub async fn set_launch_at_login(enabled: bool) -> Result<bool, Error> {
+pub async fn set_launch_at_login(enabled: bool) -> Result<LaunchAtLogin, Error> {
     tauri::async_runtime::spawn_blocking(move || set_launch_at_login_blocking(enabled)).await?
 }
 
-fn set_launch_at_login_blocking(wanted: bool) -> Result<bool, Error> {
+fn set_launch_at_login_blocking(wanted: bool) -> Result<LaunchAtLogin, Error> {
     if let Err(error) = macos::login_item::set(wanted) {
         tracing::warn!(%error, wanted, "launch at login change refused");
     }
-    let after = macos::login_item::status();
-    let now = login_item::outcome(wanted, after).inspect_err(|_| {
-        tracing::warn!(wanted, ?after, "launch at login not changed");
+    let read = bounded::read_alone(
+        &LOGIN_STATUS_READ,
+        LOGIN_STATUS_TIMEOUT,
+        macos::login_item::status,
+    );
+    let now = login_item::after_change(wanted, read).inspect_err(|failed| {
+        tracing::warn!(
+            wanted,
+            ?failed,
+            "launch at login not changed, or not read after the change"
+        );
     })?;
-    tracing::info!(launch_at_login = now, "launch at login set");
+    tracing::info!(launch_at_login = ?now, "launch at login set");
     Ok(now)
 }

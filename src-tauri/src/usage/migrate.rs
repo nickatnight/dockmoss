@@ -78,9 +78,6 @@ pub enum OldFolder {
     Left,
 }
 
-/// User data a session runs without because its move failed: no usage
-/// tracking without the launch log, default settings that are not saved
-/// without the settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeftBehind {
     UsageHistory,
@@ -116,8 +113,6 @@ impl MoveReport {
         (!self.left_behind(name)).then(|| dir.join(name))
     }
 
-    /// What the user is told is still in the old folder. The `.corrupt` and
-    /// `.dropped` copies are never read back, so they are not mentioned.
     pub fn left_behind_data(&self) -> Option<LeftBehind> {
         match (
             self.left_behind(LAUNCH_LOG_FILE),
@@ -246,7 +241,6 @@ pub fn move_old_data(old_dir: &Path, new_dir: &Path) -> MoveReport {
 #[derive(Debug, PartialEq, Eq)]
 enum Moved {
     Yes,
-    /// Moved by `rename`, on a volume that cannot make hard links.
     Renamed,
     /// The new name holds the data; the old name could not be removed, so the
     /// next start keeps the new file and leaves the old one.
@@ -259,8 +253,6 @@ enum Moved {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LinkError {
     NameTaken,
-    /// The volume makes no hard links at all, as exFAT and some network
-    /// volumes do.
     CannotLink,
     Other(io::ErrorKind),
 }
@@ -301,10 +293,6 @@ enum AfterLink {
     Failed(io::ErrorKind),
 }
 
-/// What a failed `hard_link` leads to. Only a volume that cannot link falls
-/// back to `rename`, and only when a fresh look finds the new name absent:
-/// `rename` replaces an existing name, and the move must never overwrite.
-/// `new_name` is looked at only in that case.
 fn after_failed_link(link: LinkError, new_name: impl FnOnce() -> NewName) -> AfterLink {
     match link {
         LinkError::NameTaken => AfterLink::NameTaken,
@@ -317,9 +305,6 @@ fn after_failed_link(link: LinkError, new_name: impl FnOnce() -> NewName) -> Aft
     }
 }
 
-/// `hard_link` fails when the new name exists, so nothing is ever
-/// overwritten, as `rename` would. A volume without hard links falls back to
-/// `rename` into a name found absent (`after_failed_link`).
 fn move_file(old: &Path, new: &Path) -> Moved {
     move_with(old, new, |old, new| fs::hard_link(old, new))
 }

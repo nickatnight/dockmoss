@@ -30,10 +30,6 @@ impl RedactedNsError {
     }
 }
 
-/// The status macOS reports for this app's login item. Runs in its own
-/// autorelease pool: it is called on a short-lived blocking thread that has
-/// none, so the objects `ServiceManagement` autoreleases are freed when it
-/// returns instead of when the thread is reaped.
 pub fn status() -> LoginItemStatus {
     autoreleasepool(|_| status_in_pool())
 }
@@ -57,8 +53,6 @@ fn status_in_pool() -> LoginItemStatus {
     }
 }
 
-/// Registers or unregisters this app as a login item, in its own autorelease
-/// pool, as `status` is.
 pub fn set(open_at_login: bool) -> Result<(), LoginItemError> {
     autoreleasepool(|_| set_in_pool(open_at_login))
 }

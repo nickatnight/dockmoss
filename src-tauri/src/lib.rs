@@ -249,7 +249,6 @@ impl DataDir {
         self.moved.file_in(&self.dir, name)
     }
 
-    /// What this session runs without, for the tray to say.
     fn left_behind(&self) -> Option<usage::LeftBehind> {
         self.moved.left_behind_data()
     }
@@ -639,8 +638,6 @@ mod launch_log_writer {
     }
 }
 
-/// Checks Accessibility trust and builds the tray that shows it, and what the
-/// data move left behind; the watcher keeps both on the tray as trust changes.
 fn start_trust_and_tray(
     app: &AppHandle,
     data_dir: Option<&DataDir>,
@@ -708,9 +705,6 @@ mod dock_tracker {
     use crate::usage::DockApp;
     use crate::{OVERLAY_LABEL, macos, primary_display};
 
-    /// Starts the tracker, then the Dock hover observer and the app launch
-    /// observer that wake it through `inbox`. The hover observer is optional:
-    /// without it, entry into a magnification is found by polling alone.
     pub(super) fn spawn(
         app: &AppHandle,
         messages: Receiver<TrackerMessage>,
@@ -730,8 +724,6 @@ mod dock_tracker {
         Ok(())
     }
 
-    /// Any regular app's launch, in the Dock or not: the Dock lifts its icon
-    /// or adds a tile, which shifts the others (Gate 1 Q1, job 019).
     fn watch_launches(tracker: Sender<TrackerMessage>, mtm: macos::MainThreadMarker) {
         macos::workspace::on_app_launching(
             move |app| {
@@ -841,8 +833,6 @@ mod dock_tracker {
                 Ok(TrackerMessage::DockHoverChanged) => {
                     return Woken::DockHover { at: Instant::now() };
                 }
-                // Kept even when the wait is not cut short, so the next tick
-                // starts the launch hold. The first launch of a burst counts.
                 Ok(TrackerMessage::AppLaunching) => {
                     let at = Instant::now();
                     launched.get_or_insert(at);

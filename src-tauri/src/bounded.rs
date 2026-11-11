@@ -23,10 +23,6 @@ pub fn read_within<T: Send + 'static>(
     replied.recv_timeout(timeout).ok()
 }
 
-/// `read_within`, one read per `slot` at a time. While an earlier read
-/// still runs, even one its caller stopped waiting for, this gives `None` at
-/// once and starts no read, so a read that never returns leaves one thread
-/// behind, not one per call.
 pub fn read_alone<T: Send + 'static>(
     slot: &'static AtomicBool,
     timeout: Duration,
@@ -42,8 +38,6 @@ pub fn read_alone<T: Send + 'static>(
     })
 }
 
-/// Holds a slot until dropped: when its read returns, or when the read's
-/// thread does not start and the read is dropped unrun.
 struct Claim(&'static AtomicBool);
 
 impl Claim {

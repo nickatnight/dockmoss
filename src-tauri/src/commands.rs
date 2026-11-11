@@ -19,8 +19,6 @@ use crate::usage::{self, AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 const LOGIN_STATUS_TIMEOUT: Duration = Duration::from_millis(500);
-/// Held while a login status read runs, so a `SMAppService.status` that hangs
-/// leaves one thread behind however often Settings opens.
 static LOGIN_STATUS_READ: AtomicBool = AtomicBool::new(false);
 
 pub enum TrackerMessage {
@@ -28,8 +26,6 @@ pub enum TrackerMessage {
     ScreenParametersChanged,
     OverlayOrderFailed,
     DockHoverChanged,
-    /// A regular app is launching: the Dock lifts its icon, or adds a tile
-    /// and shifts the others.
     AppLaunching,
 }
 
@@ -86,9 +82,6 @@ pub async fn get_settings(
     Ok(SettingsView::new(settings, dock.as_ref(), launch_at_login))
 }
 
-/// `None` when `ServiceManagement` does not answer in time, or an earlier
-/// read has still not answered, so Settings opens anyway, with only the
-/// launch at login box left disabled.
 async fn launch_at_login() -> Option<LaunchAtLogin> {
     let waited = tauri::async_runtime::spawn_blocking(|| {
         bounded::read_alone(&LOGIN_STATUS_READ, LOGIN_STATUS_TIMEOUT, || {
@@ -177,9 +170,6 @@ fn apply_to_growth(app: &AppHandle, saved: &MutexGuard<'_, Settings>) {
     }
 }
 
-/// Turns launch at login on or off and returns the status macOS reports after
-/// the change: on, off, or waiting for the user's approval.
-/// `login_item_not_changed` when macOS did not end in the state asked for.
 #[tauri::command]
 pub async fn set_launch_at_login(enabled: bool) -> Result<LaunchAtLogin, Error> {
     tauri::async_runtime::spawn_blocking(move || set_launch_at_login_blocking(enabled)).await?

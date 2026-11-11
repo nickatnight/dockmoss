@@ -10,8 +10,6 @@ pub enum LoginItemStatus {
     NotFound,
 }
 
-/// What the Settings box shows. Only `On` opens the app at login;
-/// `NeedsApproval` is registered but waits for the user in System Settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LaunchAtLogin {
@@ -36,9 +34,7 @@ pub struct NotChanged;
 
 /// The status after a change, judged by the status read after it, not by
 /// whether the call reported an error: unregistering an item that was never
-/// registered fails, yet ends where it was asked to. An item waiting for
-/// approval is not an error either way: turned on, only the user can approve
-/// it; turned off, it does not open at login.
+/// registered fails, yet ends where it was asked to.
 pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, NotChanged> {
     let now = after.launch_at_login();
     let as_asked = match now {

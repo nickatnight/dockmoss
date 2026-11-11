@@ -15,7 +15,6 @@ const LEFT_BEHIND_ID: &str = "left-behind";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuEntry {
-    /// A disabled line: the session runs without data its move left behind.
     LeftBehind(LeftBehind),
     GrantAccessibility,
     Settings,
@@ -23,8 +22,6 @@ enum MenuEntry {
     Quit,
 }
 
-/// `left_behind` is fixed for the session: the data move runs only at
-/// startup, and a later start retries it.
 pub fn build(
     app: &AppHandle,
     trust: Trust,
@@ -65,8 +62,6 @@ fn tooltip(trust: Trust) -> &'static str {
     }
 }
 
-/// Names what is left, never where: the old folder's path holds the user's
-/// name.
 fn left_behind_text(left_behind: LeftBehind) -> &'static str {
     match left_behind {
         LeftBehind::UsageHistory => "Usage history is still in the old folder",

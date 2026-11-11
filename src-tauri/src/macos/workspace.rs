@@ -104,10 +104,7 @@ pub fn on_app_activated(
     );
 }
 
-/// Calls `on_launching` with each app macOS is about to launch or has just
-/// launched. Will-launch arrives about 36 ms into the Dock's lift of the
-/// icon, and did-launch about 72 ms in (job 019's spike); macOS does not post
-/// will-launch for every launch, so both are observed.
+/// macOS does not post will-launch for every launch, so both are observed.
 #[expect(
     unsafe_code,
     reason = "the notification names are AppKit extern statics"

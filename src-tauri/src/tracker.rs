@@ -19,12 +19,7 @@ const REVEAL_EDGE: f64 = 4.0;
 /// Dock's default auto-hide delay, after which its slide sends frames. Bounded,
 /// so a pointer parked over a hidden Dock goes back to `Slow`.
 const REVEAL_WAIT: Duration = Duration::from_secs(1);
-/// After an app launches, `Fast` holds until this long after the later of the
-/// launch and the last frame that moved: the Dock lifts the app's icon for
-/// about 690 ms, and a new tile shifts the others.
 const LAUNCH_SETTLE: Duration = Duration::from_secs(1);
-/// A launch hold never lasts longer than this after the launch that started
-/// it, however long the Dock keeps moving or apps keep launching.
 const LAUNCH_HOLD_CAP: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,24 +262,16 @@ fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect, reach: f64) -> bool {
         && (bottom - reach..=bottom).contains(&point.y)
 }
 
-/// Keeps the poll at `Fast` only while something there moves: near the Dock,
-/// the pointer moved since the last tick, a frame was sent within
-/// `FAST_AFTER_SEND`, or the pointer moved within `REVEAL_WAIT` and waits at a
-/// hidden Dock's edge; anywhere, an app launched and the launch hold lasts.
 #[derive(Debug, Default)]
 pub struct Activity {
     last_cursor: Option<ScreenPoint>,
     last_moved: Option<Instant>,
     last_sent: Option<Instant>,
     resting: bool,
-    /// When the launch that started the current hold arrived.
     launch_hold: Option<Instant>,
 }
 
 impl Activity {
-    /// A regular app is launching, so the Dock may lift its icon or add a
-    /// tile. Starts a launch hold unless one is already running; a launch
-    /// during a hold does not extend it.
     pub fn app_launching(&mut self, at: Instant) {
         if !self.holding_for_launch(at) {
             self.launch_hold = Some(at);
@@ -345,9 +332,6 @@ impl Activity {
     ) -> Instant {
         let longer_than_a_fast_interval =
             read_due.saturating_duration_since(now) > PollRate::Fast.interval();
-        // A read a hover or a launch brings forward comes no sooner than one
-        // Fast interval after the last read, so they cannot read faster than
-        // Fast does.
         let earliest_early_read = now.checked_add(PollRate::Fast.interval()).unwrap_or(now);
         let mut wait = |until: Instant| loop {
             match wait_until(until) {
@@ -1294,8 +1278,6 @@ mod tests {
         })
     }
 
-    /// `wait_for_read_with_hovers`, woken at `hovers` by the message `woken`
-    /// builds.
     fn wait_for_read_woken_by(
         activity: &Activity,
         start: Instant,
@@ -1682,8 +1664,6 @@ mod tests {
         assert_eq!(second, ms(421) + PollRate::Fast.interval());
     }
 
-    /// One tick with the pointer still and away from the Dock, after the
-    /// launches the step lists.
     struct LaunchStep {
         case: &'static str,
         launches_ms: Vec<u64>,

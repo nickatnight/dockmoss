@@ -64,9 +64,6 @@ async function saveOrIpcFailed(
   }
 }
 
-/** Saves changes one at a time, in order, each built from what the last
- * save stored. A `save` that throws, or returns a promise that rejects,
- * gives an `ipc_failed` result, so a commit never rejects. */
 export function createSettingsSaver(
   initial: Settings,
   save: (settings: SettingsInput) => Promise<SaveSettingsResult>,
@@ -92,8 +89,6 @@ export interface Feedback {
   thresholdError: boolean;
   exclusionLimit: boolean;
   unsaved: readonly string[];
-  /** The last login change failed because macOS did not change the item,
-   * which a retry does not fix. */
   loginNotChanged: boolean;
 }
 
@@ -154,9 +149,6 @@ const TRY_AGAIN = "This change could not be saved. Try again.";
 const CHECK_LOGIN_ITEMS =
   "macOS didn't change this. Check System Settings › General › Login Items.";
 
-/** The save notice's text, or null when nothing failed. "Try again" only
- * for what a retry can fix; a login item macOS did not change points to
- * System Settings instead. */
 export function saveNotice(feedback: Feedback): string | null {
   const retryable = feedback.unsaved.filter(
     (control) => !(control === "launchAtLogin" && feedback.loginNotChanged),
@@ -189,8 +181,6 @@ export function reannounced(
   };
 }
 
-/** The status the box shows after a change: what macOS reported, or, when
- * the change failed, the state it was changed from. */
 export function launchAtLoginShown(
   wanted: boolean,
   result: LaunchAtLoginResult,
@@ -318,10 +308,6 @@ async function settled(
   }
 }
 
-/** Runs launch at login changes one at a time, in order. Only the latest
- * change's result sets the box; every result still reports. A `set` that
- * throws, or returns a promise that rejects, gives an `ipc_failed` result,
- * so a change never rejects. */
 export function createLoginToggle(
   set: (wanted: boolean) => Promise<LaunchAtLoginResult>,
 ): (wanted: boolean) => Promise<LoginChangeDone> {

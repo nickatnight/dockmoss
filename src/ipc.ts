@@ -68,8 +68,6 @@ export interface DockAppName {
   name: string;
 }
 
-/** Mirrors `login_item::LaunchAtLogin`. Only "on" opens DockMoss at login;
- * "needsApproval" waits for the user in System Settings. */
 export type LoginStatus = "on" | "off" | "needsApproval";
 
 export interface SettingsView {
@@ -157,7 +155,6 @@ export type LaunchAtLoginResult =
         | { kind: "ipc_failed"; cause: unknown };
     };
 
-/** Turns launch at login on or off. `status` is what macOS reports after. */
 export async function setLaunchAtLogin(
   enabled: boolean,
 ): Promise<LaunchAtLoginResult> {

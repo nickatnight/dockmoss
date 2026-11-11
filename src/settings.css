@@ -270,9 +270,6 @@ input[type="range"]:focus-visible {
   color: var(--negative);
 }
 
-/* The login card dims whole with the other groups while Settings loads or
-   after a failed load. When macOS did not answer, the note says why, so only
-   the box and its title dim and the note stays readable. */
 fieldset:disabled,
 .group:has(> .slider > input:disabled),
 .check:has(> input:disabled):has(> #launch-at-login-note[hidden]),

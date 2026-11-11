@@ -147,14 +147,24 @@ export async function saveSettings(
   }
 }
 
+export type LaunchAtLoginError =
+  | { kind: "login_item_not_changed"; message: string }
+  | { kind: "login_status_unknown"; message: string }
+  | { kind: "ipc_failed"; cause: unknown };
+
 export type LaunchAtLoginResult =
   | { ok: true; status: LoginStatus }
-  | {
-      ok: false;
-      error:
-        | { kind: "login_item_not_changed"; message: string }
-        | { kind: "ipc_failed"; cause: unknown };
-    };
+  | { ok: false; error: LaunchAtLoginError };
+
+export function launchAtLoginError(error: unknown): LaunchAtLoginError {
+  if (
+    isCommandError(error) &&
+    (error.kind === "login_item_not_changed" || error.kind === "login_status_unknown")
+  ) {
+    return { kind: error.kind, message: error.message };
+  }
+  return { kind: "ipc_failed", cause: error };
+}
 
 export async function setLaunchAtLogin(
   enabled: boolean,
@@ -163,9 +173,6 @@ export async function setLaunchAtLogin(
     const status = await invoke<LoginStatus>("set_launch_at_login", { enabled });
     return { ok: true, status };
   } catch (error) {
-    if (isCommandError(error) && error.kind === "login_item_not_changed") {
-      return { ok: false, error: { kind: error.kind, message: error.message } };
-    }
-    return { ok: false, error: { kind: "ipc_failed", cause: error } };
+    return { ok: false, error: launchAtLoginError(error) };
   }
 }

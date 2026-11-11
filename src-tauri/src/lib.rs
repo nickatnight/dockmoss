@@ -640,17 +640,14 @@ fn start_trust_and_tray(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let trust = macos::ax::request_trust();
     tracing::info!(trusted = trust.is_trusted(), "accessibility trust checked");
-    let left_behind = data_dir.and_then(|data_dir| data_dir.moved.left_behind_data());
-    tray::build(app, trust, left_behind)?;
+    let left_behind = data_dir.map_or_else(Vec::new, |data_dir| data_dir.moved.left_behind_data());
+    tray::build(app, trust, &left_behind)?;
     app.manage(TrustState::new(trust));
     spawn_trust_watcher(app.clone(), left_behind)?;
     Ok(())
 }
 
-fn spawn_trust_watcher(
-    app: AppHandle,
-    left_behind: Option<usage::LeftBehind>,
-) -> std::io::Result<()> {
+fn spawn_trust_watcher(app: AppHandle, left_behind: Vec<usage::LeftBehind>) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("ax-trust".into())
         .spawn(move || {
@@ -659,7 +656,7 @@ fn spawn_trust_watcher(
                 let state = app.state::<TrustState>();
                 if let Some(trust) = state.replace_if_changed(macos::ax::check_trust()) {
                     tracing::info!(trusted = trust.is_trusted(), "accessibility trust changed");
-                    refresh_tray_on_main_thread(&app, left_behind);
+                    refresh_tray_on_main_thread(&app, &left_behind);
                 }
             }
         })?;
@@ -668,15 +665,16 @@ fn spawn_trust_watcher(
 
 /// The tray is looked up on the main thread because its handle is not
 /// thread-safe: cloning it elsewhere would race the clones Tauri makes there.
-fn refresh_tray_on_main_thread(app: &AppHandle, left_behind: Option<usage::LeftBehind>) {
+fn refresh_tray_on_main_thread(app: &AppHandle, left_behind: &[usage::LeftBehind]) {
     let main = app.clone();
+    let left_behind = left_behind.to_vec();
     let scheduled = app.run_on_main_thread(move || {
         let Some(tray) = main.tray_by_id(tray::TRAY_ID) else {
             tracing::warn!("tray not updated after a trust change: the tray is gone");
             return;
         };
         let trust = main.state::<TrustState>().current();
-        if let Err(error) = tray::show_trust(&tray, trust, left_behind) {
+        if let Err(error) = tray::show_trust(&tray, trust, &left_behind) {
             tracing::warn!(%error, "tray update after a trust change failed");
         }
     });

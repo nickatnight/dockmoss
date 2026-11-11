@@ -84,7 +84,6 @@ pub enum OldFolder {
 pub enum LeftBehind {
     UsageHistory,
     Settings,
-    UsageHistoryAndSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -115,16 +114,16 @@ impl MoveReport {
         (!self.left_behind(name)).then(|| dir.join(name))
     }
 
-    pub fn left_behind_data(&self) -> Option<LeftBehind> {
-        match (
-            self.left_behind(LAUNCH_LOG_FILE),
-            self.left_behind(SETTINGS_FILE),
-        ) {
-            (true, true) => Some(LeftBehind::UsageHistoryAndSettings),
-            (true, false) => Some(LeftBehind::UsageHistory),
-            (false, true) => Some(LeftBehind::Settings),
-            (false, false) => None,
-        }
+    /// Usage history first, then settings.
+    pub fn left_behind_data(&self) -> Vec<LeftBehind> {
+        [
+            (LAUNCH_LOG_FILE, LeftBehind::UsageHistory),
+            (SETTINGS_FILE, LeftBehind::Settings),
+        ]
+        .into_iter()
+        .filter(|&(name, _)| self.left_behind(name))
+        .map(|(_, left)| left)
+        .collect()
     }
 
     fn record(&mut self, name: &'static str, moved: Moved) {
@@ -1175,26 +1174,26 @@ mod tests {
             ..MoveReport::default()
         };
         let cases = [
-            ("nothing left behind", MoveReport::default(), None),
+            ("nothing left behind", MoveReport::default(), vec![]),
             (
                 "the launch log",
                 report(vec!["launch_log.json"]),
-                Some(LeftBehind::UsageHistory),
+                vec![LeftBehind::UsageHistory],
             ),
             (
                 "the settings",
                 report(vec!["settings.json"]),
-                Some(LeftBehind::Settings),
+                vec![LeftBehind::Settings],
             ),
             (
-                "both",
-                report(vec!["launch_log.json", "settings.json"]),
-                Some(LeftBehind::UsageHistoryAndSettings),
+                "both, usage history first, whatever order they failed in",
+                report(vec!["settings.json", "launch_log.json"]),
+                vec![LeftBehind::UsageHistory, LeftBehind::Settings],
             ),
             (
                 "only copies that are never read back",
                 report(vec!["launch_log.json.corrupt", "launch_log.json.dropped"]),
-                None,
+                vec![],
             ),
         ];
         for (case, report, expected) in cases {
@@ -1244,7 +1243,7 @@ mod tests {
         assert_eq!(read(&folders.new, "launch_log.json"), "the whole history");
         assert!(!folders.old.join("launch_log.json").exists());
         assert_eq!((report.moved, report.kept, report.failed.len()), (1, 0, 0));
-        assert_eq!(report.left_behind_data(), None);
+        assert_eq!(report.left_behind_data(), vec![]);
     }
 
     #[test]
@@ -1299,7 +1298,7 @@ mod tests {
 
         assert_eq!((report.moved, report.kept, report.failed.len()), (2, 0, 0));
         assert_eq!(report.old_folder, OldFolder::Removed);
-        assert_eq!(report.left_behind_data(), None);
+        assert_eq!(report.left_behind_data(), vec![]);
         assert_eq!(read(&folders.new, "launch_log.json"), "history");
         assert_eq!(read(&folders.new, "settings.json"), "settings");
     }
@@ -1319,6 +1318,6 @@ mod tests {
         assert_eq!(read(&folders.old, "launch_log.json"), "the whole history");
         assert_eq!((report.moved, report.kept), (0, 0));
         assert_eq!(report.failed, vec!["launch_log.json"]);
-        assert_eq!(report.left_behind_data(), Some(LeftBehind::UsageHistory));
+        assert_eq!(report.left_behind_data(), vec![LeftBehind::UsageHistory]);
     }
 }

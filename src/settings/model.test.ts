@@ -683,6 +683,16 @@ describe("launch at login feedback", () => {
     });
   });
 
+  it("does not re-announce the save notice when the status read after a change missed", () => {
+    const failed = nextFeedback(NO_FEEDBACK, intensity, notSaved);
+    const unknown: LaunchAtLoginResult = {
+      ok: false,
+      error: { kind: "login_status_unknown", message: "x" },
+    };
+
+    expect(reannounced(failed, turnOn, unknown).saveNotice).toBe(false);
+  });
+
   it("re-announces the save notice when it fails again while the notice shows", () => {
     const failed = nextFeedback(NO_FEEDBACK, turnOn, notChanged);
 
@@ -716,6 +726,10 @@ describe("saveNotice", () => {
     error: { kind: "settings_not_saved", message: "settings could not be saved" },
   };
   const turnedOn: LaunchAtLoginResult = { ok: true, status: "on" };
+  const statusUnknown: LaunchAtLoginResult = {
+    ok: false,
+    error: { kind: "login_status_unknown", message: "macOS did not report launch at login in time" },
+  };
   const after = (...steps: [PageChange, Outcome][]) =>
     steps.reduce((feedback, [change, result]) => nextFeedback(feedback, change, result), NO_FEEDBACK);
 
@@ -740,6 +754,21 @@ describe("saveNotice", () => {
     [
       "the login item failed again, this time over IPC",
       after([turnOn, notChanged], [turnOn, ipcFailed]),
+      tryAgain,
+    ],
+    [
+      "macOS did not report the status after a change: the card says so, no notice",
+      after([turnOn, statusUnknown]),
+      null,
+    ],
+    [
+      "the status read missed after a refusal: the refusal's sentence goes",
+      after([turnOn, notChanged], [turnOn, statusUnknown]),
+      null,
+    ],
+    [
+      "the status read missed and a setting was not saved: only the setting's sentence",
+      after([turnOn, statusUnknown], [intensity, notSaved]),
       tryAgain,
     ],
     [
@@ -771,6 +800,12 @@ describe("launchAtLoginShown", () => {
       "on",
     ],
     ["on, no reply", "off", { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, "off"],
+    [
+      "macOS did not report the status after the change: unknown",
+      "on",
+      { ok: false, error: { kind: "login_status_unknown", message: "x" } },
+      null,
+    ],
     [
       "a failed change from needs approval keeps needs approval",
       "needsApproval",
@@ -807,7 +842,7 @@ describe("createLoginToggle", () => {
     await settle();
     calls[0]?.reply(ok(true));
 
-    expect(await done).toEqual({ result: ok(true), shown: "on" });
+    expect(await done).toEqual({ result: ok(true), shown: "on", current: true });
   });
 
   it("runs a second change only after the first has answered", async () => {
@@ -835,8 +870,8 @@ describe("createLoginToggle", () => {
     await settle();
     calls[1]?.reply(ok(false));
 
-    expect(await first).toEqual({ result: ok(true), shown: null });
-    expect(await second).toEqual({ result: ok(false), shown: "off" });
+    expect(await first).toEqual({ result: ok(true), shown: "on", current: false });
+    expect(await second).toEqual({ result: ok(false), shown: "off", current: true });
   });
 
   it("lets the last result set the box even when it fails", async () => {
@@ -850,8 +885,8 @@ describe("createLoginToggle", () => {
     await settle();
     calls[1]?.reply(notChanged);
 
-    expect((await first).shown).toBeNull();
-    expect(await second).toEqual({ result: notChanged, shown: "on" });
+    expect((await first).current).toBe(false);
+    expect(await second).toEqual({ result: notChanged, shown: "on", current: true });
   });
 
   it("gives a change that throws an ipc_failed result, and the box what macOS kept", async () => {
@@ -861,6 +896,7 @@ describe("createLoginToggle", () => {
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: "off",
+      current: true,
     });
   });
 
@@ -880,9 +916,10 @@ describe("createLoginToggle", () => {
 
     expect(await first).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
-      shown: null,
+      shown: "off",
+      current: false,
     });
-    expect(await second).toEqual({ result: ok(false), shown: "off" });
+    expect(await second).toEqual({ result: ok(false), shown: "off", current: true });
     expect(wanted).toEqual([true, false]);
   });
 
@@ -895,6 +932,7 @@ describe("createLoginToggle", () => {
     expect(await toggle(true)).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
       shown: "off",
+      current: true,
     });
   });
 
@@ -911,9 +949,10 @@ describe("createLoginToggle", () => {
 
     expect(await first).toEqual({
       result: { ok: false, error: { kind: "ipc_failed", cause: gone } },
-      shown: null,
+      shown: "off",
+      current: false,
     });
-    expect(await second).toEqual({ result: ok(false), shown: "off" });
+    expect(await second).toEqual({ result: ok(false), shown: "off", current: true });
     expect(wanted).toEqual([true, false]);
   });
 
@@ -929,6 +968,16 @@ describe("createLoginToggle", () => {
 
     expect((await toggle(true)).shown).toBe("on");
     expect((await toggle(false)).shown).toBe("on");
+  });
+
+  it("puts the box in the unknown state when macOS did not report the status after a change", async () => {
+    const unknown: LaunchAtLoginResult = {
+      ok: false,
+      error: { kind: "login_status_unknown", message: "macOS did not report launch at login in time" },
+    };
+    const toggle = createLoginToggle(() => Promise.resolve(unknown), "needsApproval");
+
+    expect(await toggle(true)).toEqual({ result: unknown, shown: null, current: true });
   });
 
   it("sets the box again for a change made after the last one answered", async () => {
@@ -958,6 +1007,11 @@ describe("announceLoginNote", () => {
       false,
     ],
     ["no reply: the red notice speaks", { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, false],
+    [
+      "macOS did not report the status: the unknown note says so",
+      { ok: false, error: { kind: "login_status_unknown", message: "x" } },
+      true,
+    ],
   ] as const)("%s", (_case, result, expected) => {
     expect(announceLoginNote(result)).toBe(expected);
   });

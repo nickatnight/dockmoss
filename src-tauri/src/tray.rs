@@ -11,7 +11,8 @@ pub const TRAY_ID: &str = "main";
 const QUIT_ID: &str = "quit";
 const GRANT_ID: &str = "grant-accessibility";
 const SETTINGS_ID: &str = "settings";
-const LEFT_BEHIND_ID: &str = "left-behind";
+const LEFT_BEHIND_USAGE_ID: &str = "left-behind-usage";
+const LEFT_BEHIND_SETTINGS_ID: &str = "left-behind-settings";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuEntry {
@@ -25,7 +26,7 @@ enum MenuEntry {
 pub fn build(
     app: &AppHandle,
     trust: Trust,
-    left_behind: Option<LeftBehind>,
+    left_behind: &[LeftBehind],
 ) -> Result<(), crate::Error> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tauri::include_image!("icons/tray.png"))
@@ -48,7 +49,7 @@ pub fn build(
 pub fn show_trust(
     tray: &TrayIcon,
     trust: Trust,
-    left_behind: Option<LeftBehind>,
+    left_behind: &[LeftBehind],
 ) -> Result<(), crate::Error> {
     tray.set_menu(Some(menu(tray.app_handle(), trust, left_behind)?))?;
     tray.set_tooltip(Some(tooltip(trust)))?;
@@ -64,18 +65,26 @@ fn tooltip(trust: Trust) -> &'static str {
 
 fn left_behind_text(left_behind: LeftBehind) -> &'static str {
     match left_behind {
-        LeftBehind::UsageHistory => "Usage history wasn\u{2019}t moved, so moss is paused",
+        LeftBehind::UsageHistory => "Usage history wasn\u{2019}t moved, so no moss is shown",
         LeftBehind::Settings => "Saved settings weren\u{2019}t moved, so changes won\u{2019}t save",
-        LeftBehind::UsageHistoryAndSettings => {
-            "Usage history and saved settings weren\u{2019}t moved"
-        }
     }
 }
 
-fn menu_entries(trust: Trust, left_behind: Option<LeftBehind>) -> Vec<MenuEntry> {
-    let mut entries = Vec::new();
-    if let Some(left) = left_behind {
-        entries.extend([MenuEntry::LeftBehind(left), MenuEntry::Separator]);
+fn left_behind_id(left_behind: LeftBehind) -> &'static str {
+    match left_behind {
+        LeftBehind::UsageHistory => LEFT_BEHIND_USAGE_ID,
+        LeftBehind::Settings => LEFT_BEHIND_SETTINGS_ID,
+    }
+}
+
+fn menu_entries(trust: Trust, left_behind: &[LeftBehind]) -> Vec<MenuEntry> {
+    let mut entries: Vec<MenuEntry> = left_behind
+        .iter()
+        .copied()
+        .map(MenuEntry::LeftBehind)
+        .collect();
+    if !entries.is_empty() {
+        entries.push(MenuEntry::Separator);
     }
     if trust == Trust::Untrusted {
         entries.push(MenuEntry::GrantAccessibility);
@@ -84,17 +93,13 @@ fn menu_entries(trust: Trust, left_behind: Option<LeftBehind>) -> Vec<MenuEntry>
     entries
 }
 
-fn menu(
-    app: &AppHandle,
-    trust: Trust,
-    left_behind: Option<LeftBehind>,
-) -> tauri::Result<Menu<Wry>> {
+fn menu(app: &AppHandle, trust: Trust, left_behind: &[LeftBehind]) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
     for entry in menu_entries(trust, left_behind) {
         match entry {
             MenuEntry::LeftBehind(left) => menu.append(&MenuItem::with_id(
                 app,
-                LEFT_BEHIND_ID,
+                left_behind_id(left),
                 left_behind_text(left),
                 false,
                 None::<&str>,
@@ -171,7 +176,7 @@ mod tests {
         ];
 
         for (trust, entries) in cases {
-            assert_eq!(menu_entries(trust, None), entries, "{trust:?}");
+            assert_eq!(menu_entries(trust, &[]), entries, "{trust:?}");
         }
     }
 
@@ -203,8 +208,25 @@ mod tests {
         ];
 
         for (trust, entries) in cases {
-            assert_eq!(menu_entries(trust, Some(left)), entries, "{trust:?}");
+            assert_eq!(menu_entries(trust, &[left]), entries, "{trust:?}");
         }
+    }
+
+    #[test]
+    fn with_both_left_behind_each_gets_its_own_line_before_one_separator() {
+        let both = [LeftBehind::UsageHistory, LeftBehind::Settings];
+
+        assert_eq!(
+            menu_entries(Trust::Trusted, &both),
+            vec![
+                MenuEntry::LeftBehind(LeftBehind::UsageHistory),
+                MenuEntry::LeftBehind(LeftBehind::Settings),
+                MenuEntry::Separator,
+                MenuEntry::Settings,
+                MenuEntry::Separator,
+                MenuEntry::Quit,
+            ]
+        );
     }
 
     #[test]
@@ -212,15 +234,11 @@ mod tests {
         let cases = [
             (
                 LeftBehind::UsageHistory,
-                "Usage history wasn\u{2019}t moved, so moss is paused",
+                "Usage history wasn\u{2019}t moved, so no moss is shown",
             ),
             (
                 LeftBehind::Settings,
                 "Saved settings weren\u{2019}t moved, so changes won\u{2019}t save",
-            ),
-            (
-                LeftBehind::UsageHistoryAndSettings,
-                "Usage history and saved settings weren\u{2019}t moved",
             ),
         ];
         for (left, expected) in cases {

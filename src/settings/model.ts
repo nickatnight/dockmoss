@@ -115,6 +115,12 @@ function rejected(result: Outcome): boolean {
   return !result.ok && result.error.kind === "invalid_settings";
 }
 
+/** The change ran, but macOS did not say how it ended: the login card shows
+ * its unknown state instead of the red notice, since a retry cannot help. */
+function statusUnknown(result: Outcome): boolean {
+  return !result.ok && result.error.kind === "login_status_unknown";
+}
+
 export function nextFeedback(
   feedback: Feedback,
   change: PageChange,
@@ -125,7 +131,7 @@ export function nextFeedback(
     change.field === "launchAtLogin"
       ? !result.ok && result.error.kind === "login_item_not_changed"
       : feedback.loginNotChanged;
-  if (result.ok) {
+  if (result.ok || statusUnknown(result)) {
     return {
       thresholdError:
         change.field === "thresholds" ? false : feedback.thresholdError,
@@ -180,7 +186,8 @@ export function reannounced(
     rejected(result) &&
     (change.field === "thresholds" || change.field === "excluded");
   return {
-    saveNotice: before.unsaved.length > 0 && !result.ok && !rejectedInPlace,
+    saveNotice:
+      before.unsaved.length > 0 && !result.ok && !rejectedInPlace && !statusUnknown(result),
     threshold:
       before.thresholdError && change.field === "thresholds" && rejected(result),
     exclusionLimit:
@@ -189,10 +196,13 @@ export function reannounced(
 }
 
 export function launchAtLoginShown(
-  before: LoginStatus,
+  before: LoginStatus | null,
   result: LaunchAtLoginResult,
-): LoginStatus {
-  return result.ok ? result.status : before;
+): LoginStatus | null {
+  if (result.ok) {
+    return result.status;
+  }
+  return statusUnknown(result) ? null : before;
 }
 
 export interface ExclusionRow {
@@ -286,7 +296,7 @@ function loginNote(status: LoginStatus | null): string | null {
 /** Only the approval note reports a change's result; a failure has the red
  * notice. Announced again even when it already shows. */
 export function announceLoginNote(result: LaunchAtLoginResult): boolean {
-  return result.ok && result.status === "needsApproval";
+  return result.ok ? result.status === "needsApproval" : statusUnknown(result);
 }
 
 export function launchAtLoginBox(status: LoginStatus | null): {
@@ -303,8 +313,10 @@ export function launchAtLoginBox(status: LoginStatus | null): {
 
 export interface LoginChangeDone {
   result: LaunchAtLoginResult;
-  /** What the box shows now, or null when a later change has overtaken this one. */
+  /** The status macOS last reported; null when it did not say. */
   shown: LoginStatus | null;
+  /** False when a later change has overtaken this one: leave the box alone. */
+  current: boolean;
 }
 
 export function createLoginToggle(
@@ -313,14 +325,14 @@ export function createLoginToggle(
 ): (wanted: boolean) => Promise<LoginChangeDone> {
   let previous: Promise<unknown> = Promise.resolve();
   let latest = 0;
-  let reported = loaded;
+  let reported: LoginStatus | null = loaded;
   return (wanted) => {
     latest += 1;
     const thisChange = latest;
     const done = previous.then(async () => {
       const result = await settled(set, wanted);
       reported = launchAtLoginShown(reported, result);
-      return { result, shown: thisChange === latest ? reported : null };
+      return { result, shown: reported, current: thisChange === latest };
     });
     previous = done;
     return done;

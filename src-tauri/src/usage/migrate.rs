@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -228,8 +228,19 @@ fn move_old_data_with(
                 report.record(name, moved);
             }
             Step::KeepNew(name)
-                if new_dir_ready
-                    && interrupted_copy_at(&old_dir.join(name), &new_dir.join(name)) =>
+                if !new_dir_ready
+                    && interrupted_copy_at(&old_dir.join(name), &new_dir.join(name))
+                        .unwrap_or(false) =>
+            {
+                report.failed.push(name);
+                tracing::warn!(
+                    file = name,
+                    "an interrupted copy of this old data file is not redone: the app data folder is not usable; left in the old folder"
+                );
+            }
+            Step::KeepNew(name)
+                if interrupted_copy_at(&old_dir.join(name), &new_dir.join(name))
+                    .unwrap_or(false) =>
             {
                 tracing::info!(
                     file = name,
@@ -323,10 +334,6 @@ fn move_with(old: &Path, new: &Path, link: impl FnOnce(&Path, &Path) -> io::Resu
     }
 }
 
-/// `create_new` refuses a name that exists, so the copy never replaces one,
-/// even a name made after the plan (macOS's exclusive rename,
-/// `RENAME_EXCL`, is refused on exFAT too). A copy that fails removes the
-/// file it made, so the next start retries the move.
 /// Old files larger than this are never compared; the new one is kept.
 const MAX_COMPARED_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -336,25 +343,41 @@ fn is_interrupted_copy(new: &[u8], old: &[u8]) -> bool {
     new.len() < old.len() && old.starts_with(new)
 }
 
-fn interrupted_copy_at(old: &Path, new: &Path) -> bool {
-    let regular_len = |path: &Path| {
-        fs::symlink_metadata(path)
-            .ok()
-            .filter(fs::Metadata::is_file)
-            .map(|metadata| metadata.len())
-    };
-    let (Some(old_len), Some(new_len)) = (regular_len(old), regular_len(new)) else {
-        return false;
-    };
+fn interrupted_copy_at(old: &Path, new: &Path) -> io::Result<bool> {
+    let old_file = open_regular(old)?;
+    let new_file = open_regular(new)?;
+    let (old_len, new_len) = (old_file.metadata()?.len(), new_file.metadata()?.len());
     if new_len >= old_len || old_len > MAX_COMPARED_BYTES {
-        return false;
+        return Ok(false);
     }
-    match (fs::read(new), fs::read(old)) {
-        (Ok(new), Ok(old)) => is_interrupted_copy(&new, &old),
-        _ => false,
+    let (mut new_bytes, mut old_bytes) = (Vec::new(), Vec::new());
+    new_file
+        .take(MAX_COMPARED_BYTES)
+        .read_to_end(&mut new_bytes)?;
+    old_file
+        .take(MAX_COMPARED_BYTES)
+        .read_to_end(&mut old_bytes)?;
+    Ok(is_interrupted_copy(&new_bytes, &old_bytes))
+}
+
+/// As the plan's `symlink_metadata` check: no link is followed, a FIFO
+/// swapped in cannot block the open, and only a regular file is read.
+fn open_regular(path: &Path) -> io::Result<fs::File> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    if file.metadata()?.is_file() {
+        Ok(file)
+    } else {
+        Err(io::ErrorKind::InvalidInput.into())
     }
 }
 
+/// `create_new` refuses a name that exists, so the copy never replaces one,
+/// even a name made after the plan (macOS's exclusive rename,
+/// `RENAME_EXCL`, is refused on exFAT too). A copy that fails removes the
+/// file it made, so the next start retries the move.
 fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
     copy_into_new_file_with(old, new, |source, target| {
         io::copy(source, target).map(drop)
@@ -366,15 +389,7 @@ fn copy_into_new_file_with(
     new: &Path,
     copy: impl FnOnce(&mut fs::File, &mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
-    // As the plan's `symlink_metadata` check: no link is followed, and a
-    // FIFO swapped in cannot block the open.
-    let mut source = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(old)?;
-    if !source.metadata()?.is_file() {
-        return Err(io::ErrorKind::InvalidInput.into());
-    }
+    let mut source = open_regular(old)?;
     let mut target = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -1287,5 +1302,23 @@ mod tests {
         assert_eq!(report.left_behind_data(), None);
         assert_eq!(read(&folders.new, "launch_log.json"), "history");
         assert_eq!(read(&folders.new, "settings.json"), "settings");
+    }
+
+    #[test]
+    fn with_the_new_folder_unusable_an_interrupted_copy_is_left_behind_not_kept() {
+        let folders = folders();
+        let elsewhere = folders.old.parent().expect("root").join("elsewhere");
+        fs::create_dir(&elsewhere).expect("elsewhere");
+        write(&elsewhere, "launch_log.json", "the whole");
+        symlink(&elsewhere, &folders.new).expect("new folder is a link");
+        write(&folders.old, "launch_log.json", "the whole history");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!(read(&elsewhere, "launch_log.json"), "the whole");
+        assert_eq!(read(&folders.old, "launch_log.json"), "the whole history");
+        assert_eq!((report.moved, report.kept), (0, 0));
+        assert_eq!(report.failed, vec!["launch_log.json"]);
+        assert_eq!(report.left_behind_data(), Some(LeftBehind::UsageHistory));
     }
 }

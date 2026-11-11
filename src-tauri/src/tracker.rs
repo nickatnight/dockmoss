@@ -21,8 +21,10 @@ const REVEAL_EDGE: f64 = 4.0;
 const REVEAL_WAIT: Duration = Duration::from_secs(1);
 const LAUNCH_SETTLE: Duration = Duration::from_secs(1);
 const LAUNCH_HOLD_CAP: Duration = Duration::from_secs(2);
-/// One app's will-launch and did-launch arrive 35 to 60 ms apart (job 019's
-/// spike), so a launch this soon after the hold's start is the same app.
+/// One app's will-launch and did-launch arrived 35 to 158 ms apart on every
+/// app measured (job 019), so a launch this soon after the hold's start is
+/// taken as the same app. A slower did-launch renews the hold instead, which
+/// is bounded and follows a lift that is still bouncing.
 const SAME_LAUNCH: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

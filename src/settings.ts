@@ -7,6 +7,7 @@ import {
 } from "./ipc";
 import {
   NO_FEEDBACK,
+  announceLoginNote,
   createLoginToggle,
   createSettingsSaver,
   enteredDays,
@@ -201,12 +202,11 @@ function showSaveError(message: string | null, again = false): void {
   setAlert(page.saveError, message ?? "", again);
 }
 
-function showLoginBox(status: LoginStatus | null): void {
+function showLoginBox(status: LoginStatus | null, announce = false): void {
   const box = launchAtLoginBox(status);
   page.launchAtLogin.checked = box.checked;
   page.launchAtLogin.disabled = box.disabled;
-  page.launchAtLoginNote.textContent = box.note;
-  page.launchAtLoginNote.hidden = box.note === null;
+  setAlert(page.launchAtLoginNote, box.note ?? "", announce);
   page.launchAtLoginCard.dataset.login = status ?? "unknown";
 }
 
@@ -269,7 +269,7 @@ async function start(): Promise<void> {
           console.error("launch at login not changed", result.error);
         }
         if (shown !== null) {
-          showLoginBox(shown);
+          showLoginBox(shown, announceLoginNote(result));
         }
         report({ field: "launchAtLogin", enabled: wanted }, result);
       });

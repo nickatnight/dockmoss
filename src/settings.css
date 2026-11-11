@@ -176,6 +176,15 @@ input[type="number"][aria-invalid="true"] {
   margin-top: 4px;
 }
 
+.check > .hint + .hint:empty {
+  margin-top: 0;
+}
+
+/* The note is the box's state, not a description of it. */
+#launch-at-login-note {
+  color: var(--text);
+}
+
 .speeds {
   display: flex;
   gap: 20px;

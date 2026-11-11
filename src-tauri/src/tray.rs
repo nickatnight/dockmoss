@@ -64,10 +64,10 @@ fn tooltip(trust: Trust) -> &'static str {
 
 fn left_behind_text(left_behind: LeftBehind) -> &'static str {
     match left_behind {
-        LeftBehind::UsageHistory => "Usage history is still in the old folder",
-        LeftBehind::Settings => "Settings are still in the old folder",
+        LeftBehind::UsageHistory => "Usage history wasn\u{2019}t moved, so moss is paused",
+        LeftBehind::Settings => "Saved settings weren\u{2019}t moved, so changes won\u{2019}t save",
         LeftBehind::UsageHistoryAndSettings => {
-            "Usage history and settings are still in the old folder"
+            "Usage history and saved settings weren\u{2019}t moved"
         }
     }
 }
@@ -212,12 +212,15 @@ mod tests {
         let cases = [
             (
                 LeftBehind::UsageHistory,
-                "Usage history is still in the old folder",
+                "Usage history wasn\u{2019}t moved, so moss is paused",
             ),
-            (LeftBehind::Settings, "Settings are still in the old folder"),
+            (
+                LeftBehind::Settings,
+                "Saved settings weren\u{2019}t moved, so changes won\u{2019}t save",
+            ),
             (
                 LeftBehind::UsageHistoryAndSettings,
-                "Usage history and settings are still in the old folder",
+                "Usage history and saved settings weren\u{2019}t moved",
             ),
         ];
         for (left, expected) in cases {

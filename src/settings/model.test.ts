@@ -21,6 +21,7 @@ import {
   launchAtLoginShown,
   nextFeedback,
   nextSettings,
+  announceLoginNote,
   reannounced,
   saveNotice,
   thresholdMessage,
@@ -699,7 +700,7 @@ describe("launch at login feedback", () => {
 describe("saveNotice", () => {
   const tryAgain = "This change could not be saved. Try again.";
   const checkLoginItems =
-    "macOS didn't change this. Check System Settings › General › Login Items.";
+    "macOS did not change launch at login. Check System\u00a0Settings\u00a0›\u00a0General\u00a0›\u00a0Login\u00a0Items.";
   const turnOn = { field: "launchAtLogin", enabled: true } as const;
   const intensity = { field: "intensityPercent", percent: 40 } as const;
   const notChanged: LaunchAtLoginResult = {
@@ -946,6 +947,22 @@ describe("createLoginToggle", () => {
   });
 });
 
+describe("announceLoginNote", () => {
+  it.each([
+    ["a change that ends waiting for approval: say so, even when the note already shows", { ok: true, status: "needsApproval" }, true],
+    ["a change that ends on: no note to announce", { ok: true, status: "on" }, false],
+    ["a change that ends off: no note to announce", { ok: true, status: "off" }, false],
+    [
+      "a refused change: the red notice speaks, not the note",
+      { ok: false, error: { kind: "login_item_not_changed", message: "x" } },
+      false,
+    ],
+    ["no reply: the red notice speaks", { ok: false, error: { kind: "ipc_failed", cause: "gone" } }, false],
+  ] as const)("%s", (_case, result, expected) => {
+    expect(announceLoginNote(result)).toBe(expected);
+  });
+});
+
 describe("launchAtLoginBox", () => {
   it.each([
     ["on", "on", { checked: true, disabled: false, note: null }],
@@ -956,7 +973,7 @@ describe("launchAtLoginBox", () => {
       {
         checked: false,
         disabled: false,
-        note: "DockMoss needs your approval in System Settings › General › Login Items.",
+        note: "DockMoss needs your approval in System\u00a0Settings\u00a0›\u00a0General\u00a0›\u00a0Login\u00a0Items.",
       },
     ],
     [

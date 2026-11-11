@@ -152,8 +152,9 @@ export function nextFeedback(
 }
 
 const TRY_AGAIN = "This change could not be saved. Try again.";
-const CHECK_LOGIN_ITEMS =
-  "macOS didn't change this. Check System Settings › General › Login Items.";
+/** No-break spaces keep the path on one line. */
+const LOGIN_ITEMS_PATH = "System\u00a0Settings\u00a0›\u00a0General\u00a0›\u00a0Login\u00a0Items";
+const CHECK_LOGIN_ITEMS = `macOS did not change launch at login. Check ${LOGIN_ITEMS_PATH}.`;
 
 export function saveNotice(feedback: Feedback): string | null {
   const retryable = feedback.unsaved.filter(
@@ -275,11 +276,17 @@ function loginNote(status: LoginStatus | null): string | null {
     case null:
       return "macOS did not say whether this is on. To ask again, close and reopen Settings.";
     case "needsApproval":
-      return "DockMoss needs your approval in System Settings › General › Login Items.";
+      return `DockMoss needs your approval in ${LOGIN_ITEMS_PATH}.`;
     case "on":
     case "off":
       return null;
   }
+}
+
+/** Only the approval note reports a change's result; a failure has the red
+ * notice. Announced again even when it already shows. */
+export function announceLoginNote(result: LaunchAtLoginResult): boolean {
+  return result.ok && result.status === "needsApproval";
 }
 
 export function launchAtLoginBox(status: LoginStatus | null): {

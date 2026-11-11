@@ -1411,4 +1411,23 @@ mod tests {
         );
         assert_eq!(read(&folders.old, "launch_log.json"), history);
     }
+
+    #[test]
+    fn an_old_file_over_the_launch_logs_read_cap_is_never_compared() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        let cap = usize::try_from(crate::usage::store::MAX_FILE_BYTES).expect("cap fits usize");
+        write(&folders.old, "at_cap", &"h".repeat(cap));
+        write(&folders.old, "over_cap", &"h".repeat(cap + 1));
+        write(&folders.new, "short", "hh");
+        let short = folders.new.join("short");
+
+        assert_eq!(
+            (
+                interrupted_copy_at(&folders.old.join("at_cap"), &short).ok(),
+                interrupted_copy_at(&folders.old.join("over_cap"), &short).ok(),
+            ),
+            (Some(true), Some(false))
+        );
+    }
 }

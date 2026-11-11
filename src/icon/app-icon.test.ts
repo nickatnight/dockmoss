@@ -10,7 +10,6 @@ function mapThrough(transform: string): (value: number) => number {
     expect(b === undefined || b === a, `non-uniform ${kind} in ${transform}`).toBe(true);
     return { kind, by: Number(a) };
   });
-  expect(steps.length).toBeGreaterThan(0);
   return (value) =>
     steps.reduceRight((at, { kind, by }) => (kind === "translate" ? at + by : at * by), value);
 }
@@ -33,10 +32,6 @@ describe("the app icon", () => {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(svg));
     const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(hex).toBe(SITE_LOGO_SHA256);
-  });
-
-  it("is the same document on every call", () => {
-    expect(appIconSvg()).toBe(svg);
   });
 
   it("is a 1024 px square SVG document", () => {

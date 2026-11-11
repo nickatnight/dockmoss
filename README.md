@@ -229,12 +229,41 @@ src/                # webview frontend: overlay.ts (one subscription per channel
 
 ## Icons
 
-The bundle icons and the tray glyph are generated from the SVG masters in `src-tauri/icons/source/`:
+The bundle icons and the tray glyph are generated from the SVG masters in `src-tauri/icons/source/`.
+
+### App icon
+
+`src-tauri/icons/source/app-icon.svg` is generated, so do not edit it by hand. `appIconMaster()` in `src/icon/app-icon.ts` writes it. The master is the old stone tile with the moss generator's output (`src/render/generator.ts`) drawn over it. The moss is grown at level step 16 of 24 from the seed `fnv1a32("dockmoss#0")`, without props, and laid out as the overlay lays moss on a Dock tile (`ART_SIDE_PER_TILE_WIDTH`). The marketing site's logo is the same document: this repo is the source, and the site ports `src/icon/` from it (ADR-0019).
+
+A vitest file snapshot fails `pnpm test` when the master is stale. After a change to the icon or to the moss generator:
 
 ```sh
+pnpm test src/icon -u    # rewrite app-icon.svg; the filter goes before -u
+# re-pin APP_ICON_SHA256 in src/icon/app-icon.test.ts (the failing test prints the new value)
 pnpm tauri icon src-tauri/icons/source/app-icon.svg
 # then delete the non-macOS outputs (android/, ios/, icon.ico, Square*Logo.png, StoreLogo.png, 64x64.png)
+```
 
+- **Put the filter before `-u`.** Vitest's `-u` takes an optional value (`--update [type]`), so in `pnpm test -u src/icon` vitest reads `src/icon` as that value and updates snapshots across the whole suite.
+- **Re-pin the SHA-256 by hand.** `-u` never rewrites `APP_ICON_SHA256`, so the SHA test stays red until you re-pin it. A changed icon is therefore always a deliberate edit.
+- **Re-port the site.** The site then re-ports `src/icon/` and pins the same SHA-256 in its own test.
+- **Rerun `pnpm tauri icon`.** No test fails if you skip it, so run it every time the master changes.
+
+Two tests parse `appIconSvg()` and `appIconMaster()` with fast-xml-parser's `XMLValidator`. It rejects a missing or mismatched closing tag, a duplicate attribute and an unquoted attribute. It accepts some documents that XML forbids:
+- `--` inside a comment, which the master test asserts against separately;
+- a comment that ends in `-` (`--->`);
+- `&` or `<` inside an attribute value;
+- an empty second root element.
+
+`xmllint` rejects all of these. After a change that touches the header comment or the document's structure, also run:
+
+```sh
+xmllint --noout src-tauri/icons/source/app-icon.svg
+```
+
+### Tray glyph
+
+```sh
 pnpm tauri icon src-tauri/icons/source/tray.svg --png 44 -o src-tauri/icons
 mv src-tauri/icons/44x44.png src-tauri/icons/tray.png
 ```

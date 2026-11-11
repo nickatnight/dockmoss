@@ -7,7 +7,7 @@ use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
-    NSWorkspaceDidTerminateApplicationNotification,
+    NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceWillLaunchApplicationNotification,
 };
 use objc2_foundation::{NSNotification, NSOperationQueue, NSString, NSURL};
 
@@ -102,6 +102,33 @@ pub fn on_app_activated(
         move |app| on_activated(super::app::active_app(app)),
         mtm,
     );
+}
+
+/// Calls `on_launching` with each app macOS is about to launch or has just
+/// launched. Will-launch arrives about 36 ms into the Dock's lift of the
+/// icon, and did-launch about 72 ms in (job 019's spike); macOS does not post
+/// will-launch for every launch, so both are observed.
+#[expect(
+    unsafe_code,
+    reason = "the notification names are AppKit extern statics"
+)]
+pub fn on_app_launching(
+    on_launching: impl Fn(RunningApp) + Send + Sync + 'static,
+    mtm: MainThreadMarker,
+) {
+    let on_launching = Arc::new(on_launching);
+    // SAFETY: the names are immutable NSString constants that AppKit
+    // initialises before any Rust code runs.
+    let names = unsafe {
+        [
+            NSWorkspaceWillLaunchApplicationNotification,
+            NSWorkspaceDidLaunchApplicationNotification,
+        ]
+    };
+    for name in names {
+        let on_launching = Arc::clone(&on_launching);
+        observe(name, move |app| on_launching(running_app(app)), mtm);
+    }
 }
 
 /// Calls `on_app` on the main thread with the application of each workspace

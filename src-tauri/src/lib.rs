@@ -123,7 +123,8 @@ pub fn run() {
             } else {
                 Visibility::Hidden
             };
-            dock_tracker::spawn(app.handle(), messages, tracker_inbox.clone(), display, shown)?;
+            let inbox = tracker_inbox.clone();
+            dock_tracker::spawn(app.handle(), messages, inbox, display, shown, mtm)?;
             macos::screen::on_screen_parameters_change(
                 move || {
                     if tracker_inbox
@@ -707,24 +708,39 @@ mod dock_tracker {
     use crate::usage::DockApp;
     use crate::{OVERLAY_LABEL, macos, primary_display};
 
-    /// Starts the tracker, then the Dock hover observer that wakes it through
-    /// `inbox`. The observer is optional: without it, entry into a
-    /// magnification is found by polling alone.
+    /// Starts the tracker, then the Dock hover observer and the app launch
+    /// observer that wake it through `inbox`. The hover observer is optional:
+    /// without it, entry into a magnification is found by polling alone.
     pub(super) fn spawn(
         app: &AppHandle,
         messages: Receiver<TrackerMessage>,
         inbox: Sender<TrackerMessage>,
         display: Display,
         overlay: Visibility,
+        mtm: macos::MainThreadMarker,
     ) -> std::io::Result<()> {
         let tracked = app.clone();
         std::thread::Builder::new()
             .name("dock-tracker".into())
             .spawn(move || track_dock(&tracked, &messages, display, overlay))?;
+        watch_launches(inbox.clone(), mtm);
         if let Err(error) = spawn_observer(app.clone(), inbox) {
             tracing::warn!(%error, "dock hover observer not started; entry is polled");
         }
         Ok(())
+    }
+
+    /// Any regular app's launch, in the Dock or not: the Dock lifts its icon
+    /// or adds a tile, which shifts the others (Gate 1 Q1, job 019).
+    fn watch_launches(tracker: Sender<TrackerMessage>, mtm: macos::MainThreadMarker) {
+        macos::workspace::on_app_launching(
+            move |app| {
+                if app.can_have_dock_icon && tracker.send(TrackerMessage::AppLaunching).is_err() {
+                    tracing::debug!("app launch not passed on: the dock tracker stopped");
+                }
+            },
+            mtm,
+        );
     }
 
     fn spawn_observer(app: AppHandle, tracker: Sender<TrackerMessage>) -> std::io::Result<()> {
@@ -758,6 +774,7 @@ mod dock_tracker {
         let mut watcher = None;
         let mut rate = PollRate::Slow;
         let mut screen_changed = false;
+        let mut launched = None;
         let mut deadline = Instant::now();
         loop {
             let started = Instant::now();
@@ -793,10 +810,14 @@ mod dock_tracker {
                         &mut tracker,
                         &mut watcher,
                         &mut screen_changed,
+                        &mut launched,
                     )
                 },
                 macos::cursor::location,
             );
+            if let Some(at) = launched.take() {
+                activity.app_launching(at);
+            }
         }
     }
 
@@ -806,6 +827,7 @@ mod dock_tracker {
         tracker: &mut Tracker,
         watcher: &mut Option<Channel<Vec<DockItem>>>,
         screen_changed: &mut bool,
+        launched: &mut Option<Instant>,
     ) -> Woken {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
@@ -818,6 +840,13 @@ mod dock_tracker {
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
                 Ok(TrackerMessage::DockHoverChanged) => {
                     return Woken::DockHover { at: Instant::now() };
+                }
+                // Kept even when the wait is not cut short, so the next tick
+                // starts the launch hold. The first launch of a burst counts.
+                Ok(TrackerMessage::AppLaunching) => {
+                    let at = Instant::now();
+                    launched.get_or_insert(at);
+                    return Woken::AppLaunch { at };
                 }
                 Err(RecvTimeoutError::Timeout) => return Woken::Due,
                 Err(RecvTimeoutError::Disconnected) => {
@@ -998,6 +1027,7 @@ mod dock_tracker {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             let mut watcher = None;
             let mut screen_changed = false;
+            let mut launched = None;
             let delay = Duration::from_millis(50);
 
             let started = Instant::now();
@@ -1007,6 +1037,7 @@ mod dock_tracker {
                 &mut tracker,
                 &mut watcher,
                 &mut screen_changed,
+                &mut launched,
             );
 
             assert!(
@@ -1030,6 +1061,7 @@ mod dock_tracker {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             let mut watcher = None;
             let mut screen_changed = false;
+            let mut launched = None;
 
             let started = Instant::now();
             let woken = drain_inbox_until(
@@ -1038,6 +1070,7 @@ mod dock_tracker {
                 &mut tracker,
                 &mut watcher,
                 &mut screen_changed,
+                &mut launched,
             );
 
             let returned = Instant::now();
@@ -1052,6 +1085,78 @@ mod dock_tracker {
         }
 
         #[test]
+        fn an_app_launch_ends_the_wait_at_once_and_is_kept_for_the_next_tick() {
+            let (inbox, messages) = mpsc::channel();
+            inbox
+                .send(TrackerMessage::AppLaunching)
+                .expect("the receiver is alive");
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            let mut watcher = None;
+            let mut screen_changed = false;
+            let mut launched = None;
+
+            let started = Instant::now();
+            let woken = drain_inbox_until(
+                started + Duration::from_secs(5),
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+
+            let returned = Instant::now();
+
+            assert!(matches!(woken, Woken::AppLaunch { at } if at >= started && at <= returned));
+            assert!(
+                launched.is_some_and(|at| at >= started && at <= returned),
+                "{launched:?}"
+            );
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "returned after {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn a_later_launch_in_the_same_wait_keeps_the_first_launch_time() {
+            let (inbox, messages) = mpsc::channel();
+            inbox
+                .send(TrackerMessage::AppLaunching)
+                .expect("the receiver is alive");
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            let mut watcher = None;
+            let mut screen_changed = false;
+            let mut launched = None;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            drain_inbox_until(
+                deadline,
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+            let first = launched;
+            inbox
+                .send(TrackerMessage::AppLaunching)
+                .expect("the receiver is alive");
+
+            drain_inbox_until(
+                deadline,
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+
+            assert!(first.is_some());
+            assert_eq!(launched, first);
+        }
+
+        #[test]
         fn a_new_watcher_gets_the_current_frame_on_the_next_tick() {
             let (inbox, messages) = mpsc::channel();
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
@@ -1062,6 +1167,7 @@ mod dock_tracker {
                 .expect("the receiver is alive");
             let mut watcher = None;
             let mut screen_changed = false;
+            let mut launched = None;
 
             drain_inbox_until(
                 Instant::now() + Duration::from_millis(5),
@@ -1069,6 +1175,7 @@ mod dock_tracker {
                 &mut tracker,
                 &mut watcher,
                 &mut screen_changed,
+                &mut launched,
             );
             let after_watch = tracker.tick(Ok(vec![safari()]), None);
 

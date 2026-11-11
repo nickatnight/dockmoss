@@ -19,6 +19,13 @@ const REVEAL_EDGE: f64 = 4.0;
 /// Dock's default auto-hide delay, after which its slide sends frames. Bounded,
 /// so a pointer parked over a hidden Dock goes back to `Slow`.
 const REVEAL_WAIT: Duration = Duration::from_secs(1);
+/// After an app launches, `Fast` holds until this long after the later of the
+/// launch and the last frame that moved: the Dock lifts the app's icon for
+/// about 690 ms, and a new tile shifts the others.
+const LAUNCH_SETTLE: Duration = Duration::from_secs(1);
+/// A launch hold never lasts longer than this after the launch that started
+/// it, however long the Dock keeps moving or apps keep launching.
+const LAUNCH_HOLD_CAP: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -260,18 +267,38 @@ fn near_bottom_edge(point: ScreenPoint, frame: ScreenRect, reach: f64) -> bool {
         && (bottom - reach..=bottom).contains(&point.y)
 }
 
-/// Keeps the poll at `Fast` only while something there moves: the pointer
-/// moved since the last tick, a frame was sent within `FAST_AFTER_SEND`, or
-/// the pointer moved within `REVEAL_WAIT` and waits at a hidden Dock's edge.
+/// Keeps the poll at `Fast` only while something there moves: near the Dock,
+/// the pointer moved since the last tick, a frame was sent within
+/// `FAST_AFTER_SEND`, or the pointer moved within `REVEAL_WAIT` and waits at a
+/// hidden Dock's edge; anywhere, an app launched and the launch hold lasts.
 #[derive(Debug, Default)]
 pub struct Activity {
     last_cursor: Option<ScreenPoint>,
     last_moved: Option<Instant>,
     last_sent: Option<Instant>,
     resting: bool,
+    /// When the launch that started the current hold arrived.
+    launch_hold: Option<Instant>,
 }
 
 impl Activity {
+    /// A regular app is launching, so the Dock may lift its icon or add a
+    /// tile. Starts a launch hold unless one is already running; a launch
+    /// during a hold does not extend it.
+    pub fn app_launching(&mut self, at: Instant) {
+        if !self.holding_for_launch(at) {
+            self.launch_hold = Some(at);
+        }
+    }
+
+    fn holding_for_launch(&self, now: Instant) -> bool {
+        self.launch_hold.is_some_and(|since| {
+            let settles_from = self.last_sent.map_or(since, |sent| sent.max(since));
+            now.saturating_duration_since(since) <= LAUNCH_HOLD_CAP
+                && now.saturating_duration_since(settles_from) <= LAUNCH_SETTLE
+        })
+    }
+
     pub fn rate(
         &mut self,
         proximity_rate: PollRate,
@@ -296,7 +323,11 @@ impl Activity {
         let near = proximity_rate == PollRate::Fast;
         let moving = moved || settling || revealing;
         self.resting = near && !moving;
-        if near && moving {
+        let launching = self.holding_for_launch(now);
+        if !launching {
+            self.launch_hold = None;
+        }
+        if (near && moving) || launching {
             PollRate::Fast
         } else {
             PollRate::Slow
@@ -314,20 +345,23 @@ impl Activity {
     ) -> Instant {
         let longer_than_a_fast_interval =
             read_due.saturating_duration_since(now) > PollRate::Fast.interval();
-        // A hover read comes no sooner than one Fast interval after the last
-        // read, so hovers alone cannot read faster than Fast does.
-        let earliest_hover_read = now.checked_add(PollRate::Fast.interval()).unwrap_or(now);
+        // A read a hover or a launch brings forward comes no sooner than one
+        // Fast interval after the last read, so they cannot read faster than
+        // Fast does.
+        let earliest_early_read = now.checked_add(PollRate::Fast.interval()).unwrap_or(now);
         let mut wait = |until: Instant| loop {
             match wait_until(until) {
                 Woken::Due => return None,
-                Woken::DockHover { at } if longer_than_a_fast_interval => {
-                    if at < earliest_hover_read {
-                        while wait_until(earliest_hover_read) != Woken::Due {}
-                        return Some(earliest_hover_read);
+                Woken::DockHover { at } | Woken::AppLaunch { at }
+                    if longer_than_a_fast_interval =>
+                {
+                    if at < earliest_early_read {
+                        while wait_until(earliest_early_read) != Woken::Due {}
+                        return Some(earliest_early_read);
                     }
                     return Some(at);
                 }
-                Woken::DockHover { .. } => {}
+                Woken::DockHover { .. } | Woken::AppLaunch { .. } => {}
             }
         };
         let mut checked = now;
@@ -351,6 +385,7 @@ impl Activity {
 pub enum Woken {
     Due,
     DockHover { at: Instant },
+    AppLaunch { at: Instant },
 }
 
 /// When the tick after one due at `previous` is due: one interval later, so
@@ -1254,6 +1289,22 @@ mod tests {
         pointer: &[Option<ScreenPoint>],
         hovers: &[Duration],
     ) -> (Duration, Vec<u64>) {
+        wait_for_read_woken_by(activity, start, now, read_due, pointer, hovers, |at| {
+            Woken::DockHover { at }
+        })
+    }
+
+    /// `wait_for_read_with_hovers`, woken at `hovers` by the message `woken`
+    /// builds.
+    fn wait_for_read_woken_by(
+        activity: &Activity,
+        start: Instant,
+        now: Duration,
+        read_due: Duration,
+        pointer: &[Option<ScreenPoint>],
+        hovers: &[Duration],
+        woken: fn(Instant) -> Woken,
+    ) -> (Duration, Vec<u64>) {
         let at = |offset: Duration| start.checked_add(offset).expect("in range");
         let since_start = |instant: Instant| {
             u64::try_from(instant.duration_since(start).as_millis()).expect("in range")
@@ -1267,7 +1318,7 @@ mod tests {
             |until| {
                 if let Some(hover) = hovers.next_if(|&hover| hover <= until) {
                     clock.set(hover.max(clock.get()));
-                    return Woken::DockHover { at: clock.get() };
+                    return woken(clock.get());
                 }
                 clock.set(until);
                 Woken::Due
@@ -1629,6 +1680,252 @@ mod tests {
 
         assert_eq!(first, ms(420));
         assert_eq!(second, ms(421) + PollRate::Fast.interval());
+    }
+
+    /// One tick with the pointer still and away from the Dock, after the
+    /// launches the step lists.
+    struct LaunchStep {
+        case: &'static str,
+        launches_ms: Vec<u64>,
+        sent: bool,
+        at_ms: u64,
+        expected: PollRate,
+    }
+
+    fn run_launch_steps(proximity_rate: PollRate, steps: impl IntoIterator<Item = LaunchStep>) {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let cursor = Some(if proximity_rate == PollRate::Fast {
+            IN_BAND
+        } else {
+            FAR
+        });
+        let mut activity = Activity::default();
+        activity.rate(proximity_rate, false, cursor, false, start);
+        for step in steps {
+            for launch in step.launches_ms {
+                activity.app_launching(at(launch));
+            }
+            let rate = activity.rate(proximity_rate, false, cursor, step.sent, at(step.at_ms));
+            assert_eq!(rate, step.expected, "{}", step.case);
+        }
+    }
+
+    #[test]
+    fn a_launch_holds_fast_away_from_the_dock_until_one_second_after_the_last_moved_frame() {
+        let step = |case, launches_ms: Vec<u64>, sent, at_ms, expected| LaunchStep {
+            case,
+            launches_ms,
+            sent,
+            at_ms,
+            expected,
+        };
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step("no launch: Slow", vec![], false, 500, PollRate::Slow),
+                step(
+                    "the launch starts the hold",
+                    vec![1000],
+                    false,
+                    1010,
+                    PollRate::Fast,
+                ),
+                step(
+                    "the lift moves the Dock",
+                    vec![],
+                    true,
+                    1080,
+                    PollRate::Fast,
+                ),
+                step("still lifting", vec![], true, 1300, PollRate::Fast),
+                step("the last moved frame", vec![], true, 1700, PollRate::Fast),
+                step(
+                    "one second after the last moved frame",
+                    vec![],
+                    false,
+                    2700,
+                    PollRate::Fast,
+                ),
+                step("the hold has ended", vec![], false, 2701, PollRate::Slow),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_launch_that_moves_nothing_holds_fast_for_one_second_from_the_launch() {
+        let step = |case, launches_ms: Vec<u64>, at_ms, expected| LaunchStep {
+            case,
+            launches_ms,
+            sent: false,
+            at_ms,
+            expected,
+        };
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step("the launch", vec![1000], 1500, PollRate::Fast),
+                step("one second after it", vec![], 2000, PollRate::Fast),
+                step("the hold has ended", vec![], 2001, PollRate::Slow),
+                step(
+                    "a launch after the hold ended starts a new one",
+                    vec![2500],
+                    2510,
+                    PollRate::Fast,
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn the_hold_never_outlasts_two_seconds_after_the_launch_that_started_it() {
+        let step = |case, launches_ms: Vec<u64>, at_ms, expected| LaunchStep {
+            case,
+            launches_ms,
+            sent: true,
+            at_ms,
+            expected,
+        };
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step(
+                    "the launch, the Dock moving",
+                    vec![1000],
+                    1100,
+                    PollRate::Fast,
+                ),
+                step("still moving", vec![], 2500, PollRate::Fast),
+                step("two seconds after the launch", vec![], 3000, PollRate::Fast),
+                step(
+                    "moving past the cap: the hold has ended",
+                    vec![],
+                    3001,
+                    PollRate::Slow,
+                ),
+                step("still moving: Slow", vec![], 3500, PollRate::Slow),
+            ],
+        );
+    }
+
+    #[test]
+    fn launches_during_a_hold_do_not_extend_it() {
+        let step = |case, launches_ms: Vec<u64>, sent, at_ms, expected| LaunchStep {
+            case,
+            launches_ms,
+            sent,
+            at_ms,
+            expected,
+        };
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step(
+                    "will-launch, then did-launch for the same app",
+                    vec![1000, 1040],
+                    true,
+                    1050,
+                    PollRate::Fast,
+                ),
+                step("the Dock moves", vec![], true, 1600, PollRate::Fast),
+                step("the Dock moves", vec![], true, 2200, PollRate::Fast),
+                step(
+                    "another app launches while the Dock still moves",
+                    vec![2500],
+                    true,
+                    2510,
+                    PollRate::Fast,
+                ),
+                step(
+                    "two seconds after the first launch, not the last",
+                    vec![],
+                    true,
+                    3001,
+                    PollRate::Slow,
+                ),
+            ],
+        );
+        run_launch_steps(
+            PollRate::Slow,
+            [
+                step("a launch", vec![1000], false, 1010, PollRate::Fast),
+                step(
+                    "a second launch inside the hold, nothing moving",
+                    vec![1900],
+                    false,
+                    1910,
+                    PollRate::Fast,
+                ),
+                step(
+                    "one second after the first launch: ended, not extended",
+                    vec![],
+                    false,
+                    2001,
+                    PollRate::Slow,
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_launch_holds_fast_with_the_pointer_resting_in_the_band() {
+        run_launch_steps(
+            PollRate::Fast,
+            [
+                LaunchStep {
+                    case: "resting in the band: Slow",
+                    launches_ms: vec![],
+                    sent: false,
+                    at_ms: 500,
+                    expected: PollRate::Slow,
+                },
+                LaunchStep {
+                    case: "a launch: Fast, though the pointer rests",
+                    launches_ms: vec![1000],
+                    sent: false,
+                    at_ms: 1010,
+                    expected: PollRate::Fast,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn an_app_launch_ends_a_slow_wait_as_a_hover_does() {
+        let start = Instant::now();
+        let now = ms(HOVER_NOW_MS);
+        let fast = PollRate::Fast.interval();
+        let launch = |at| Woken::AppLaunch { at };
+        let cases = [
+            ("a slow wait: read at the launch", ms(800), ms(420), ms(420)),
+            (
+                "2 ms after the last read: read one Fast interval after it",
+                ms(800),
+                ms(302),
+                now + fast,
+            ),
+            (
+                "a wait of exactly one Fast interval: the launch changes nothing",
+                now + fast,
+                ms(305),
+                now + fast,
+            ),
+        ];
+        for (case, read_due, launch_at, expected) in cases {
+            let (activity, _) = still_far(start);
+
+            let (read, _) = wait_for_read_woken_by(
+                &activity,
+                start,
+                now,
+                read_due,
+                &[Some(FAR)],
+                &[launch_at],
+                launch,
+            );
+
+            assert_eq!(read, expected, "{case}");
+        }
     }
 
     #[test]

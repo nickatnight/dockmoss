@@ -31,9 +31,10 @@ src-tauri/src/
   commands.rs    # #[tauri::command] fns: thin, they delegate to modules (watch_dock,
                  #   watch_growth, get_settings, save_settings, set_launch_at_login)
   tracker.rs     # pure: per Dock read -> what to send, log and show; the poll rate,
-                 #   Activity (Fast only while something moves), read deadlines, and
-                 #   the hover cut (wait_for_read: a Dock hover change ends a long wait,
-                 #   no sooner than one Fast interval after the last read)
+                 #   Activity (Fast only while something moves, and the launch hold),
+                 #   read deadlines, and the early read (wait_for_read: a Dock hover
+                 #   change or an app launch ends a long wait, no sooner than one Fast
+                 #   interval after the last read)
   geometry.rs    # pure: AX rects -> overlay-local logical pixels (the one conversion),
                  #   and the settings window's height clamped to the work area
   dock.rs        # pure: raw Dock children -> DockItems (application items only),
@@ -115,12 +116,16 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - Every `unsafe` block lives in `macos/` and has a `// SAFETY:` comment stating the invariant it depends on. Keep each block as small as the call it wraps. `unsafe_code` is denied crate-wide, so the item holding the block opts in with `#[expect(unsafe_code, reason = "...")]`.
 - **AppKit runs on the main thread.** Take a `MainThreadMarker` in any function that touches `NSWindow`/`NSWorkspace`, and reach the main thread from elsewhere with `app.run_on_main_thread(...)`.
 - **AX calls are synchronous IPC to the Dock process** and can block. Run Dock polling on a dedicated thread, or with `tauri::async_runtime::spawn_blocking`, and never on the main thread. Release CF objects through `CFRetained`/RAII wrappers instead of calling `CFRelease` by hand.
-- **Every AX read costs the Dock process CPU** (about 0.4% at 2 Hz). The tracker reads at 60 Hz only while something moves: the pointer near the Dock, a frame sent within 250 ms, or a pointer waiting at a hidden Dock's edge (1 s after its last move). A pointer at rest in the band gets pointer-only checks at 10 Hz, with no AX read. Keep any new reason to poll fast bounded in time, and put it in `tracker.rs`'s `Activity` with table tests (ADR-0012).
+- **Every AX read costs the Dock process CPU** (about 0.4% at 2 Hz). The tracker reads at 60 Hz only while something moves: the pointer near the Dock, a frame sent within 250 ms, or a pointer waiting at a hidden Dock's edge (1 s after its last move), or, wherever the pointer is, a launch hold. A pointer at rest in the band gets pointer-only checks at 10 Hz, with no AX read. Keep any new reason to poll fast bounded in time, and put it in `tracker.rs`'s `Activity` with table tests (ADR-0012).
 - **A Dock hover change ends a long wait** (ADR-0017). The Dock posts no move or resize notification for its items, only `AXSelectedChildrenChanged` when the hovered item changes (entry, each item crossed, exit). So reads stay polled, and the notification only starts them early.
   - The `dock-observer` thread (`macos/dock_observer.rs`) registers for it on its own `CFRunLoop`, never on the main thread, and sends `TrackerMessage::DockHoverChanged`. It is optional: the tracker starts first, and polling is the fallback.
   - Whether it may register is decided by the pure `dock::HoverObserverGate`: the cached `TrustState` and a fresh, no-prompt `check_trust`, a latch after `APIDisabled` until trust is seen revoked, and a stop after `NotificationUnsupported`. Attempts are at least 2 s apart.
   - In `Activity::wait_for_read`, a hover ends a wait longer than one `Fast` interval, but never makes a read due sooner than one `Fast` interval after the last read. That caps hover-driven reads at 60 a second, two per selection change while the pointer is still, and adds no reason to stay at `Fast`.
-  - It is the only `TrackerMessage` that cuts the wait short (ADR-0007, amended).
+  - It and `AppLaunching` (below) are the only `TrackerMessage`s that cut the wait short (ADR-0007, amended).
+- **An app launch holds `Fast`** (job 019, Gate 1 Q1). The Dock posts nothing for the lift of a launching app's icon (about 690 ms), so with the pointer away from the Dock it was followed at 2 Hz.
+  - `macos::workspace::on_app_launching` observes `NSWorkspace`'s will-launch and did-launch notifications on the main queue. Will-launch arrives about 36 ms into the lift and did-launch about 72 ms in (job 019's spike), and macOS does not post will-launch for every launch, so both count. For any regular app, pinned or not (a new tile shifts the others), `dock_tracker::watch_launches` sends `TrackerMessage::AppLaunching`.
+  - `Activity::app_launching` starts a launch hold unless one is running: `Fast` until 1 s after the later of the launch and the last frame that moved (`LAUNCH_SETTLE`), never more than 2 s after the launch that started it (`LAUNCH_HOLD_CAP`). A launch during a hold does not extend it, so one launch costs at most 120 extra reads (about 100 measured).
+  - The message ends a long wait under the hover rule (`Woken::AppLaunch`), and `drain_inbox_until` keeps the first launch time even when the wait is not cut, so the next tick starts the hold.
 - Get the native window with `window.ns_window()` and cast it to `&NSWindow` inside `macos/overlay.rs` only.
 
 ## Tauri 2 conventions

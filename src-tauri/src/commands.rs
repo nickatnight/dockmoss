@@ -28,6 +28,9 @@ pub enum TrackerMessage {
     ScreenParametersChanged,
     OverlayOrderFailed,
     DockHoverChanged,
+    /// A regular app is launching: the Dock lifts its icon, or adds a tile
+    /// and shifts the others.
+    AppLaunching,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);

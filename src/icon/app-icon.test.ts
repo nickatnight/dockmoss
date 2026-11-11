@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { type LevelStep, mossScene } from "../render/generator";
-import { fnv1a32 } from "../render/model";
+import { artBox, fnv1a32 } from "../render/model";
 import { APP_ICON_MOSS, appIconMaster, appIconSvg } from "./app-icon";
 import { sceneSvg } from "./svg";
 
@@ -21,6 +21,7 @@ function groupTransforms(svg: string): string[] {
 
 describe("the app icon", () => {
   const svg = appIconSvg();
+  const art = artBox({ x: 0, y: 0, width: 1024, height: 1024 });
 
   it("grows the moss of the app's first Dock item keyed dockmoss, at level step 16 of 24, without props", () => {
     expect(APP_ICON_MOSS).toEqual({ seed: fnv1a32("dockmoss#0"), step: 16, overgrown: false });
@@ -48,15 +49,15 @@ describe("the app icon", () => {
     const [stone] = groupTransforms(svg);
     expect(svg).toContain('<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#stone)"');
     const toCanvas = mapThrough(stone);
-    expect(toCanvas(100)).toBeCloseTo(107.52, 1);
-    expect(toCanvas(924)).toBeCloseTo(107.52 + 808.96, 1);
+    expect(toCanvas(100)).toBeCloseTo(art.x, 1);
+    expect(toCanvas(924)).toBeCloseTo(art.x + art.width, 1);
   });
 
   it("lays the moss's 112 icon units over the same box as the stone", () => {
     const [, moss] = groupTransforms(svg);
     const toCanvas = mapThrough(moss);
-    expect(toCanvas(0)).toBeCloseTo(107.52, 1);
-    expect(toCanvas(112)).toBeCloseTo(107.52 + 808.96, 1);
+    expect(toCanvas(0)).toBeCloseTo(art.x, 1);
+    expect(toCanvas(112)).toBeCloseTo(art.x + art.width, 1);
   });
 
   it("draws the generator's moss over the stone", () => {

@@ -265,7 +265,7 @@ fn link_error(error: &io::Error) -> LinkError {
     if error.kind() == io::ErrorKind::AlreadyExists {
         LinkError::NameTaken
     } else if error.kind() == io::ErrorKind::Unsupported
-        || matches!(error.raw_os_error(), Some(libc::ENOTSUP | libc::EOPNOTSUPP))
+        || error.raw_os_error() == Some(libc::ENOTSUP)
     {
         LinkError::CannotLink
     } else {

@@ -356,6 +356,16 @@ fn interrupted_copy_at(old: &Path, new: &Path) -> bool {
 }
 
 fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
+    copy_into_new_file_with(old, new, |source, target| {
+        io::copy(source, target).map(drop)
+    })
+}
+
+fn copy_into_new_file_with(
+    old: &Path,
+    new: &Path,
+    copy: impl FnOnce(&mut fs::File, &mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
     // As the plan's `symlink_metadata` check: no link is followed, and a
     // FIFO swapped in cannot block the open.
     let mut source = fs::OpenOptions::new()
@@ -370,7 +380,7 @@ fn copy_into_new_file(old: &Path, new: &Path) -> io::Result<()> {
         .create_new(true)
         .mode(PRIVATE_FILE_MODE)
         .open(new)?;
-    let copied = io::copy(&mut source, &mut target).and_then(|_| target.sync_all());
+    let copied = copy(&mut source, &mut target).and_then(|()| target.sync_all());
     if copied.is_err()
         && let Err(error) = fs::remove_file(new)
     {
@@ -388,7 +398,8 @@ mod tests {
 
     use super::{
         Entry, LeftBehind, LinkError, Listing, MOVED_FILES, MoveReport, Moved, OldFolder, Step,
-        is_interrupted_copy, link_error, move_old_data, move_old_data_with, move_with, plan_move,
+        copy_into_new_file_with, is_interrupted_copy, link_error, move_old_data,
+        move_old_data_with, move_with, plan_move,
     };
 
     fn listing(entries: &[(&'static str, Entry)]) -> Listing {
@@ -1241,5 +1252,40 @@ mod tests {
         assert!(matches!(moved, Moved::No(_)), "{moved:?}");
         assert!(!folders.new.join("launch_log.json").exists());
         assert_eq!(read(&folders.old, "elsewhere"), "not user data");
+    }
+
+    #[test]
+    fn a_copy_that_fails_part_way_leaves_no_file_under_the_new_name() {
+        let folders = folders();
+        fs::create_dir(&folders.new).expect("new folder");
+        write(&folders.old, "launch_log.json", "the whole history");
+
+        let copied = copy_into_new_file_with(
+            &folders.old.join("launch_log.json"),
+            &folders.new.join("launch_log.json"),
+            |_, target| {
+                io::Write::write_all(target, b"the wh")?;
+                Err(io::Error::other("the volume went away"))
+            },
+        );
+
+        assert!(copied.is_err());
+        assert!(!folders.new.join("launch_log.json").exists());
+        assert_eq!(read(&folders.old, "launch_log.json"), "the whole history");
+    }
+
+    #[test]
+    fn on_a_volume_that_cannot_link_the_whole_move_copies_every_file_and_reports_nothing_left() {
+        let folders = folders();
+        write(&folders.old, "launch_log.json", "history");
+        write(&folders.old, "settings.json", "settings");
+
+        let report = move_old_data_with(&folders.old, &folders.new, cannot_link);
+
+        assert_eq!((report.moved, report.kept, report.failed.len()), (2, 0, 0));
+        assert_eq!(report.old_folder, OldFolder::Removed);
+        assert_eq!(report.left_behind_data(), None);
+        assert_eq!(read(&folders.new, "launch_log.json"), "history");
+        assert_eq!(read(&folders.new, "settings.json"), "settings");
     }
 }

@@ -805,9 +805,7 @@ mod dock_tracker {
                 },
                 macos::cursor::location,
             );
-            if let Some(at) = launched.take() {
-                activity.app_launching(at);
-            }
+            launched.hand_to(&mut activity);
         }
     }
 

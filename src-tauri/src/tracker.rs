@@ -384,6 +384,13 @@ impl PendingLaunch {
     pub fn take(&mut self) -> Option<Instant> {
         self.0.take()
     }
+
+    /// After a wait, hands the launch to `activity`, so the next tick holds.
+    pub fn hand_to(&mut self, activity: &mut Activity) {
+        if let Some(at) = self.take() {
+            activity.app_launching(at);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1992,6 +1999,42 @@ mod tests {
 
         assert_eq!(pending.take(), Some(at(10)));
         assert_eq!(pending.take(), None);
+    }
+
+    #[test]
+    fn a_launch_long_after_the_last_sent_frame_still_holds_fast_for_one_second() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut activity = Activity::default();
+        activity.rate(PollRate::Slow, false, Some(FAR), true, start);
+
+        activity.app_launching(at(5000));
+
+        assert_eq!(
+            activity.rate(PollRate::Slow, false, Some(FAR), false, at(5010)),
+            PollRate::Fast
+        );
+        assert_eq!(
+            activity.rate(PollRate::Slow, false, Some(FAR), false, at(6001)),
+            PollRate::Slow
+        );
+    }
+
+    #[test]
+    fn a_pending_launch_handed_to_activity_holds_the_next_tick_once() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut activity = Activity::default();
+        activity.rate(PollRate::Slow, false, Some(FAR), false, start);
+        let mut pending = PendingLaunch::default();
+
+        pending.record(at(1000));
+        pending.hand_to(&mut activity);
+        let held = activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010));
+        pending.hand_to(&mut activity);
+        let after = activity.rate(PollRate::Slow, false, Some(FAR), false, at(2500));
+
+        assert_eq!((held, after), (PollRate::Fast, PollRate::Slow));
     }
 
     #[test]

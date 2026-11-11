@@ -129,8 +129,17 @@ mod tests {
             AloneRead::NoAnswer
         );
 
-        std::thread::sleep(BOUND * 2);
+        // Busy until the late read returns; the deadline only stops a hang.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let next = loop {
+            match read_alone(&SLOT, BOUND, || 3) {
+                AloneRead::Busy if Instant::now() < deadline => {
+                    std::thread::sleep(BOUND / 10);
+                }
+                other => break other,
+            }
+        };
 
-        assert_eq!(read_alone(&SLOT, BOUND, || 3), AloneRead::Answered(3));
+        assert_eq!(next, AloneRead::Answered(3));
     }
 }

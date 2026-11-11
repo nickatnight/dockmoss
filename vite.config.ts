@@ -1,8 +1,8 @@
 import { defineConfig, type Plugin } from "vite";
 
-function noDebugModuleInBuild(): Plugin {
+function noDevOnlyModuleInBuild(): Plugin {
   return {
-    name: "dockmoss:no-debug-module-in-build",
+    name: "dockmoss:no-dev-only-module-in-build",
     apply: "build",
     generateBundle() {
       for (const id of this.getModuleIds()) {
@@ -11,6 +11,9 @@ function noDebugModuleInBuild(): Plugin {
             `${id} is in the release build. Load it only through import() under import.meta.env.DEV.`,
           );
         }
+        if (id.includes("/src/icon/")) {
+          this.error(`${id} is in the release build. src/icon/ writes the bundle icon master under vitest only.`);
+        }
       }
     },
   };
@@ -18,7 +21,7 @@ function noDebugModuleInBuild(): Plugin {
 
 export default defineConfig({
   clearScreen: false,
-  plugins: [noDebugModuleInBuild()],
+  plugins: [noDevOnlyModuleInBuild()],
   server: {
     port: 5110,
     strictPort: true,

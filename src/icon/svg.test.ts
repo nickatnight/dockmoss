@@ -87,8 +87,8 @@ describe("shapesSvg", () => {
   });
 
   it("fills and strokes at full opacity", () => {
-    expect(shapesSvg([dot(1, { kind: "fillAndStroke", fill: "#F7D54A", stroke: "#D9A92B", width: 0.4 })])).toBe(
-      '<g fill="#F7D54A" stroke="#D9A92B" stroke-width="0.4"><circle cx="1" cy="2" r="3"/></g>',
+    expect(shapesSvg([dot(1, { kind: "fillAndStroke", fill: "#F7D54A", stroke: "#D9A92B", width: 0.45 })])).toBe(
+      '<g fill="#F7D54A" stroke="#D9A92B" stroke-width="0.45"><circle cx="1" cy="2" r="3"/></g>',
     );
   });
 });

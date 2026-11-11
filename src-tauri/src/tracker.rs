@@ -164,8 +164,10 @@ impl Tracker {
         Some(apps)
     }
 
-    pub fn overlay(&self) -> Visibility {
-        self.ordered
+    /// The overlay is ordered hidden exactly when the Dock is off screen:
+    /// auto-hidden, or in a full-screen Space.
+    pub fn dock_on_screen(&self) -> bool {
+        self.ordered == Visibility::Shown
     }
 
     fn order(&mut self, sent: &[DockItem]) -> Option<Visibility> {
@@ -388,9 +390,9 @@ impl PendingLaunch {
         self.0.take()
     }
 
-    pub fn hand_to(&mut self, activity: &mut Activity, overlay: Visibility) {
+    pub fn hand_to(&mut self, activity: &mut Activity, dock_on_screen: bool) {
         if let Some(at) = self.take()
-            && overlay == Visibility::Shown
+            && dock_on_screen
         {
             activity.app_launching(at);
         }
@@ -2014,7 +2016,7 @@ mod tests {
         let mut pending = PendingLaunch::default();
 
         pending.record(at(1000));
-        pending.hand_to(&mut activity, Visibility::Hidden);
+        pending.hand_to(&mut activity, false);
 
         assert_eq!(
             activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010)),
@@ -2050,13 +2052,13 @@ mod tests {
         let mut pending = PendingLaunch::default();
 
         pending.record(at(1000));
-        pending.hand_to(&mut activity, Visibility::Shown);
+        pending.hand_to(&mut activity, true);
         activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010));
         activity.rate(PollRate::Slow, false, Some(FAR), false, at(3100));
         pending.record(at(4000));
-        pending.hand_to(&mut activity, Visibility::Hidden);
+        pending.hand_to(&mut activity, false);
         pending.record(at(6000));
-        pending.hand_to(&mut activity, Visibility::Shown);
+        pending.hand_to(&mut activity, true);
 
         assert_eq!(
             activity.rate(PollRate::Slow, false, Some(FAR), false, at(6010)),
@@ -2065,17 +2067,14 @@ mod tests {
     }
 
     #[test]
-    fn the_overlay_reads_as_last_ordered() {
+    fn the_dock_reads_as_on_screen_as_last_ordered() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
         tracker.tick(Ok(vec![]), None);
-        let hidden = tracker.overlay();
+        let hidden = tracker.dock_on_screen();
         tracker.order_failed();
 
-        assert_eq!(
-            (hidden, tracker.overlay()),
-            (Visibility::Hidden, Visibility::Shown)
-        );
+        assert_eq!((hidden, tracker.dock_on_screen()), (false, true));
     }
 
     #[test]

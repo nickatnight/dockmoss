@@ -39,10 +39,22 @@ pub struct NotChanged;
 /// registered fails, yet ends where it was asked to.
 pub fn outcome(wanted: bool, after: LoginItemStatus) -> Result<LaunchAtLogin, NotChanged> {
     match (wanted, after.launch_at_login()) {
-        (true, LaunchAtLogin::On) => Ok(LaunchAtLogin::On),
-        (false, LaunchAtLogin::Off) => Ok(LaunchAtLogin::Off),
-        (_, LaunchAtLogin::NeedsApproval) => Ok(LaunchAtLogin::NeedsApproval),
-        (true, LaunchAtLogin::Off) | (false, LaunchAtLogin::On) => Err(NotChanged),
+        (true, status) if status.is_registered() => Ok(status),
+        (false, status) if !status.opens_at_login() => Ok(status),
+        _ => Err(NotChanged),
+    }
+}
+
+impl LaunchAtLogin {
+    /// An item waiting for the user's approval is registered: only the user
+    /// can take it further.
+    fn is_registered(self) -> bool {
+        matches!(self, Self::On | Self::NeedsApproval)
+    }
+
+    /// An item waiting for the user's approval does not open at login.
+    fn opens_at_login(self) -> bool {
+        matches!(self, Self::On)
     }
 }
 

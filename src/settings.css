@@ -272,9 +272,8 @@ input[type="range"]:focus-visible {
 
 fieldset:disabled,
 .group:has(> .slider > input:disabled),
-.check:has(> input:disabled):has(> #launch-at-login-note[hidden]),
-.check:has(> input:disabled):not(:has(> #launch-at-login-note[hidden]))
-  > :is(input, label) {
+.check[data-login="loading"],
+.check[data-login="unknown"] > :is(input, label) {
   opacity: 0.6;
 }
 

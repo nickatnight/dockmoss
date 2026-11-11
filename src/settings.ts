@@ -42,6 +42,7 @@ const page = {
   saveError: byId("save-error", HTMLParagraphElement),
   launchAtLogin: byId("launch-at-login", HTMLInputElement),
   launchAtLoginNote: byId("launch-at-login-note", HTMLParagraphElement),
+  launchAtLoginCard: byId("launch-at-login-card", HTMLDivElement),
   groups: [
     byId("stages", HTMLFieldSetElement),
     byId("fast-forward", HTMLFieldSetElement),
@@ -206,6 +207,7 @@ function showLoginBox(status: LoginStatus | null): void {
   page.launchAtLogin.disabled = box.disabled;
   page.launchAtLoginNote.textContent = box.note;
   page.launchAtLoginNote.hidden = box.note === null;
+  page.launchAtLoginCard.dataset.login = status ?? "unknown";
 }
 
 function enteredThresholds(): SettingsChange {

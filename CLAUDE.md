@@ -47,7 +47,8 @@ src-tauri/src/
                  #   dev fast-forward override in place of the saved speed), SettingsView
   login_item.rs  # pure: LoginItemStatus, outcome (judged by the status macOS reports
                  #   after a change), is_app_bundle (only a .app may become a login item)
-  bounded.rs     # std only: read_within, one read on its own thread with a deadline
+  bounded.rs     # std only: read_within, one read on its own thread with a deadline,
+                 #   and read_alone, at most one such read per slot at a time
   navigation.rs  # pure: which URLs a window may load (is_app_origin)
   focus.rs       # pure: which activated app Settings hands focus back to
                  #   (is_return_target), and what closing Settings does
@@ -175,7 +176,7 @@ The boundary that matters is between `macos/` and everything else. `growth/`, `u
 - Known limits (ADR-0016): on a volume without hard links every move fails, so every start runs without usage tracking and only a `warn` says so. A failed `remove_file` after a successful link leaves a frozen copy in the old folder, which keeps that folder from being removed. The old log folder `~/Library/Logs/com.dockmoss.app` is left as it is.
 
 **Settings file** (ADR-0014):
-- Rust owns settings. The webview reads them with `get_settings` (settings, `limits` from the Rust constants, the Dock apps by name, or `null` while the Dock list is unknown, and `launchAtLogin` from macOS as `"on"`, `"off"` or `"needsApproval"`, or `null` when it does not answer within 500 ms) and writes them only through `save_settings`. The login status is read alongside the Dock list through `bounded::read_within`, so a stalled ServiceManagement disables only that box; the page then says why (`launchAtLoginBox`). There is no `tauri-plugin-store` and no store permission.
+- Rust owns settings. The webview reads them with `get_settings` (settings, `limits` from the Rust constants, the Dock apps by name, or `null` while the Dock list is unknown, and `launchAtLogin` from macOS as `"on"`, `"off"` or `"needsApproval"`, or `null` when it does not answer within 500 ms) and writes them only through `save_settings`. The login status is read alongside the Dock list through `bounded::read_alone`, so a stalled ServiceManagement disables only that box, and while one read is still stalled, opening Settings again starts no other; the page then says why (`launchAtLoginBox`). There is no `tauri-plugin-store` and no store permission.
 - `settings.json` lives in `app_data_dir`. It is versioned JSON (`version: 1`) with one key per setting in the webview's camelCase shape: `thresholds`, `intensityPercent`, `excluded` (sorted) and `fastForward`.
 - Only `save_settings` writes it, through `usage::write_atomically`: the same `write_private` temp file as the launch log (stale file removed, `create_new`, mode 0600), synced, then `rename`. Nothing writes it at startup or at quit.
 - Save is all or nothing. `Settings::parse` checks every field through its constructor (`Thresholds::new`, `Intensity::new`, `FastForward::from_factor`, `BundleId::new`, at most 256 exclusions, and lists over 4 × 256 entries refused before reading). Then `settings::commit` writes, and only after the write succeeds replaces the settings in memory. A failed write returns `settings_not_saved` with a fixed message; the cause, which can hold a path, is logged. The managed `Mutex<Settings>` is held through the write, on a `spawn_blocking` thread.

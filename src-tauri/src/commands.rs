@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -18,6 +19,9 @@ use crate::usage::{self, AppGrowth, DistinctDockApps};
 
 const DOCK_APPS_TIMEOUT: Duration = Duration::from_millis(500);
 const LOGIN_STATUS_TIMEOUT: Duration = Duration::from_millis(500);
+/// Held while a login status read runs, so a `SMAppService.status` that hangs
+/// leaves one thread behind however often Settings opens.
+static LOGIN_STATUS_READ: AtomicBool = AtomicBool::new(false);
 
 pub enum TrackerMessage {
     Watch(Channel<Vec<DockItem>>),
@@ -79,11 +83,12 @@ pub async fn get_settings(
     Ok(SettingsView::new(settings, dock.as_ref(), launch_at_login))
 }
 
-/// `None` when `ServiceManagement` does not answer in time, so Settings opens
-/// anyway, with only the launch at login box left disabled.
+/// `None` when `ServiceManagement` does not answer in time, or an earlier
+/// read has still not answered, so Settings opens anyway, with only the
+/// launch at login box left disabled.
 async fn launch_at_login() -> Option<LaunchAtLogin> {
     let waited = tauri::async_runtime::spawn_blocking(|| {
-        bounded::read_within(LOGIN_STATUS_TIMEOUT, || {
+        bounded::read_alone(&LOGIN_STATUS_READ, LOGIN_STATUS_TIMEOUT, || {
             macos::login_item::status().launch_at_login()
         })
     })

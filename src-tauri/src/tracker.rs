@@ -164,6 +164,11 @@ impl Tracker {
         Some(apps)
     }
 
+    /// The overlay's visibility as last ordered.
+    pub fn overlay(&self) -> Visibility {
+        self.ordered
+    }
+
     fn order(&mut self, sent: &[DockItem]) -> Option<Visibility> {
         let wanted = if sent.is_empty() {
             Visibility::Hidden
@@ -386,8 +391,11 @@ impl PendingLaunch {
     }
 
     /// After a wait, hands the launch to `activity`, so the next tick holds.
-    pub fn hand_to(&mut self, activity: &mut Activity) {
-        if let Some(at) = self.take() {
+    /// With the overlay hidden the Dock shows no lift, so the launch is dropped.
+    pub fn hand_to(&mut self, activity: &mut Activity, overlay: Visibility) {
+        if let Some(at) = self.take()
+            && overlay == Visibility::Shown
+        {
             activity.app_launching(at);
         }
     }
@@ -2002,6 +2010,23 @@ mod tests {
     }
 
     #[test]
+    fn a_launch_with_the_dock_hidden_starts_no_hold() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut activity = Activity::default();
+        activity.rate(PollRate::Slow, false, Some(FAR), false, start);
+        let mut pending = PendingLaunch::default();
+
+        pending.record(at(1000));
+        pending.hand_to(&mut activity, Visibility::Hidden);
+
+        assert_eq!(
+            activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010)),
+            PollRate::Slow
+        );
+    }
+
+    #[test]
     fn a_launch_long_after_the_last_sent_frame_still_holds_fast_for_one_second() {
         let start = Instant::now();
         let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
@@ -2029,9 +2054,9 @@ mod tests {
         let mut pending = PendingLaunch::default();
 
         pending.record(at(1000));
-        pending.hand_to(&mut activity);
+        pending.hand_to(&mut activity, Visibility::Shown);
         let held = activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010));
-        pending.hand_to(&mut activity);
+        pending.hand_to(&mut activity, Visibility::Shown);
         let after = activity.rate(PollRate::Slow, false, Some(FAR), false, at(2500));
 
         assert_eq!((held, after), (PollRate::Fast, PollRate::Slow));

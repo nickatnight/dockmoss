@@ -805,7 +805,7 @@ mod dock_tracker {
                 },
                 macos::cursor::location,
             );
-            launched.hand_to(&mut activity);
+            launched.hand_to(&mut activity, tracker.overlay());
         }
     }
 
@@ -1125,6 +1125,7 @@ mod dock_tracker {
                 &mut screen_changed,
                 &mut launched,
             );
+            std::thread::sleep(Duration::from_millis(1));
             let between = Instant::now();
             inbox
                 .send(TrackerMessage::AppLaunching)

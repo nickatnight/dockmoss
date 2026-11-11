@@ -105,26 +105,29 @@ pub fn on_app_activated(
 }
 
 /// macOS does not post will-launch for every launch, so both are observed.
-#[expect(
-    unsafe_code,
-    reason = "the notification names are AppKit extern statics"
-)]
 pub fn on_app_launching(
     on_launching: impl Fn(RunningApp) + Send + Sync + 'static,
     mtm: MainThreadMarker,
 ) {
     let on_launching = Arc::new(on_launching);
+    for name in launch_notification_names() {
+        let on_launching = Arc::clone(&on_launching);
+        observe(name, move |app| on_launching(running_app(app)), mtm);
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "the notification names are AppKit extern statics"
+)]
+fn launch_notification_names() -> [&'static NSString; 2] {
     // SAFETY: the names are immutable NSString constants that AppKit
     // initialises before any Rust code runs.
-    let names = unsafe {
+    unsafe {
         [
             NSWorkspaceWillLaunchApplicationNotification,
             NSWorkspaceDidLaunchApplicationNotification,
         ]
-    };
-    for name in names {
-        let on_launching = Arc::clone(&on_launching);
-        observe(name, move |app| on_launching(running_app(app)), mtm);
     }
 }
 

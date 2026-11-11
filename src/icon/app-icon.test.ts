@@ -70,6 +70,14 @@ describe("the app icon", () => {
     expect(APP_ICON_MOSS).toEqual({ seed: fnv1a32("dockmoss#0"), step: 16, overgrown: false });
   });
 
+  it("is the marketing site's logo: the SHA-256 of appIconSvg() at dockmoss-marketing f77ccd1", async () => {
+    // A change here moves the site logo too: the site re-ports and pins the new value.
+    const SITE_LOGO_SHA256 = "0110f3cbb42cc4d231f9da2e92c542712ba9358b4d3cb7df6968e03ba04232d3";
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(svg));
+    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    expect(hex).toBe(SITE_LOGO_SHA256);
+  });
+
   it("is the same document on every call", () => {
     expect(appIconSvg()).toBe(svg);
   });

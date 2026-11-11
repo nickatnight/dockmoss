@@ -73,15 +73,15 @@ fn left_behind_text(left_behind: LeftBehind) -> &'static str {
 }
 
 fn menu_entries(trust: Trust, left_behind: Option<LeftBehind>) -> Vec<MenuEntry> {
-    let notice = left_behind
-        .map(|left| [MenuEntry::LeftBehind(left), MenuEntry::Separator])
-        .into_iter()
-        .flatten();
-    let grant = (trust == Trust::Untrusted).then_some(MenuEntry::GrantAccessibility);
-    notice
-        .chain(grant)
-        .chain([MenuEntry::Settings, MenuEntry::Separator, MenuEntry::Quit])
-        .collect()
+    let mut entries = Vec::new();
+    if let Some(left) = left_behind {
+        entries.extend([MenuEntry::LeftBehind(left), MenuEntry::Separator]);
+    }
+    if trust == Trust::Untrusted {
+        entries.push(MenuEntry::GrantAccessibility);
+    }
+    entries.extend([MenuEntry::Settings, MenuEntry::Separator, MenuEntry::Quit]);
+    entries
 }
 
 fn menu(

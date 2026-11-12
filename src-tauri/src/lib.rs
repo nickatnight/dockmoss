@@ -774,7 +774,7 @@ mod dock_tracker {
                 reader.read()
             });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
-            let tick = tracker.tick(read, cursor);
+            let tick = tracker.tick(read, cursor, started);
             let next_rate = activity.rate(
                 tick.proximity_rate,
                 tick.awaits_reveal,
@@ -789,7 +789,7 @@ mod dock_tracker {
             perform(app, tick, &mut watcher);
             let now = Instant::now();
             deadline = activity.wait_for_read(
-                tracker::next_deadline(deadline, rate, now),
+                tracker.read_due(tracker::next_deadline(deadline, rate, now)),
                 now,
                 |until| {
                     drain_inbox_until(
@@ -825,6 +825,7 @@ mod dock_tracker {
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
                 Ok(TrackerMessage::DockHoverChanged) => {
+                    tracker.switch_ended();
                     return Woken::DockHover { at: Instant::now() };
                 }
                 Ok(TrackerMessage::AppLaunching) => {
@@ -975,7 +976,7 @@ mod dock_tracker {
         use super::drain_inbox_until;
         use crate::commands::TrackerMessage;
         use crate::dock::RawDockChild;
-        use crate::geometry::{Display, ScreenRect};
+        use crate::geometry::{Display, ScreenPoint, ScreenRect};
         use crate::tracker::{PendingLaunch, Tracker, Visibility, Woken};
 
         const PRIMARY_2X: Display = Display {
@@ -1069,6 +1070,42 @@ mod dock_tracker {
         }
 
         #[test]
+        fn a_dock_hover_change_brings_a_held_overlay_in_on_the_next_read() {
+            let (inbox, messages) = mpsc::channel();
+            let start = Instant::now();
+            let far = Some(ScreenPoint { x: 720.0, y: 300.0 });
+            let off_screen = RawDockChild {
+                rect: Some(ScreenRect {
+                    y: 990.0,
+                    ..safari().rect.expect("a rect")
+                }),
+                ..safari()
+            };
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            tracker.tick(Ok(vec![off_screen]), far, start);
+            let held = tracker.tick(Ok(vec![safari()]), far, start + Duration::from_millis(300));
+            inbox
+                .send(TrackerMessage::DockHoverChanged)
+                .expect("the receiver is alive");
+            let mut watcher = None;
+            let mut screen_changed = false;
+            let mut launched = PendingLaunch::default();
+
+            drain_inbox_until(
+                Instant::now() + Duration::from_secs(5),
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+            let next = tracker.tick(Ok(vec![safari()]), far, start + Duration::from_millis(900));
+
+            assert_eq!(held.overlay, None, "held");
+            assert_eq!(next.overlay, Some(Visibility::Shown));
+        }
+
+        #[test]
         fn an_app_launch_ends_the_wait_at_once_and_is_kept_for_the_next_tick() {
             let (inbox, messages) = mpsc::channel();
             inbox
@@ -1145,8 +1182,8 @@ mod dock_tracker {
         fn a_new_watcher_gets_the_current_frame_on_the_next_tick() {
             let (inbox, messages) = mpsc::channel();
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            let first = tracker.tick(Ok(vec![safari()]), None);
-            let unchanged = tracker.tick(Ok(vec![safari()]), None);
+            let first = tracker.tick(Ok(vec![safari()]), None, Instant::now());
+            let unchanged = tracker.tick(Ok(vec![safari()]), None, Instant::now());
             inbox
                 .send(TrackerMessage::Watch(Channel::new(|_| Ok(()))))
                 .expect("the receiver is alive");
@@ -1162,7 +1199,7 @@ mod dock_tracker {
                 &mut screen_changed,
                 &mut launched,
             );
-            let after_watch = tracker.tick(Ok(vec![safari()]), None);
+            let after_watch = tracker.tick(Ok(vec![safari()]), None, Instant::now());
 
             assert!(first.send.is_some() && unchanged.send.is_none(), "baseline");
             assert!(watcher.is_some(), "the watcher is stored");

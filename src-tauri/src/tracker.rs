@@ -24,6 +24,15 @@ const LAUNCH_HOLD_CAP: Duration = Duration::from_secs(2);
 /// One app's will-launch and did-launch arrived 35 to 158 ms apart on every
 /// app measured (job 019).
 const SAME_LAUNCH: Duration = Duration::from_millis(250);
+/// An auto-hidden Dock slides in under a pointer at the bottom edge, and the
+/// pointer may follow it up before the read that sees it. Within this many
+/// points of the edge the Dock's return counts as that reveal; farther away,
+/// as a Space switch. Above the tallest Dock (128 pt tiles).
+const REVEAL_REACH: f64 = 150.0;
+/// The end-of-switch notices came 937 to 977 ms after the switch began, and
+/// the first read can see the Dock 25 ms after it began, so a switch's hold
+/// lasts at most about 950 ms. The cap bounds a notice that never comes.
+const SWITCH_HOLD_CAP: Duration = Duration::from_millis(1200);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -68,6 +77,22 @@ pub struct Tick {
     pub awaits_reveal: bool,
 }
 
+/// Where the reads have found the Dock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sighting {
+    OnScreen,
+    /// Below the display: auto-hidden, or on a full-screen Space.
+    OffScreen,
+    /// Unreadable, or with no app on the display.
+    Unknown,
+    /// Back on screen after a Space switch whose animation has not ended.
+    /// Every window the app can own slides with that animation, so the
+    /// overlay stays out and an empty frame stands in for the Dock's.
+    Held {
+        since: Instant,
+    },
+}
+
 pub struct Tracker {
     display: Display,
     last_sent: Option<Vec<DockItem>>,
@@ -77,6 +102,9 @@ pub struct Tracker {
     ordered: Visibility,
     /// What `ordered` was before that, restored if the ordering fails.
     before_order: Visibility,
+    sighting: Sighting,
+    /// An end-of-switch notice came since the last read.
+    switch_ended: bool,
 }
 
 impl Tracker {
@@ -90,6 +118,11 @@ impl Tracker {
             last_error: None,
             ordered: overlay,
             before_order: overlay,
+            sighting: match overlay {
+                Visibility::Shown => Sighting::OnScreen,
+                Visibility::Hidden => Sighting::Unknown,
+            },
+            switch_ended: false,
         }
     }
 
@@ -114,6 +147,7 @@ impl Tracker {
         &mut self,
         read: Result<Vec<RawDockChild>, DockError>,
         cursor: Option<ScreenPoint>,
+        now: Instant,
     ) -> Tick {
         let (frame, bounds, log) = match read {
             Ok(children) => {
@@ -127,6 +161,11 @@ impl Tracker {
                 self.last_error = Some(error);
                 (Vec::new(), None, log)
             }
+        };
+        let frame = if self.sight(&frame, bounds, cursor, now) {
+            Vec::new()
+        } else {
+            frame
         };
         let send = if changed(self.last_sent.as_deref(), &frame) {
             self.last_sent = Some(frame.clone());
@@ -144,6 +183,61 @@ impl Tracker {
             proximity_rate: poll_rate(cursor, bounds, self.display),
             awaits_reveal: awaits_reveal(cursor, bounds, self.display),
         }
+    }
+
+    /// Records the Space notice or the Dock's hover notice. Both come at the
+    /// end of a Space switch's animation. Returns whether the overlay is held
+    /// for that end, so the read that brings it in should come now.
+    pub fn switch_ended(&mut self) -> bool {
+        self.switch_ended = true;
+        matches!(self.sighting, Sighting::Held { .. })
+    }
+
+    /// The read scheduled at `scheduled`, or the hold's cap if that is sooner.
+    pub fn read_due(&self, scheduled: Instant) -> Instant {
+        match self.sighting {
+            Sighting::Held { since } => since
+                .checked_add(SWITCH_HOLD_CAP)
+                .map_or(scheduled, |cap| cap.min(scheduled)),
+            _ => scheduled,
+        }
+    }
+
+    /// Follows the Dock from this read and returns whether the overlay is
+    /// held out. A Dock back from off screen with the pointer away from the
+    /// bottom edge is a Space switch: it is held until an end-of-switch
+    /// notice or the cap. With the pointer near the edge, or unknown, it is
+    /// an auto-hide reveal and comes in at once.
+    fn sight(
+        &mut self,
+        frame: &[DockItem],
+        bounds: Option<ScreenRect>,
+        cursor: Option<ScreenPoint>,
+        now: Instant,
+    ) -> bool {
+        let display = self.display.frame();
+        let seen = if !frame.is_empty() {
+            Sighting::OnScreen
+        } else if bounds.is_some_and(|bounds| !overlaps(bounds, display)) {
+            Sighting::OffScreen
+        } else {
+            Sighting::Unknown
+        };
+        let ended = std::mem::take(&mut self.switch_ended);
+        let switching =
+            cursor.is_some_and(|cursor| !near_bottom_edge(cursor, display, REVEAL_REACH));
+        self.sighting = match (self.sighting, seen) {
+            (Sighting::OffScreen, Sighting::OnScreen) if switching && !ended => {
+                Sighting::Held { since: now }
+            }
+            (Sighting::Held { since }, Sighting::OnScreen)
+                if !ended && now.saturating_duration_since(since) < SWITCH_HOLD_CAP =>
+            {
+                self.sighting
+            }
+            (_, seen) => seen,
+        };
+        matches!(self.sighting, Sighting::Held { .. })
     }
 
     fn apps_changed(&mut self, sent: &[DockItem]) -> Option<Vec<DockApp>> {
@@ -164,8 +258,9 @@ impl Tracker {
         Some(apps)
     }
 
-    /// The overlay is ordered hidden exactly when the Dock is off screen:
-    /// auto-hidden, or in a full-screen Space.
+    /// The overlay is ordered hidden exactly when the Dock is off screen
+    /// (auto-hidden, or in a full-screen Space), cannot be read, or is held
+    /// after a Space switch.
     pub fn dock_on_screen(&self) -> bool {
         self.ordered == Visibility::Shown
     }
@@ -596,9 +691,9 @@ mod tests {
     #[test]
     fn slow_drift_is_sent_once_it_adds_up_to_the_tolerance() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        let first = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
-        let drifted = tracker.tick(Ok(vec![raw_app("Safari", 700.3)]), None);
-        let drifted_again = tracker.tick(Ok(vec![raw_app("Safari", 700.6)]), None);
+        let first = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        let drifted = tracker.tick(Ok(vec![raw_app("Safari", 700.3)]), None, Instant::now());
+        let drifted_again = tracker.tick(Ok(vec![raw_app("Safari", 700.6)]), None, Instant::now());
 
         assert!(first.send.is_some(), "first frame");
         assert_eq!(drifted.send, None, "0.3 from the sent frame");
@@ -775,13 +870,18 @@ mod tests {
         let near = tracker.tick(
             Ok(vec![raw_app("Safari", 700.0)]),
             Some(point(720.0, 850.0)),
+            Instant::now(),
         );
         let far = tracker.tick(
             Ok(vec![raw_app("Safari", 700.0)]),
             Some(point(720.0, 300.0)),
+            Instant::now(),
         );
-        let failed_near_bottom =
-            tracker.tick(Err(DockError::CannotComplete), Some(point(720.0, 900.0)));
+        let failed_near_bottom = tracker.tick(
+            Err(DockError::CannotComplete),
+            Some(point(720.0, 900.0)),
+            Instant::now(),
+        );
 
         assert_eq!(near.proximity_rate, PollRate::Fast, "near the Dock");
         assert_eq!(far.proximity_rate, PollRate::Slow, "away from the Dock");
@@ -830,7 +930,11 @@ mod tests {
 
         for (case, read, cursor, expected) in cases {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            assert_eq!(tracker.tick(read, cursor).awaits_reveal, expected, "{case}");
+            assert_eq!(
+                tracker.tick(read, cursor, Instant::now()).awaits_reveal,
+                expected,
+                "{case}"
+            );
         }
     }
 
@@ -884,7 +988,7 @@ mod tests {
                 send: sent,
                 log: logged,
                 ..
-            } = tracker.tick(read, None);
+            } = tracker.tick(read, None, Instant::now());
 
             assert_eq!((sent, logged), (send, log), "{case}");
         }
@@ -894,7 +998,7 @@ mod tests {
     fn error_before_any_frame_sends_an_empty_list() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
-        let tick = tracker.tick(Err(DockError::ApiDisabled), None);
+        let tick = tracker.tick(Err(DockError::ApiDisabled), None, Instant::now());
 
         assert_eq!(tick.send, Some(vec![]));
         assert_eq!(tick.log, Some(TickLog::ReadFailed(DockError::ApiDisabled)));
@@ -913,8 +1017,8 @@ mod tests {
                 .collect())
         };
 
-        let failed = tracker.tick(Err(DockError::CannotComplete), None);
-        let hidden = tracker.tick(hidden_read(), None);
+        let failed = tracker.tick(Err(DockError::CannotComplete), None, Instant::now());
+        let hidden = tracker.tick(hidden_read(), None, Instant::now());
 
         assert_eq!(failed.send, Some(vec![]), "error");
         assert_eq!(hidden.send, None, "an empty frame after an empty list");
@@ -928,10 +1032,10 @@ mod tests {
     #[test]
     fn resend_on_next_tick_resends_the_current_frame() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         tracker.resend_on_next_tick();
-        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         assert_eq!(tick.send.map(|frame| frame.len()), Some(1));
     }
@@ -939,10 +1043,10 @@ mod tests {
     #[test]
     fn resend_during_an_error_resends_the_empty_list_without_logging() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Err(DockError::CannotComplete), None);
+        tracker.tick(Err(DockError::CannotComplete), None, Instant::now());
 
         tracker.resend_on_next_tick();
-        let tick = tracker.tick(Err(DockError::CannotComplete), None);
+        let tick = tracker.tick(Err(DockError::CannotComplete), None, Instant::now());
 
         assert_eq!(tick.send, Some(vec![]));
         assert_eq!(tick.log, None);
@@ -951,7 +1055,7 @@ mod tests {
     #[test]
     fn new_display_converts_the_next_read_against_it() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         let _changed = tracker.set_display(Display {
             physical_x: 0,
@@ -960,14 +1064,14 @@ mod tests {
             physical_height: 1080,
             scale_factor: 1.0,
         });
-        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         assert_eq!(tick.send, None, "same AX rect, same overlay-local rect");
         let below_old_bottom = Ok(vec![RawDockChild {
             rect: Some(rect(700.0, 1000.0, 56.0, 56.0)),
             ..raw_app("Safari", 700.0)
         }]);
-        let tick = tracker.tick(below_old_bottom, None);
+        let tick = tracker.tick(below_old_bottom, None, Instant::now());
         assert_eq!(
             tick.send.as_deref().map(<[DockItem]>::len),
             Some(1),
@@ -1013,7 +1117,11 @@ mod tests {
         ];
 
         for (case, read, expected) in steps {
-            assert_eq!(tracker.tick(read, None).overlay, expected, "{case}");
+            assert_eq!(
+                tracker.tick(read, None, Instant::now()).overlay,
+                expected,
+                "{case}"
+            );
         }
     }
 
@@ -1021,7 +1129,7 @@ mod tests {
     fn first_empty_frame_orders_the_overlay_out() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
-        let tick = tracker.tick(Err(DockError::ApiDisabled), None);
+        let tick = tracker.tick(Err(DockError::ApiDisabled), None, Instant::now());
 
         assert_eq!(tick.overlay, Some(Visibility::Hidden));
     }
@@ -2070,7 +2178,7 @@ mod tests {
     fn the_dock_reads_as_on_screen_as_last_ordered() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
-        tracker.tick(Ok(vec![]), None);
+        tracker.tick(Ok(vec![]), None, Instant::now());
         let hidden = tracker.dock_on_screen();
         tracker.order_failed();
 
@@ -2162,9 +2270,9 @@ mod tests {
     fn a_dock_that_stops_answering_or_running_clears_and_orders_out_on_that_tick() {
         for error in [DockError::CannotComplete, DockError::NotRunning] {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+            tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
-            let tick = tracker.tick(Err(error.clone()), None);
+            let tick = tracker.tick(Err(error.clone()), None, Instant::now());
 
             assert_eq!(tick.send, Some(Vec::new()), "{error}");
             assert_eq!(tick.overlay, Some(Visibility::Hidden), "{error}");
@@ -2197,8 +2305,8 @@ mod tests {
     fn tracker_started_hidden_orders_the_overlay_in_only_for_a_full_frame() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Hidden);
 
-        let empty = tracker.tick(Err(DockError::ApiDisabled), None);
-        let full = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        let empty = tracker.tick(Err(DockError::ApiDisabled), None, Instant::now());
+        let full = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         assert_eq!(empty.overlay, None, "already hidden");
         assert_eq!(full.overlay, Some(Visibility::Shown));
@@ -2224,12 +2332,12 @@ mod tests {
             let mut retried = Tracker::new(PRIMARY_2X, start);
             let mut control = Tracker::new(PRIMARY_2X, start);
             assert_eq!(
-                retried.tick(read.clone(), None).overlay,
+                retried.tick(read.clone(), None, Instant::now()).overlay,
                 Some(ordered),
                 "{case}"
             );
             assert_eq!(
-                control.tick(read.clone(), None).overlay,
+                control.tick(read.clone(), None, Instant::now()).overlay,
                 Some(ordered),
                 "{case}"
             );
@@ -2237,12 +2345,12 @@ mod tests {
             retried.order_failed();
 
             assert_eq!(
-                retried.tick(read.clone(), None).overlay,
+                retried.tick(read.clone(), None, Instant::now()).overlay,
                 Some(ordered),
                 "{case}: issued again"
             );
             assert_eq!(
-                control.tick(read, None).overlay,
+                control.tick(read, None, Instant::now()).overlay,
                 None,
                 "{case}: without the failure the ordering stands"
             );
@@ -2254,12 +2362,14 @@ mod tests {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
         let full = || Ok(vec![raw_app("Safari", 700.0)]);
         assert_eq!(
-            tracker.tick(Err(DockError::CannotComplete), None).overlay,
+            tracker
+                .tick(Err(DockError::CannotComplete), None, Instant::now())
+                .overlay,
             Some(Visibility::Hidden),
             "the first ordering, out, succeeds"
         );
         assert_eq!(
-            tracker.tick(full(), None).overlay,
+            tracker.tick(full(), None, Instant::now()).overlay,
             Some(Visibility::Shown),
             "the second ordering, in, is issued"
         );
@@ -2267,7 +2377,7 @@ mod tests {
         tracker.order_failed();
 
         assert_eq!(
-            tracker.tick(full(), None).overlay,
+            tracker.tick(full(), None, Instant::now()).overlay,
             Some(Visibility::Shown),
             "the failed ordering in is issued again"
         );
@@ -2330,19 +2440,384 @@ mod tests {
         ];
 
         for (case, read, apps) in steps {
-            assert_eq!(tracker.tick(read, None).apps, apps, "{case}");
+            assert_eq!(
+                tracker.tick(read, None, Instant::now()).apps,
+                apps,
+                "{case}"
+            );
         }
     }
 
     #[test]
     fn a_resent_frame_does_not_report_the_apps_again() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         tracker.resend_on_next_tick();
-        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None);
+        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
 
         assert!(tick.send.is_some(), "the frame is resent");
         assert_eq!(tick.apps, None);
+    }
+    const EDGE: ScreenPoint = ScreenPoint { x: 700.0, y: 982.0 };
+
+    fn dock_shown() -> Vec<RawDockChild> {
+        vec![raw_app("Safari", 700.0)]
+    }
+
+    /// Below the display: auto-hidden, or on a full-screen Space.
+    fn dock_off_screen() -> Vec<RawDockChild> {
+        vec![RawDockChild {
+            rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        }]
+    }
+
+    const IN_AT_ONCE: (Option<Visibility>, Option<usize>) = (Some(Visibility::Shown), Some(1));
+    const HELD_OUT: (Option<Visibility>, Option<usize>) = (None, None);
+
+    /// One read. `ended` marks an end-of-switch signal (the Space notice or
+    /// the Dock's hover notice) since the read before. `expected` is the
+    /// ordering asked for and the length of the frame sent.
+    struct ReturnStep {
+        case: &'static str,
+        read: Vec<RawDockChild>,
+        cursor: Option<ScreenPoint>,
+        ended: bool,
+        at_ms: u64,
+        expected: (Option<Visibility>, Option<usize>),
+    }
+
+    fn step(
+        case: &'static str,
+        read: Vec<RawDockChild>,
+        cursor: Option<ScreenPoint>,
+        ended: bool,
+        at_ms: u64,
+        expected: (Option<Visibility>, Option<usize>),
+    ) -> ReturnStep {
+        ReturnStep {
+            case,
+            read,
+            cursor,
+            ended,
+            at_ms,
+            expected,
+        }
+    }
+
+    /// Starts on the desktop with the Dock shown, then switches to a
+    /// full-screen Space at 500 ms.
+    fn run_after_a_switch_to_full_screen(steps: impl IntoIterator<Item = ReturnStep>) {
+        let start = Instant::now();
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        let prefix = [
+            step(
+                "the Dock on the desktop",
+                dock_shown(),
+                Some(FAR),
+                false,
+                0,
+                (None, Some(1)),
+            ),
+            step(
+                "a switch to a full-screen Space",
+                dock_off_screen(),
+                Some(FAR),
+                false,
+                500,
+                (Some(Visibility::Hidden), Some(0)),
+            ),
+        ];
+        for step in prefix.into_iter().chain(steps) {
+            if step.ended {
+                tracker.switch_ended();
+            }
+            let tick = tracker.tick(
+                Ok(step.read),
+                step.cursor,
+                start.checked_add(ms(step.at_ms)).expect("in range"),
+            );
+            assert_eq!(
+                (tick.overlay, tick.send.map(|frame| frame.len())),
+                step.expected,
+                "{}",
+                step.case
+            );
+        }
+    }
+
+    #[test]
+    fn a_dock_back_from_a_space_switch_stays_out_until_the_switch_ends() {
+        run_after_a_switch_to_full_screen([
+            step(
+                "back on the desktop while the switch animates: still out",
+                dock_shown(),
+                Some(FAR),
+                false,
+                3000,
+                HELD_OUT,
+            ),
+            step(
+                "the next Slow read, the switch still running",
+                dock_shown(),
+                Some(FAR),
+                false,
+                3500,
+                HELD_OUT,
+            ),
+            step(
+                "the read after the switch ended: in, with the fresh frame",
+                dock_shown(),
+                Some(FAR),
+                true,
+                3950,
+                IN_AT_ONCE,
+            ),
+            step(
+                "the Dock at rest",
+                dock_shown(),
+                Some(FAR),
+                false,
+                4450,
+                (None, None),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn a_pointer_near_the_bottom_edge_is_a_reveal_and_brings_the_overlay_in_at_once() {
+        let cases = [
+            (
+                "at the bottom edge: an auto-hide reveal",
+                Some(EDGE),
+                IN_AT_ONCE,
+            ),
+            (
+                "followed the Dock up into it",
+                Some(point(700.0, 900.0)),
+                IN_AT_ONCE,
+            ),
+            (
+                "150 pt above the bottom edge",
+                Some(point(700.0, 832.0)),
+                IN_AT_ONCE,
+            ),
+            (
+                "150.5 pt above the bottom edge: a Space switch",
+                Some(point(700.0, 831.5)),
+                HELD_OUT,
+            ),
+            ("far from the Dock: a Space switch", Some(FAR), HELD_OUT),
+            ("unknown: in at once, as before", None, IN_AT_ONCE),
+        ];
+        for (case, cursor, expected) in cases {
+            run_after_a_switch_to_full_screen([step(
+                case,
+                dock_shown(),
+                cursor,
+                false,
+                3000,
+                expected,
+            )]);
+        }
+    }
+
+    #[test]
+    fn a_hold_whose_switch_never_signals_its_end_lasts_1_2_s() {
+        run_after_a_switch_to_full_screen([
+            step(
+                "back on the desktop",
+                dock_shown(),
+                Some(FAR),
+                false,
+                1000,
+                HELD_OUT,
+            ),
+            step(
+                "500 ms into the hold",
+                dock_shown(),
+                Some(FAR),
+                false,
+                1500,
+                HELD_OUT,
+            ),
+            step(
+                "1199 ms into the hold",
+                dock_shown(),
+                Some(FAR),
+                false,
+                2199,
+                HELD_OUT,
+            ),
+            step(
+                "1200 ms into the hold: in",
+                dock_shown(),
+                Some(FAR),
+                false,
+                2200,
+                IN_AT_ONCE,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn a_dock_that_leaves_the_display_again_ends_the_hold_and_its_next_return_starts_a_new_one() {
+        run_after_a_switch_to_full_screen([
+            step(
+                "back on the desktop",
+                dock_shown(),
+                Some(FAR),
+                false,
+                1000,
+                HELD_OUT,
+            ),
+            step(
+                "swiped back to full screen; that switch's notice comes with the read",
+                dock_off_screen(),
+                Some(FAR),
+                true,
+                1500,
+                HELD_OUT,
+            ),
+            step(
+                "back on the desktop again: a new hold",
+                dock_shown(),
+                Some(FAR),
+                false,
+                3000,
+                HELD_OUT,
+            ),
+            step(
+                "past the first hold's cap, inside the second's",
+                dock_shown(),
+                Some(FAR),
+                false,
+                4100,
+                HELD_OUT,
+            ),
+            step(
+                "1200 ms after the second return: in",
+                dock_shown(),
+                Some(FAR),
+                false,
+                4200,
+                IN_AT_ONCE,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn a_switch_that_ended_before_the_read_that_sees_the_dock_starts_no_hold() {
+        run_after_a_switch_to_full_screen([step(
+            "the notice came before the first read on the desktop",
+            dock_shown(),
+            Some(FAR),
+            true,
+            1000,
+            IN_AT_ONCE,
+        )]);
+    }
+
+    #[test]
+    fn a_dock_back_from_an_unreadable_state_is_not_held() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut recovered = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        recovered.tick(Ok(dock_shown()), Some(FAR), at(0));
+        recovered.tick(Err(DockError::CannotComplete), Some(FAR), at(500));
+        let mut started_hidden = Tracker::new(PRIMARY_2X, Visibility::Hidden);
+
+        let after_error = recovered.tick(Ok(dock_shown()), Some(FAR), at(1000));
+        let first_read = started_hidden.tick(Ok(dock_shown()), Some(FAR), at(0));
+
+        assert_eq!(
+            after_error.overlay,
+            Some(Visibility::Shown),
+            "after an error"
+        );
+        assert_eq!(first_read.overlay, Some(Visibility::Shown), "at start");
+    }
+
+    #[test]
+    fn the_end_of_a_switch_is_awaited_only_while_the_overlay_is_held() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+
+        tracker.tick(Ok(dock_shown()), Some(FAR), at(0));
+        let shown = tracker.switch_ended();
+        tracker.tick(Ok(dock_off_screen()), Some(FAR), at(500));
+        let off_screen = tracker.switch_ended();
+        tracker.tick(Ok(dock_off_screen()), Some(FAR), at(1000));
+        tracker.tick(Ok(dock_shown()), Some(FAR), at(1500));
+        let held = tracker.switch_ended();
+        tracker.tick(Ok(dock_shown()), Some(FAR), at(1600));
+        let ended = tracker.switch_ended();
+
+        assert_eq!(
+            (shown, off_screen, held, ended),
+            (false, false, true, false)
+        );
+    }
+
+    #[test]
+    fn a_held_overlay_is_read_again_by_its_cap_at_the_latest() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        tracker.tick(Ok(dock_off_screen()), Some(FAR), at(0));
+        let not_held = tracker.read_due(at(500));
+
+        tracker.tick(Ok(dock_shown()), Some(FAR), at(1000));
+
+        assert_eq!(not_held, at(500), "not held: as scheduled");
+        assert_eq!(tracker.read_due(at(1500)), at(1500), "before the cap");
+        assert_eq!(tracker.read_due(at(2500)), at(2200), "past the cap");
+    }
+
+    #[test]
+    fn a_new_watcher_during_a_hold_gets_the_empty_frame() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        tracker.tick(Ok(dock_off_screen()), Some(FAR), at(0));
+        tracker.tick(Ok(dock_shown()), Some(FAR), at(1000));
+
+        tracker.resend_on_next_tick();
+        let tick = tracker.tick(Ok(dock_shown()), Some(FAR), at(1500));
+
+        assert_eq!((tick.overlay, tick.send), (None, Some(vec![])));
+    }
+
+    #[test]
+    fn a_space_switch_away_from_the_dock_reads_at_slow_throughout() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        let mut activity = Activity::default();
+        let reads = [
+            (dock_shown(), false, 0),
+            (dock_off_screen(), false, 500),
+            (dock_shown(), false, 3000),
+            (dock_shown(), false, 3500),
+            (dock_shown(), true, 3950),
+            (dock_shown(), false, 4450),
+        ];
+
+        for (read, ended, at_ms) in reads {
+            if ended {
+                tracker.switch_ended();
+            }
+            let tick = tracker.tick(Ok(read), Some(FAR), at(at_ms));
+            let rate = activity.rate(
+                tick.proximity_rate,
+                tick.awaits_reveal,
+                Some(FAR),
+                tick.send.is_some(),
+                at(at_ms),
+            );
+            assert_eq!(rate, PollRate::Slow, "{at_ms} ms");
+        }
     }
 }

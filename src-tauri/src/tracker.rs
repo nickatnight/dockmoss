@@ -444,7 +444,7 @@ impl Activity {
         let mut wait = |until: Instant| loop {
             match wait_until(until) {
                 Woken::Due => return None,
-                Woken::DockHover { at } | Woken::AppLaunch { at }
+                Woken::DockHover { at } | Woken::AppLaunch { at } | Woken::SpaceChanged { at }
                     if longer_than_a_fast_interval =>
                 {
                     if at < earliest_early_read {
@@ -453,7 +453,7 @@ impl Activity {
                     }
                     return Some(at);
                 }
-                Woken::DockHover { .. } | Woken::AppLaunch { .. } => {}
+                Woken::DockHover { .. } | Woken::AppLaunch { .. } | Woken::SpaceChanged { .. } => {}
             }
         };
         let mut checked = now;
@@ -499,6 +499,7 @@ pub enum Woken {
     Due,
     DockHover { at: Instant },
     AppLaunch { at: Instant },
+    SpaceChanged { at: Instant },
 }
 
 /// When the tick after one due at `previous` is due: one interval later, so
@@ -2096,6 +2097,44 @@ mod tests {
                 &[Some(FAR)],
                 &[launch_at],
                 launch,
+            );
+
+            assert_eq!(read, expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn a_space_change_ends_a_slow_wait_as_a_hover_does() {
+        let start = Instant::now();
+        let now = ms(HOVER_NOW_MS);
+        let fast = PollRate::Fast.interval();
+        let space_changed = |at| Woken::SpaceChanged { at };
+        let cases = [
+            ("a slow wait: read at the change", ms(800), ms(420), ms(420)),
+            (
+                "2 ms after the last read: read one Fast interval after it",
+                ms(800),
+                ms(302),
+                now + fast,
+            ),
+            (
+                "a wait of exactly one Fast interval: the change changes nothing",
+                now + fast,
+                ms(305),
+                now + fast,
+            ),
+        ];
+        for (case, read_due, changed_at, expected) in cases {
+            let (activity, _) = still_far(start);
+
+            let (read, _) = wait_for_read_woken_by(
+                &activity,
+                start,
+                now,
+                read_due,
+                &[Some(FAR)],
+                &[changed_at],
+                space_changed,
             );
 
             assert_eq!(read, expected, "{case}");

@@ -5,7 +5,8 @@ use block2::RcBlock;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{
-    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
+    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace,
+    NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceApplicationKey,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceWillLaunchApplicationNotification,
 };
@@ -102,6 +103,22 @@ pub fn on_app_activated(
         move |app| on_activated(super::app::active_app(app)),
         mtm,
     );
+}
+
+/// macOS posts it when a Space switch's animation ends, not when it starts
+/// (job 021).
+#[expect(
+    unsafe_code,
+    reason = "the notification name is an AppKit extern static"
+)]
+pub fn on_active_space_changed(
+    on_change: impl Fn() + Send + Sync + 'static,
+    mtm: MainThreadMarker,
+) {
+    // SAFETY: the name is an immutable NSString constant that AppKit
+    // initialises before any Rust code runs.
+    let name = unsafe { NSWorkspaceActiveSpaceDidChangeNotification };
+    observe_notification(name, move |_| on_change(), mtm);
 }
 
 /// macOS does not post will-launch for every launch, so both are observed.

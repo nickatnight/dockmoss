@@ -245,7 +245,7 @@ impl Tracker {
         Some(apps)
     }
 
-    pub fn dock_on_screen(&self) -> bool {
+    pub fn overlay_shown(&self) -> bool {
         self.ordered == Visibility::Shown
     }
 
@@ -469,9 +469,9 @@ impl PendingLaunch {
         self.0.take()
     }
 
-    pub fn hand_to(&mut self, activity: &mut Activity, dock_on_screen: bool) {
+    pub fn hand_to(&mut self, activity: &mut Activity, overlay_shown: bool) {
         if let Some(at) = self.take()
-            && dock_on_screen
+            && overlay_shown
         {
             activity.app_launching(at);
         }
@@ -2198,14 +2198,14 @@ mod tests {
     }
 
     #[test]
-    fn the_dock_reads_as_on_screen_as_last_ordered() {
+    fn the_overlay_reads_as_shown_as_last_ordered() {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
         tracker.tick(Ok(vec![]), None, Instant::now());
-        let hidden = tracker.dock_on_screen();
+        let hidden = tracker.overlay_shown();
         tracker.order_failed();
 
-        assert_eq!((hidden, tracker.dock_on_screen()), (false, true));
+        assert_eq!((hidden, tracker.overlay_shown()), (false, true));
     }
 
     #[test]

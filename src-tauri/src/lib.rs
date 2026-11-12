@@ -815,7 +815,7 @@ mod dock_tracker {
                 },
                 macos::cursor::location,
             );
-            launched.hand_to(&mut activity, tracker.dock_on_screen());
+            launched.hand_to(&mut activity, tracker.overlay_shown());
         }
     }
 

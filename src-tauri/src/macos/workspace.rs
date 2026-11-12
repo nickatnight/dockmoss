@@ -133,13 +133,33 @@ fn launch_notification_names() -> [&'static NSString; 2] {
 
 /// Calls `on_app` on the main thread with the application of each workspace
 /// notification named `name`.
+fn observe(
+    name: &NSString,
+    on_app: impl Fn(&NSRunningApplication) + Send + Sync + 'static,
+    mtm: MainThreadMarker,
+) {
+    observe_notification(
+        name,
+        move |notification| {
+            if let Some(app) = notified_app(notification) {
+                on_app(&app);
+            } else {
+                tracing::debug!(name = %notification.name(), "workspace notification without an application");
+            }
+        },
+        mtm,
+    );
+}
+
+/// Calls `on_notification` on the main thread with each workspace
+/// notification named `name`.
 #[expect(
     unsafe_code,
     reason = "the observer API takes a block, and the block dereferences the delivered notification"
 )]
-fn observe(
+fn observe_notification(
     name: &NSString,
-    on_app: impl Fn(&NSRunningApplication) + Send + Sync + 'static,
+    on_notification: impl Fn(&NSNotification) + Send + Sync + 'static,
     _mtm: MainThreadMarker,
 ) {
     // Workspace notifications are posted only to NSWorkspace's own center,
@@ -149,15 +169,10 @@ fn observe(
     let block = RcBlock::new(move |notification: NonNull<NSNotification>| {
         // SAFETY: Foundation calls the block with the notification being
         // delivered, which stays alive for the duration of the call.
-        let notification = unsafe { notification.as_ref() };
-        if let Some(app) = notified_app(notification) {
-            on_app(&app);
-        } else {
-            tracing::debug!(name = %notification.name(), "workspace notification without an application");
-        }
+        on_notification(unsafe { notification.as_ref() });
     });
     // SAFETY: `obj` is None (any sender). The block is sendable, as the
-    // binding requires: it captures only `on_app`, which is
+    // binding requires: it captures only `on_notification`, which is
     // `Send + Sync + 'static`, so Foundation may copy, call or release it on
     // any thread. The main queue runs it on the main thread, where `_mtm`
     // shows the registration also happens.

@@ -1087,11 +1087,11 @@ mod dock_tracker {
             assert!(screen_changed);
         }
 
-        #[test]
-        fn a_dock_hover_change_brings_a_held_overlay_in_on_the_next_read() {
-            let (inbox, messages) = mpsc::channel();
-            let start = Instant::now();
-            let far = Some(ScreenPoint { x: 720.0, y: 300.0 });
+        const FAR: Option<ScreenPoint> = Some(ScreenPoint { x: 720.0, y: 300.0 });
+
+        /// A tracker whose overlay is held after a switch from a full-screen
+        /// Space: the Dock read off screen at `start`, back 300 ms later.
+        fn held_after_a_switch(start: Instant) -> Tracker {
             let off_screen = RawDockChild {
                 rect: Some(ScreenRect {
                     y: 990.0,
@@ -1100,8 +1100,17 @@ mod dock_tracker {
                 ..safari()
             };
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            tracker.tick(Ok(vec![off_screen]), far, start);
-            let held = tracker.tick(Ok(vec![safari()]), far, start + Duration::from_millis(300));
+            tracker.tick(Ok(vec![off_screen]), FAR, start);
+            let held = tracker.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(300));
+            assert_eq!(held.overlay, None, "held");
+            tracker
+        }
+
+        #[test]
+        fn a_dock_hover_change_brings_a_held_overlay_in_on_the_next_read() {
+            let (inbox, messages) = mpsc::channel();
+            let start = Instant::now();
+            let mut tracker = held_after_a_switch(start);
             inbox
                 .send(TrackerMessage::DockHoverChanged)
                 .expect("the receiver is alive");
@@ -1117,28 +1126,17 @@ mod dock_tracker {
                 &mut screen_changed,
                 &mut launched,
             );
-            let next = tracker.tick(Ok(vec![safari()]), far, start + Duration::from_millis(900));
+            let next = tracker.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(900));
 
-            assert_eq!(held.overlay, None, "held");
             assert_eq!(next.overlay, Some(Visibility::Shown));
         }
 
         #[test]
         fn a_space_change_ends_the_wait_only_while_the_overlay_is_held() {
             let start = Instant::now();
-            let far = Some(ScreenPoint { x: 720.0, y: 300.0 });
-            let off_screen = RawDockChild {
-                rect: Some(ScreenRect {
-                    y: 990.0,
-                    ..safari().rect.expect("a rect")
-                }),
-                ..safari()
-            };
             let mut shown = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            shown.tick(Ok(vec![safari()]), far, start);
-            let mut held = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            held.tick(Ok(vec![off_screen]), far, start);
-            held.tick(Ok(vec![safari()]), far, start + Duration::from_millis(300));
+            shown.tick(Ok(vec![safari()]), FAR, start);
+            let mut held = held_after_a_switch(start);
             let delay = Duration::from_millis(50);
 
             for (case, tracker, ends_at_once) in [
@@ -1170,7 +1168,7 @@ mod dock_tracker {
                 );
                 assert_eq!(waited.elapsed() < delay, ends_at_once, "{case}");
             }
-            let next = held.tick(Ok(vec![safari()]), far, start + Duration::from_millis(900));
+            let next = held.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(900));
             assert_eq!(next.overlay, Some(Visibility::Shown), "the next read");
         }
 

@@ -694,10 +694,11 @@ mod tests {
 
     #[test]
     fn slow_drift_is_sent_once_it_adds_up_to_the_tolerance() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        let first = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
-        let drifted = tracker.tick(Ok(vec![raw_app("Safari", 700.3)]), None, Instant::now());
-        let drifted_again = tracker.tick(Ok(vec![raw_app("Safari", 700.6)]), None, Instant::now());
+        let first = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
+        let drifted = tracker.tick(Ok(vec![raw_app("Safari", 700.3)]), None, now);
+        let drifted_again = tracker.tick(Ok(vec![raw_app("Safari", 700.6)]), None, now);
 
         assert!(first.send.is_some(), "first frame");
         assert_eq!(drifted.send, None, "0.3 from the sent frame");
@@ -869,22 +870,23 @@ mod tests {
 
     #[test]
     fn tick_reports_the_rate_for_the_cursor_and_the_read() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
         let near = tracker.tick(
             Ok(vec![raw_app("Safari", 700.0)]),
             Some(point(720.0, 850.0)),
-            Instant::now(),
+            now,
         );
         let far = tracker.tick(
             Ok(vec![raw_app("Safari", 700.0)]),
             Some(point(720.0, 300.0)),
-            Instant::now(),
+            now,
         );
         let failed_near_bottom = tracker.tick(
             Err(DockError::CannotComplete),
             Some(point(720.0, 900.0)),
-            Instant::now(),
+            now,
         );
 
         assert_eq!(near.proximity_rate, PollRate::Fast, "near the Dock");
@@ -898,6 +900,7 @@ mod tests {
 
     #[test]
     fn tick_reports_a_pointer_awaiting_a_reveal_for_the_cursor_and_the_read() {
+        let now = Instant::now();
         let hidden_read = || {
             Ok(vec![RawDockChild {
                 rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
@@ -935,7 +938,7 @@ mod tests {
         for (case, read, cursor, expected) in cases {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             assert_eq!(
-                tracker.tick(read, cursor, Instant::now()).awaits_reveal,
+                tracker.tick(read, cursor, now).awaits_reveal,
                 expected,
                 "{case}"
             );
@@ -944,6 +947,7 @@ mod tests {
 
     #[test]
     fn tracker_sends_changes_and_logs_errors_once() {
+        let now = Instant::now();
         let safari_frame = || Ok(vec![raw_app("Safari", 700.0)]);
         let expected_frame = vec![item(
             "Safari",
@@ -992,7 +996,7 @@ mod tests {
                 send: sent,
                 log: logged,
                 ..
-            } = tracker.tick(read, None, Instant::now());
+            } = tracker.tick(read, None, now);
 
             assert_eq!((sent, logged), (send, log), "{case}");
         }
@@ -1000,9 +1004,10 @@ mod tests {
 
     #[test]
     fn error_before_any_frame_sends_an_empty_list() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
-        let tick = tracker.tick(Err(DockError::ApiDisabled), None, Instant::now());
+        let tick = tracker.tick(Err(DockError::ApiDisabled), None, now);
 
         assert_eq!(tick.send, Some(vec![]));
         assert_eq!(tick.log, Some(TickLog::ReadFailed(DockError::ApiDisabled)));
@@ -1010,6 +1015,7 @@ mod tests {
 
     #[test]
     fn hidden_dock_after_an_error_sends_nothing_new() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
         let hidden_read = || {
             Ok(vec![raw_app("Safari", 700.0)]
@@ -1021,8 +1027,8 @@ mod tests {
                 .collect())
         };
 
-        let failed = tracker.tick(Err(DockError::CannotComplete), None, Instant::now());
-        let hidden = tracker.tick(hidden_read(), None, Instant::now());
+        let failed = tracker.tick(Err(DockError::CannotComplete), None, now);
+        let hidden = tracker.tick(hidden_read(), None, now);
 
         assert_eq!(failed.send, Some(vec![]), "error");
         assert_eq!(hidden.send, None, "an empty frame after an empty list");
@@ -1035,22 +1041,24 @@ mod tests {
 
     #[test]
     fn resend_on_next_tick_resends_the_current_frame() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         tracker.resend_on_next_tick();
-        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         assert_eq!(tick.send.map(|frame| frame.len()), Some(1));
     }
 
     #[test]
     fn resend_during_an_error_resends_the_empty_list_without_logging() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Err(DockError::CannotComplete), None, Instant::now());
+        tracker.tick(Err(DockError::CannotComplete), None, now);
 
         tracker.resend_on_next_tick();
-        let tick = tracker.tick(Err(DockError::CannotComplete), None, Instant::now());
+        let tick = tracker.tick(Err(DockError::CannotComplete), None, now);
 
         assert_eq!(tick.send, Some(vec![]));
         assert_eq!(tick.log, None);
@@ -1058,8 +1066,9 @@ mod tests {
 
     #[test]
     fn new_display_converts_the_next_read_against_it() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         let _changed = tracker.set_display(Display {
             physical_x: 0,
@@ -1068,14 +1077,14 @@ mod tests {
             physical_height: 1080,
             scale_factor: 1.0,
         });
-        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         assert_eq!(tick.send, None, "same AX rect, same overlay-local rect");
         let below_old_bottom = Ok(vec![RawDockChild {
             rect: Some(rect(700.0, 1000.0, 56.0, 56.0)),
             ..raw_app("Safari", 700.0)
         }]);
-        let tick = tracker.tick(below_old_bottom, None, Instant::now());
+        let tick = tracker.tick(below_old_bottom, None, now);
         assert_eq!(
             tick.send.as_deref().map(<[DockItem]>::len),
             Some(1),
@@ -1085,6 +1094,7 @@ mod tests {
 
     #[test]
     fn overlay_is_ordered_out_for_an_empty_frame_and_in_for_a_full_one() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
         let hidden = || {
             Ok(vec![RawDockChild {
@@ -1121,19 +1131,16 @@ mod tests {
         ];
 
         for (case, read, expected) in steps {
-            assert_eq!(
-                tracker.tick(read, None, Instant::now()).overlay,
-                expected,
-                "{case}"
-            );
+            assert_eq!(tracker.tick(read, None, now).overlay, expected, "{case}");
         }
     }
 
     #[test]
     fn first_empty_frame_orders_the_overlay_out() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
-        let tick = tracker.tick(Err(DockError::ApiDisabled), None, Instant::now());
+        let tick = tracker.tick(Err(DockError::ApiDisabled), None, now);
 
         assert_eq!(tick.overlay, Some(Visibility::Hidden));
     }
@@ -2218,9 +2225,10 @@ mod tests {
 
     #[test]
     fn the_overlay_reads_as_shown_as_last_ordered() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
-        tracker.tick(Ok(vec![]), None, Instant::now());
+        tracker.tick(Ok(vec![]), None, now);
         let hidden = tracker.overlay_shown();
         tracker.order_failed();
 
@@ -2310,11 +2318,12 @@ mod tests {
 
     #[test]
     fn a_dock_that_stops_answering_or_running_clears_and_orders_out_on_that_tick() {
+        let now = Instant::now();
         for error in [DockError::CannotComplete, DockError::NotRunning] {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+            tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
-            let tick = tracker.tick(Err(error.clone()), None, Instant::now());
+            let tick = tracker.tick(Err(error.clone()), None, now);
 
             assert_eq!(tick.send, Some(Vec::new()), "{error}");
             assert_eq!(tick.overlay, Some(Visibility::Hidden), "{error}");
@@ -2345,10 +2354,11 @@ mod tests {
 
     #[test]
     fn tracker_started_hidden_orders_the_overlay_in_only_for_a_full_frame() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Hidden);
 
-        let empty = tracker.tick(Err(DockError::ApiDisabled), None, Instant::now());
-        let full = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        let empty = tracker.tick(Err(DockError::ApiDisabled), None, now);
+        let full = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         assert_eq!(empty.overlay, None, "already hidden");
         assert_eq!(full.overlay, Some(Visibility::Shown));
@@ -2356,6 +2366,7 @@ mod tests {
 
     #[test]
     fn a_failed_ordering_is_issued_again_on_the_next_tick() {
+        let now = Instant::now();
         let cases = [
             (
                 "ordering out failed",
@@ -2374,12 +2385,12 @@ mod tests {
             let mut retried = Tracker::new(PRIMARY_2X, start);
             let mut control = Tracker::new(PRIMARY_2X, start);
             assert_eq!(
-                retried.tick(read.clone(), None, Instant::now()).overlay,
+                retried.tick(read.clone(), None, now).overlay,
                 Some(ordered),
                 "{case}"
             );
             assert_eq!(
-                control.tick(read.clone(), None, Instant::now()).overlay,
+                control.tick(read.clone(), None, now).overlay,
                 Some(ordered),
                 "{case}"
             );
@@ -2387,12 +2398,12 @@ mod tests {
             retried.order_failed();
 
             assert_eq!(
-                retried.tick(read.clone(), None, Instant::now()).overlay,
+                retried.tick(read.clone(), None, now).overlay,
                 Some(ordered),
                 "{case}: issued again"
             );
             assert_eq!(
-                control.tick(read, None, Instant::now()).overlay,
+                control.tick(read, None, now).overlay,
                 None,
                 "{case}: without the failure the ordering stands"
             );
@@ -2401,17 +2412,18 @@ mod tests {
 
     #[test]
     fn a_failed_ordering_after_a_successful_one_is_issued_again() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
         let full = || Ok(vec![raw_app("Safari", 700.0)]);
         assert_eq!(
             tracker
-                .tick(Err(DockError::CannotComplete), None, Instant::now())
+                .tick(Err(DockError::CannotComplete), None, now)
                 .overlay,
             Some(Visibility::Hidden),
             "the first ordering, out, succeeds"
         );
         assert_eq!(
-            tracker.tick(full(), None, Instant::now()).overlay,
+            tracker.tick(full(), None, now).overlay,
             Some(Visibility::Shown),
             "the second ordering, in, is issued"
         );
@@ -2419,7 +2431,7 @@ mod tests {
         tracker.order_failed();
 
         assert_eq!(
-            tracker.tick(full(), None, Instant::now()).overlay,
+            tracker.tick(full(), None, now).overlay,
             Some(Visibility::Shown),
             "the failed ordering in is issued again"
         );
@@ -2434,6 +2446,7 @@ mod tests {
 
     #[test]
     fn tick_reports_the_dock_apps_when_the_list_changes() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
         let hidden = || {
             Ok(vec![RawDockChild {
@@ -2482,21 +2495,18 @@ mod tests {
         ];
 
         for (case, read, apps) in steps {
-            assert_eq!(
-                tracker.tick(read, None, Instant::now()).apps,
-                apps,
-                "{case}"
-            );
+            assert_eq!(tracker.tick(read, None, now).apps, apps, "{case}");
         }
     }
 
     #[test]
     fn a_resent_frame_does_not_report_the_apps_again() {
+        let now = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         tracker.resend_on_next_tick();
-        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, Instant::now());
+        let tick = tracker.tick(Ok(vec![raw_app("Safari", 700.0)]), None, now);
 
         assert!(tick.send.is_some(), "the frame is resent");
         assert_eq!(tick.apps, None);
@@ -2518,13 +2528,15 @@ mod tests {
     struct Outcome {
         ordered: Option<Visibility>,
         sent_items: Option<usize>,
+        held: bool,
     }
 
     impl Outcome {
-        fn of(tick: &Tick) -> Self {
+        fn of(tick: &Tick, tracker: &Tracker) -> Self {
             Self {
                 ordered: tick.overlay,
                 sent_items: tick.send.as_ref().map(Vec::len),
+                held: tracker.awaits_switch_end(),
             }
         }
     }
@@ -2532,19 +2544,22 @@ mod tests {
     const IN_AT_ONCE: Outcome = Outcome {
         ordered: Some(Visibility::Shown),
         sent_items: Some(1),
+        held: false,
     };
     const HELD_OUT: Outcome = Outcome {
         ordered: None,
         sent_items: None,
+        held: true,
     };
     const UNCHANGED: Outcome = Outcome {
         ordered: None,
         sent_items: None,
+        held: false,
     };
 
     struct ReturnStep {
         case: &'static str,
-        read: Vec<RawDockChild>,
+        read: Result<Vec<RawDockChild>, DockError>,
         cursor: Option<ScreenPoint>,
         ended: bool,
         at_ms: u64,
@@ -2561,9 +2576,20 @@ mod tests {
     ) -> ReturnStep {
         ReturnStep {
             case,
-            read,
+            read: Ok(read),
             cursor,
             ended,
+            at_ms,
+            expected,
+        }
+    }
+
+    fn failed_read(case: &'static str, at_ms: u64, expected: Outcome) -> ReturnStep {
+        ReturnStep {
+            case,
+            read: Err(DockError::CannotComplete),
+            cursor: Some(FAR),
+            ended: false,
             at_ms,
             expected,
         }
@@ -2582,6 +2608,7 @@ mod tests {
                 Outcome {
                     ordered: None,
                     sent_items: Some(1),
+                    held: false,
                 },
             ),
             step(
@@ -2593,6 +2620,7 @@ mod tests {
                 Outcome {
                     ordered: Some(Visibility::Hidden),
                     sent_items: Some(0),
+                    held: false,
                 },
             ),
         ];
@@ -2601,11 +2629,11 @@ mod tests {
                 tracker.record_switch_end();
             }
             let tick = tracker.tick(
-                Ok(step.read),
+                step.read,
                 step.cursor,
                 start.checked_add(ms(step.at_ms)).expect("in range"),
             );
-            assert_eq!(Outcome::of(&tick), step.expected, "{}", step.case);
+            assert_eq!(Outcome::of(&tick, &tracker), step.expected, "{}", step.case);
         }
     }
 
@@ -2735,12 +2763,12 @@ mod tests {
                 HELD_OUT,
             ),
             step(
-                "swiped back to full screen; that switch's notice comes with the read",
+                "swiped back to full screen, before that switch's notice",
                 dock_off_screen(),
                 Some(FAR),
-                true,
+                false,
                 1500,
-                HELD_OUT,
+                UNCHANGED,
             ),
             step(
                 "back on the desktop again: a new hold",
@@ -2767,6 +2795,89 @@ mod tests {
                 IN_AT_ONCE,
             ),
         ]);
+    }
+
+    #[test]
+    fn a_quick_switch_back_is_held_though_the_last_switchs_notice_came_after_its_last_read() {
+        run_after_a_switch_to_full_screen([
+            step(
+                "the switch to full screen ends: its hover notice wakes a read",
+                dock_off_screen(),
+                Some(FAR),
+                true,
+                950,
+                UNCHANGED,
+            ),
+            step(
+                "its Space notice came after that read; the switch back is seen at the next Slow read",
+                dock_shown(),
+                Some(FAR),
+                true,
+                1450,
+                HELD_OUT,
+            ),
+            step(
+                "the switch back's own notice",
+                dock_shown(),
+                Some(FAR),
+                true,
+                2400,
+                IN_AT_ONCE,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn a_failed_read_during_a_hold_ends_it() {
+        run_after_a_switch_to_full_screen([
+            step(
+                "back on the desktop",
+                dock_shown(),
+                Some(FAR),
+                false,
+                1000,
+                HELD_OUT,
+            ),
+            failed_read("the read fails", 1500, UNCHANGED),
+            step(
+                "read again inside the first hold's cap: in at once",
+                dock_shown(),
+                Some(FAR),
+                false,
+                2000,
+                IN_AT_ONCE,
+            ),
+        ]);
+    }
+
+    fn dock_at(y: f64) -> Vec<RawDockChild> {
+        vec![RawDockChild {
+            rect: Some(rect(700.0, y, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        }]
+    }
+
+    #[test]
+    fn the_frame_sent_at_the_end_of_a_hold_is_the_one_read_then() {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        tracker.tick(Ok(dock_off_screen()), Some(FAR), at(0));
+        tracker.tick(Ok(dock_at(940.0)), Some(FAR), at(300));
+        tracker.tick(Ok(dock_at(930.0)), Some(FAR), at(800));
+
+        tracker.record_switch_end();
+        let end = tracker.tick(Ok(dock_at(920.0)), Some(FAR), at(950));
+
+        let sent_y: Option<Vec<f64>> = end
+            .send
+            .map(|frame| frame.iter().map(|item| item.rect.y).collect());
+        assert_eq!(end.overlay, Some(Visibility::Shown));
+        assert_eq!(
+            sent_y,
+            Some(vec![920.0]),
+            "the at-rest frame, not a mid-rise one"
+        );
     }
 
     #[test]

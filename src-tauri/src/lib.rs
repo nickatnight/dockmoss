@@ -1284,10 +1284,11 @@ mod dock_tracker {
 
         #[test]
         fn a_new_watcher_gets_the_current_frame_on_the_next_tick() {
+            let now = Instant::now();
             let (inbox, messages) = mpsc::channel();
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            let first = tracker.tick(Ok(vec![safari()]), None, Instant::now());
-            let unchanged = tracker.tick(Ok(vec![safari()]), None, Instant::now());
+            let first = tracker.tick(Ok(vec![safari()]), None, now);
+            let unchanged = tracker.tick(Ok(vec![safari()]), None, now);
             inbox
                 .send(TrackerMessage::Watch(Channel::new(|_| Ok(()))))
                 .expect("the receiver is alive");
@@ -1303,7 +1304,7 @@ mod dock_tracker {
                 &mut screen_changed,
                 &mut launched,
             );
-            let after_watch = tracker.tick(Ok(vec![safari()]), None, Instant::now());
+            let after_watch = tracker.tick(Ok(vec![safari()]), None, now);
 
             assert!(first.send.is_some() && unchanged.send.is_none(), "baseline");
             assert!(watcher.is_some(), "the watcher is stored");

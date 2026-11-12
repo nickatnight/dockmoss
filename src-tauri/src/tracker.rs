@@ -2508,8 +2508,33 @@ mod tests {
         }]
     }
 
-    const IN_AT_ONCE: (Option<Visibility>, Option<usize>) = (Some(Visibility::Shown), Some(1));
-    const HELD_OUT: (Option<Visibility>, Option<usize>) = (None, None);
+    #[derive(Debug, PartialEq)]
+    struct Outcome {
+        ordered: Option<Visibility>,
+        sent_items: Option<usize>,
+    }
+
+    impl Outcome {
+        fn of(tick: &Tick) -> Self {
+            Self {
+                ordered: tick.overlay,
+                sent_items: tick.send.as_ref().map(Vec::len),
+            }
+        }
+    }
+
+    const IN_AT_ONCE: Outcome = Outcome {
+        ordered: Some(Visibility::Shown),
+        sent_items: Some(1),
+    };
+    const HELD_OUT: Outcome = Outcome {
+        ordered: None,
+        sent_items: None,
+    };
+    const UNCHANGED: Outcome = Outcome {
+        ordered: None,
+        sent_items: None,
+    };
 
     struct ReturnStep {
         case: &'static str,
@@ -2517,7 +2542,7 @@ mod tests {
         cursor: Option<ScreenPoint>,
         ended: bool,
         at_ms: u64,
-        expected: (Option<Visibility>, Option<usize>),
+        expected: Outcome,
     }
 
     fn step(
@@ -2526,7 +2551,7 @@ mod tests {
         cursor: Option<ScreenPoint>,
         ended: bool,
         at_ms: u64,
-        expected: (Option<Visibility>, Option<usize>),
+        expected: Outcome,
     ) -> ReturnStep {
         ReturnStep {
             case,
@@ -2548,7 +2573,10 @@ mod tests {
                 Some(FAR),
                 false,
                 0,
-                (None, Some(1)),
+                Outcome {
+                    ordered: None,
+                    sent_items: Some(1),
+                },
             ),
             step(
                 "a switch to a full-screen Space",
@@ -2556,7 +2584,10 @@ mod tests {
                 Some(FAR),
                 false,
                 500,
-                (Some(Visibility::Hidden), Some(0)),
+                Outcome {
+                    ordered: Some(Visibility::Hidden),
+                    sent_items: Some(0),
+                },
             ),
         ];
         for step in prefix.into_iter().chain(steps) {
@@ -2568,12 +2599,7 @@ mod tests {
                 step.cursor,
                 start.checked_add(ms(step.at_ms)).expect("in range"),
             );
-            assert_eq!(
-                (tick.overlay, tick.send.map(|frame| frame.len())),
-                step.expected,
-                "{}",
-                step.case
-            );
+            assert_eq!(Outcome::of(&tick), step.expected, "{}", step.case);
         }
     }
 
@@ -2610,7 +2636,7 @@ mod tests {
                 Some(FAR),
                 false,
                 4450,
-                (None, None),
+                UNCHANGED,
             ),
         ]);
     }

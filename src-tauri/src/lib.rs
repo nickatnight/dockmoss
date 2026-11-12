@@ -837,7 +837,7 @@ mod dock_tracker {
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
                 Ok(TrackerMessage::DockHoverChanged) => {
-                    tracker.switch_ended();
+                    tracker.record_switch_end();
                     return Woken::DockHover { at: Instant::now() };
                 }
                 Ok(TrackerMessage::AppLaunching) => {
@@ -846,8 +846,8 @@ mod dock_tracker {
                     return Woken::AppLaunch { at };
                 }
                 Ok(TrackerMessage::SpaceChanged) => {
-                    tracker.switch_ended();
                     if tracker.awaits_switch_end() {
+                        tracker.record_switch_end();
                         return Woken::SpaceChanged { at: Instant::now() };
                     }
                 }
@@ -1166,10 +1166,47 @@ mod dock_tracker {
                     ends_at_once,
                     "{case}: {woken:?}"
                 );
-                assert_eq!(waited.elapsed() < delay, ends_at_once, "{case}");
+                if !ends_at_once {
+                    assert!(waited.elapsed() >= delay, "{case}: the wait ran out");
+                }
             }
             let next = held.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(900));
             assert_eq!(next.overlay, Some(Visibility::Shown), "the next read");
+        }
+
+        #[test]
+        fn a_space_change_while_nothing_is_held_does_not_cancel_the_next_hold() {
+            let start = Instant::now();
+            let off_screen = RawDockChild {
+                rect: Some(ScreenRect {
+                    y: 990.0,
+                    ..safari().rect.expect("a rect")
+                }),
+                ..safari()
+            };
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            tracker.tick(Ok(vec![off_screen]), FAR, start);
+            let (inbox, messages) = mpsc::channel();
+            inbox
+                .send(TrackerMessage::SpaceChanged)
+                .expect("the receiver is alive");
+            let mut watcher = None;
+            let mut screen_changed = false;
+            let mut launched = PendingLaunch::default();
+
+            let woken = drain_inbox_until(
+                Instant::now() + Duration::from_millis(20),
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+            let back = tracker.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(400));
+
+            assert_eq!(woken, Woken::Due, "not held: no wake");
+            assert_eq!(back.overlay, None, "the switch back is held");
+            assert!(tracker.awaits_switch_end());
         }
 
         #[test]

@@ -123,7 +123,7 @@ pub struct Tracker {
     /// What `ordered` was before that, restored if the ordering fails.
     before_order: Visibility,
     sighting: Sighting,
-    switch_ended: bool,
+    switch_end_recorded: bool,
 }
 
 impl Tracker {
@@ -141,7 +141,7 @@ impl Tracker {
                 Visibility::Shown => Sighting::OnScreen,
                 Visibility::Hidden => Sighting::Unknown,
             },
-            switch_ended: false,
+            switch_end_recorded: false,
         }
     }
 
@@ -205,14 +205,20 @@ impl Tracker {
         }
     }
 
-    pub fn switch_ended(&mut self) {
-        self.switch_ended = true;
+    /// Records the Space notice or the Dock's hover notice, so the next read
+    /// ends a hold. A notice never prevents a hold: one left over from the
+    /// switch to full screen would cancel the hold of a quick switch back.
+    pub fn record_switch_end(&mut self) {
+        self.switch_end_recorded = true;
     }
 
+    /// Whether the overlay is held, waiting for a Space switch to end.
     pub fn awaits_switch_end(&self) -> bool {
         self.sighting.is_held()
     }
 
+    /// The read scheduled at `scheduled`, or, during a hold, the hold's cap
+    /// if that is sooner, so a notice that never comes still ends it on time.
     pub fn read_due(&self, scheduled: Instant) -> Instant {
         match self.sighting {
             Sighting::Held { since } => since
@@ -223,10 +229,10 @@ impl Tracker {
     }
 
     fn follow(&mut self, seen: Sighting, cursor: Option<ScreenPoint>, now: Instant) -> Sighting {
-        let ended = std::mem::take(&mut self.switch_ended);
+        let ended = std::mem::take(&mut self.switch_end_recorded);
         self.sighting = match (self.sighting, seen) {
             (Sighting::OffScreen, Sighting::OnScreen)
-                if !ended && is_space_switch(cursor, self.display.frame()) =>
+                if is_space_switch(cursor, self.display.frame()) =>
             {
                 Sighting::Held { since: now }
             }
@@ -2592,7 +2598,7 @@ mod tests {
         ];
         for step in prefix.into_iter().chain(steps) {
             if step.ended {
-                tracker.switch_ended();
+                tracker.record_switch_end();
             }
             let tick = tracker.tick(
                 Ok(step.read),
@@ -2764,15 +2770,26 @@ mod tests {
     }
 
     #[test]
-    fn a_switch_that_ended_before_the_read_that_sees_the_dock_starts_no_hold() {
-        run_after_a_switch_to_full_screen([step(
-            "the notice came before the first read on the desktop",
-            dock_shown(),
-            Some(FAR),
-            true,
-            1000,
-            IN_AT_ONCE,
-        )]);
+    fn a_notice_before_the_read_that_sees_the_dock_back_is_dropped_and_the_hold_runs_to_its_cap() {
+        run_after_a_switch_to_full_screen([
+            step(
+                "a read delayed past the switch's notice: the notice is not kept",
+                dock_shown(),
+                Some(FAR),
+                true,
+                1000,
+                HELD_OUT,
+            ),
+            step(
+                "1199 ms into the hold",
+                dock_shown(),
+                Some(FAR),
+                false,
+                2199,
+                HELD_OUT,
+            ),
+            step("the cap", dock_shown(), Some(FAR), false, 2200, IN_AT_ONCE),
+        ]);
     }
 
     #[test]
@@ -2807,7 +2824,7 @@ mod tests {
         let off_screen = tracker.awaits_switch_end();
         tracker.tick(Ok(dock_shown()), Some(FAR), at(1500));
         let held = tracker.awaits_switch_end();
-        tracker.switch_ended();
+        tracker.record_switch_end();
         tracker.tick(Ok(dock_shown()), Some(FAR), at(1600));
         let ended = tracker.awaits_switch_end();
 
@@ -2863,7 +2880,7 @@ mod tests {
 
         for (read, ended, at_ms) in reads {
             if ended {
-                tracker.switch_ended();
+                tracker.record_switch_end();
             }
             let tick = tracker.tick(Ok(read), Some(FAR), at(at_ms));
             let rate = activity.rate(

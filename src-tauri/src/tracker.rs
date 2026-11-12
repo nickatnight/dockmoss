@@ -181,8 +181,11 @@ impl Tracker {
         }
     }
 
-    pub fn switch_ended(&mut self) -> bool {
+    pub fn switch_ended(&mut self) {
         self.switch_ended = true;
+    }
+
+    pub fn awaits_switch_end(&self) -> bool {
         matches!(self.sighting, Sighting::Held { .. })
     }
 
@@ -2763,14 +2766,14 @@ mod tests {
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
 
         tracker.tick(Ok(dock_shown()), Some(FAR), at(0));
-        let shown = tracker.switch_ended();
+        let shown = tracker.awaits_switch_end();
         tracker.tick(Ok(dock_off_screen()), Some(FAR), at(500));
-        let off_screen = tracker.switch_ended();
-        tracker.tick(Ok(dock_off_screen()), Some(FAR), at(1000));
+        let off_screen = tracker.awaits_switch_end();
         tracker.tick(Ok(dock_shown()), Some(FAR), at(1500));
-        let held = tracker.switch_ended();
+        let held = tracker.awaits_switch_end();
+        tracker.switch_ended();
         tracker.tick(Ok(dock_shown()), Some(FAR), at(1600));
-        let ended = tracker.switch_ended();
+        let ended = tracker.awaits_switch_end();
 
         assert_eq!(
             (shown, off_screen, held, ended),

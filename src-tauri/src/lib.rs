@@ -846,7 +846,8 @@ mod dock_tracker {
                     return Woken::AppLaunch { at };
                 }
                 Ok(TrackerMessage::SpaceChanged) => {
-                    if tracker.switch_ended() {
+                    tracker.switch_ended();
+                    if tracker.awaits_switch_end() {
                         return Woken::SpaceChanged { at: Instant::now() };
                     }
                 }

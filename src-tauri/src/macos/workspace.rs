@@ -168,8 +168,6 @@ fn observe(
     );
 }
 
-/// Calls `on_notification` on the main thread with each workspace
-/// notification named `name`.
 #[expect(
     unsafe_code,
     reason = "the observer API takes a block, and the block dereferences the delivered notification"

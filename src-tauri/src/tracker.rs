@@ -77,13 +77,10 @@ pub struct Tick {
     pub awaits_reveal: bool,
 }
 
-/// Where the reads have found the Dock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Sighting {
     OnScreen,
-    /// Below the display: auto-hidden, or on a full-screen Space.
     OffScreen,
-    /// Unreadable, or with no app on the display.
     Unknown,
     /// Back on screen after a Space switch whose animation has not ended.
     /// Every window the app can own slides with that animation, so the
@@ -103,7 +100,6 @@ pub struct Tracker {
     /// What `ordered` was before that, restored if the ordering fails.
     before_order: Visibility,
     sighting: Sighting,
-    /// An end-of-switch notice came since the last read.
     switch_ended: bool,
 }
 
@@ -185,15 +181,11 @@ impl Tracker {
         }
     }
 
-    /// Records the Space notice or the Dock's hover notice. Both come at the
-    /// end of a Space switch's animation. Returns whether the overlay is held
-    /// for that end, so the read that brings it in should come now.
     pub fn switch_ended(&mut self) -> bool {
         self.switch_ended = true;
         matches!(self.sighting, Sighting::Held { .. })
     }
 
-    /// The read scheduled at `scheduled`, or the hold's cap if that is sooner.
     pub fn read_due(&self, scheduled: Instant) -> Instant {
         match self.sighting {
             Sighting::Held { since } => since
@@ -203,11 +195,6 @@ impl Tracker {
         }
     }
 
-    /// Follows the Dock from this read and returns whether the overlay is
-    /// held out. A Dock back from off screen with the pointer away from the
-    /// bottom edge is a Space switch: it is held until an end-of-switch
-    /// notice or the cap. With the pointer near the edge, or unknown, it is
-    /// an auto-hide reveal and comes in at once.
     fn sight(
         &mut self,
         frame: &[DockItem],
@@ -258,9 +245,6 @@ impl Tracker {
         Some(apps)
     }
 
-    /// The overlay is ordered hidden exactly when the Dock is off screen
-    /// (auto-hidden, or in a full-screen Space), cannot be read, or is held
-    /// after a Space switch.
     pub fn dock_on_screen(&self) -> bool {
         self.ordered == Visibility::Shown
     }
@@ -2504,7 +2488,6 @@ mod tests {
         vec![raw_app("Safari", 700.0)]
     }
 
-    /// Below the display: auto-hidden, or on a full-screen Space.
     fn dock_off_screen() -> Vec<RawDockChild> {
         vec![RawDockChild {
             rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
@@ -2515,9 +2498,6 @@ mod tests {
     const IN_AT_ONCE: (Option<Visibility>, Option<usize>) = (Some(Visibility::Shown), Some(1));
     const HELD_OUT: (Option<Visibility>, Option<usize>) = (None, None);
 
-    /// One read. `ended` marks an end-of-switch signal (the Space notice or
-    /// the Dock's hover notice) since the read before. `expected` is the
-    /// ordering asked for and the length of the frame sent.
     struct ReturnStep {
         case: &'static str,
         read: Vec<RawDockChild>,
@@ -2545,8 +2525,6 @@ mod tests {
         }
     }
 
-    /// Starts on the desktop with the Dock shown, then switches to a
-    /// full-screen Space at 500 ms.
     fn run_after_a_switch_to_full_screen(steps: impl IntoIterator<Item = ReturnStep>) {
         let start = Instant::now();
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);

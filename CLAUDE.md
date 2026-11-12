@@ -1,8 +1,10 @@
 # DockMoss
 
-macOS-only Tauri 2 app: a transparent, click-through overlay that grows moss on Dock icons for apps that haven't been used in a while. Product rules, the last-used algorithm, risks and milestones are in `SUMMARY.md`. Read it before touching usage tracking or growth logic, and update it when one of those rules changes.
+macOS-only Tauri 2 app: a transparent, click-through overlay that grows moss on Dock icons for apps that haven't been used in a while.
 
-Read CONSTRAINTS.md before writing code. Do not weaken it to make a change pass.
+- Read `SUMMARY.md` before touching usage tracking or growth logic, and update it when one of those rules changes.
+- Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass.
+- `ARCHITECTURE.md` has the threads, data flow and source layout. Update it when they change.
 
 ## Checks
 
@@ -15,195 +17,77 @@ cargo test
 cargo build
 ```
 
-Run the app with `pnpm tauri dev` from the repo root. Quit any other DockMoss first (an installed bundle, a debug bundle, another `tauri dev`): every copy shares the bundle identifier, so a second copy exits at once and the running one opens Settings instead. The package manager is **pnpm** (`pnpm install`, `pnpm add`, `pnpm <script>`), and `pnpm-lock.yaml` is the only lockfile. Frontend checks come from the scripts in `package.json`: `pnpm test` runs vitest over the pure TS (`src/**/*.test.ts`), and `pnpm check:task` also builds the frontend and fails if `dist/` carries the debug layer.
+Frontend: `pnpm test` (vitest), and `pnpm check:task`, which also fails if `dist/` carries the debug layer. The package manager is **pnpm** only.
 
-## Layout
+Run the app with `pnpm tauri dev`. Quit any other DockMoss first: every copy shares the bundle identifier, so a second copy exits at once.
 
-```
-src-tauri/src/
-  main.rs        # one line: dockmoss_lib::run()
-  lib.rs         # Builder, plugins (single-instance first, then private-log-dir), setup(),
-                 #   command registration, the one-time data move (DataDir), the dock-tracker,
-                 #   launch-log (usage) and spotlight-seed thread glue, loading settings,
-                 #   the settings window (create or focus, focus hand-back), and what
-                 #   opens it besides the tray (a second launch, Reopen)
-  error.rs       # crate Error enum (thiserror + Serialize)
-  commands.rs    # #[tauri::command] fns: thin, they delegate to modules (watch_dock,
-                 #   watch_growth, get_settings, save_settings, set_launch_at_login)
-  tracker.rs     # pure: per Dock read -> what to send, log and show; the poll rate,
-                 #   Activity (Fast only while something moves, and the launch hold),
-                 #   read deadlines, and the early read (wait_for_read: a Dock hover
-                 #   change or an app launch ends a long wait, no sooner than one Fast
-                 #   interval after the last read)
-  geometry.rs    # pure: AX rects -> overlay-local logical pixels (the one conversion),
-                 #   and the settings window's height clamped to the work area
-  dock.rs        # pure: raw Dock children -> DockItems (application items only),
-                 #   ReadGate (no AX read while trust is revoked), and HoverObserverGate
-                 #   (when the hover observer may register: trusted, not latched after
-                 #   APIDisabled, not refused)
-  bundle_id.rs   # pure: BundleId newtype
-  settings.rs    # pure apart from std file I/O: Settings (thresholds, intensity,
-                 #   exclusions, fast-forward), one decoder per field, load_file (capped,
-                 #   per-field fallback), commit (write first, then adopt), applied (the
-                 #   dev fast-forward override in place of the saved speed), SettingsView
-  login_item.rs  # pure: LoginItemStatus, outcome (judged by the status macOS reports
-                 #   after a change), after_change (that outcome, or StatusUnknown when
-                 #   the read after a change does not answer), is_app_bundle (only a
-                 #   .app may become a login item)
-  bounded.rs     # std only: read_within, one read on its own thread with a deadline,
-                 #   and read_alone, at most one such read per slot at a time
-  navigation.rs  # pure: which URLs a window may load (is_app_origin)
-  focus.rs       # pure: which activated app Settings hands focus back to
-                 #   (is_return_target), and what closing Settings does
-                 #   (on_settings_closed, hides)
-  growth/        # pure: effective last-used -> 0..1 overgrowth, jitter, stages
-  usage/         # launch log model and file format (log.rs), the capped read and atomic
-                 #   write both user-data files use (store.rs),
-                 #   save and recompute schedule (schedule.rs), running-app filter,
-                 #   Spotlight parsing and migration-batch check (spotlight.rs), and
-                 #   UsageState (state.rs): first run, first-seen, growth per Dock app
-                 #   under the applied settings; migrate.rs: the one-time move out of the
-                 #   com.dockmoss.app folder (plan_move pure, move_old_data std I/O)
-  macos/         # every objc2 / AppKit / AX call, the `mdls` subprocess, and every
-                 #   `unsafe` block; app.rs: the front app, the app at a pid, and
-                 #   activating one; login_item.rs: SMAppService.mainApp status and set;
-                 #   dock_observer.rs: the dock-observer thread (AXObserver for the
-                 #   Dock's AXSelectedChildrenChanged, its own CFRunLoop)
-src-tauri/capabilities/   # one capability file per window: overlay.json, settings.json
-overlay.html, settings.html   # one Vite entry per window
-src/                      # webview: overlay.ts (one subscription per channel, fanned out),
-                          #   ipc.ts, debug.ts / debug.css (dev builds only)
-  render/                 # baked moss, drawn with WebGL2 (ADR-0018):
-                          #   generator.ts (pure: the moss prototype's port, shapes for one
-                          #   item at one of 24 level steps: anchors, cushions, fronds,
-                          #   spore stalks, and an Overgrown item's mushroom and flower),
-                          #   bake.ts (shapes to Canvas2D calls on a software-backed
-                          #   OffscreenCanvas), atlas.ts (pure: bake keys, and the atlas
-                          #   plan: one texture-array layer per bake, eviction, two bakes
-                          #   a frame, an item's held bake kept while its new one waits),
-                          #   model.ts (pure: mossy icons, item keys and seeds, art and bake
-                          #   boxes, draw rule, shader constants, instance attribute layout,
-                          #   and the shrivel: which items start one, its progress, and an
-                          #   icon's instance at a progress), renderer.ts (draws on change,
-                          #   bakes into the atlas, plus a 30 fps loop for the shrivel,
-                          #   behind an injected schedule, bake and MossGl), gl.ts (the
-                          #   texture-array atlas and one instanced draw), index.ts (DOM
-                          #   wiring), moss.{vert,frag}.glsl
-  icon/                   # dev only, never imported by an HTML entry (ADR-0019): svg.ts (pure:
-                          #   generator shapes to SVG), app-icon.ts (pure: appIconSvg, the
-                          #   stone tile with the generator's moss at step 16, and
-                          #   appIconMaster, which writes src-tauri/icons/source/app-icon.svg).
-                          #   app-icon.test.ts pins the master by file snapshot and by
-                          #   APP_ICON_SHA256, and parses both with the fast-xml-parser
-                          #   devDependency (README "Icons")
-  settings.ts             # the settings form: DOM wiring and ⌘W (lazy window import)
-  settings.css
-  settings/model.ts       # pure: the next settings from one change, the one-at-a-time
-                          #   saver, page feedback and re-announce rules, exclusion rows,
-                          #   which day fields are wrong, the messages (the save notice's
-                          #   in saveNotice), and the launch at login box (launchAtLoginBox,
-                          #   launchAtLoginShown) and its one-at-a-time toggle
-                          #   (createLoginToggle) (model.test.ts)
-```
+## The boundary
 
-The boundary that matters is between `macos/` and everything else. `growth/`, `usage/`, `settings.rs`, `login_item.rs`, `bounded.rs`, `navigation.rs`, `focus.rs`, `tracker.rs`, `geometry.rs`, `dock.rs` and `bundle_id.rs` stay pure Rust: no `tauri`, no `objc2`, and time passed in as a parameter. That keeps them unit-testable with fixed clocks and fixed displays. `macos/` exposes safe functions that return plain Rust types such as `RawDockChild { subrole, rect, app_path, bundle_id }`, so the rest of the crate never sees a raw pointer.
+All objc2, AppKit and AX calls, the `mdls` subprocess, and every `unsafe` block live in `macos/`, which returns plain Rust types. Everything else (`growth/`, `usage/`, `tracker.rs`, `geometry.rs`, `dock.rs`, `settings.rs`, `focus.rs`, `login_item.rs`, `navigation.rs`, `bounded.rs`, `bundle_id.rs`) stays pure: no `tauri`, no `objc2`, time passed in as a parameter, so it is unit-testable with fixed clocks and displays.
 
-## Rust conventions
+## Rust
 
-- **Edition 2024**, with `rust-version` pinned in `Cargo.toml`. Use current std: `LazyLock`/`OnceLock`, let-else, let chains, `impl Trait` in argument position.
-- **Errors:** each module has a `thiserror` enum. Commands return `Result<T, crate::Error>`, where `Error` implements `Serialize` as `{ kind, message }` so the frontend can branch on `kind`. `anyhow` is fine in `setup()` and in tests.
-- **Panics:** use `?` in non-test code. Release builds abort on panic. `unwrap`, `expect` and slice indexing are denied crate-wide (CONSTRAINTS.md Floor). The only `.expect`s outside tests are named startup invariants: the `MainThreadMarker` in `setup()`, the Tauri build in `run()`, and `build.rs`. Each has its own `#[expect(clippy::expect_used, reason = "...")]`, and the reason states the invariant ("tauri runs setup() on the main thread").
-- **Logging:** use `tracing` macros with structured fields (`tracing::debug!(bundle_id, days, "growth updated")`), wired up through `tauri-plugin-log`. Logs go to `~/Library/Logs/app.dockmoss.DockMoss/DockMoss.log`. The `private-log-dir` plugin in `lib.rs` makes that folder 0700 (`usage::private_dir`) before the log plugin opens the file, so it is registered right after single-instance and before `tauri-plugin-log` (Tauri sets plugins up in registration order). The folder is the guard: the log plugin has no file-mode option and recreates `DockMoss.log` as 0644 when it rotates.
-- **Types:** use newtypes for domain values: `BundleId(String)`, and `Overgrowth(f32)` clamped to 0..=1 when constructed. Store time as `jiff::Timestamp` (UTC) and convert to local time only for display.
-- **Tests:** unit tests sit in one inline `#[cfg(test)] mod tests { ... }` per module, as its last item. Guards: `clippy::tests_outside_test_module` (denied) fails a `#[test]` outside a `#[cfg(test)]` module, and `clippy::items_after_test_module` fails an item after the test module. In `check:fast`, a grep allows `#[cfg(test)]` only on the line directly above `mod tests {` and refuses `#![cfg(test)]`, a second grep refuses `include!(`, and a `find` refuses any `tests.rs` and any file under a `tests/` folder in `src-tauri/src`, so a separate test file fails. There is no coverage gate: `pnpm coverage` reports line coverage on demand, with no threshold, and test lines count toward it, so it is a rough guide. Frontend tests sit beside their module as `*.test.ts` and run under vitest; keep what they test pure (no DOM, WebGL or clock), as `src/render/model.ts` and `src/settings/model.ts` are.
-- **Lints:** set them in `Cargo.toml` under `[lints]` instead of crate-level attributes. Enable `clippy::pedantic` as warn, plus `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`. When you allow a lint, add `#[expect(clippy::..., reason = "...")]` at the narrowest scope. A lint attribute covers everything inside the item or statement it sits on, closures included, so never put one on a statement that holds a closure such as `.setup(|app| ...)`; split the statement first.
-- **Dependencies:** check that a new crate is maintained and supports Tauri 2 before you add it. Prefer an official `tauri-plugin-*` when one exists and meets the requirement (log). `tauri-plugin-autostart` does not: its macOS launchers are a LaunchAgent (listed under Allow in the Background, not Open at Login) and AppleScript (prompts for Automation), so launch at login uses `SMAppService` (ADR-0016). Settings do not use `tauri-plugin-store`: they are written like the launch log (ADR-0014).
+- **Edition 2024.** Use current std: `LazyLock`/`OnceLock`, let-else, let chains.
+- **Errors:** a `thiserror` enum per module. Commands return `Result<T, crate::Error>`, serialized as `{ kind, message }`. `anyhow` only in `setup()` and tests.
+- **No panics:** `unwrap`, `expect` and slice indexing are denied. The only `.expect`s outside tests are named startup invariants (`MainThreadMarker` in `setup()`, the Tauri build in `run()`, `build.rs`), each with its own `#[expect(clippy::expect_used, reason = "...")]`.
+- **Logging:** `tracing` macros with structured fields. The `private-log-dir` plugin must be registered right after single-instance and before `tauri-plugin-log`, because the folder's 0700 mode is the only guard on the log file.
+- **Types:** newtypes for domain values (`BundleId`, `Overgrowth` clamped on construction). Time is `jiff::Timestamp` in UTC.
+- **Tests:** one inline `#[cfg(test)] mod tests { ... }` per module, as its last item. No `tests.rs`, no `tests/` folder, no `include!` (`check:fast` refuses them). Frontend tests sit beside their module as `*.test.ts` and test only pure code (no DOM, WebGL or clock).
+- **Lints:** set in `Cargo.toml` under `[lints]`. Allow a lint with `#[expect(..., reason = "...")]` at the narrowest scope. Never put one on a statement holding a closure (such as `.setup(|app| ...)`); split it first.
+- **Dependencies:** check a crate is maintained and supports Tauri 2. Don't use `tauri-plugin-autostart` (launch at login is `SMAppService`, ADR-0016) or `tauri-plugin-store` (settings are written like the launch log, ADR-0014).
 
 ## Unsafe and objc2
 
-- Use the `objc2` framework crates (`objc2-app-kit`, `objc2-foundation`, `objc2-application-services`, `objc2-core-foundation`, `objc2-core-graphics`, `objc2-service-management`). The older `cocoa` and `objc` crates are deprecated, so leave them out.
-- Every `unsafe` block lives in `macos/` and has a `// SAFETY:` comment stating the invariant it depends on. Keep each block as small as the call it wraps. `unsafe_code` is denied crate-wide, so the item holding the block opts in with `#[expect(unsafe_code, reason = "...")]`.
-- **AppKit runs on the main thread.** Take a `MainThreadMarker` in any function that touches `NSWindow`/`NSWorkspace`, and reach the main thread from elsewhere with `app.run_on_main_thread(...)`.
-- **AX calls are synchronous IPC to the Dock process** and can block. Run Dock polling on a dedicated thread, or with `tauri::async_runtime::spawn_blocking`, and never on the main thread. Release CF objects through `CFRetained`/RAII wrappers instead of calling `CFRelease` by hand.
-- **Every AX read costs the Dock process CPU** (about 0.4% at 2 Hz). The tracker reads at 60 Hz only while something moves: the pointer near the Dock, a frame sent within 250 ms, a pointer waiting at a hidden Dock's edge (1 s after its last move), or, wherever the pointer is, a launch hold. A pointer at rest in the band gets pointer-only checks at 10 Hz, with no AX read. Keep any new reason to poll fast bounded in time, and put it in `tracker.rs`'s `Activity` with table tests (ADR-0012).
-- **A Dock hover change ends a long wait** (ADR-0017). The Dock posts no move or resize notification for its items, only `AXSelectedChildrenChanged` when the hovered item changes (entry, each item crossed, exit). So reads stay polled, and the notification only starts them early.
-  - The `dock-observer` thread (`macos/dock_observer.rs`) registers for it on its own `CFRunLoop`, never on the main thread, and sends `TrackerMessage::DockHoverChanged`. It is optional: the tracker starts first, and polling is the fallback.
-  - Whether it may register is decided by the pure `dock::HoverObserverGate`: the cached `TrustState` and a fresh, no-prompt `check_trust`, a latch after `APIDisabled` until trust is seen revoked, and a stop after `NotificationUnsupported`. Attempts are at least 2 s apart.
-  - In `Activity::wait_for_read`, a hover ends a wait longer than one `Fast` interval, but never makes a read due sooner than one `Fast` interval after the last read. That caps hover-driven reads at 60 a second, two per selection change while the pointer is still, and adds no reason to stay at `Fast`.
-  - It and `AppLaunching` (below) are the only `TrackerMessage`s that cut the wait short (ADR-0007, amended).
-- **An app launch holds `Fast`** (job 019, Gate 1 Q1). The Dock posts nothing for the lift of a launching app's icon (about 690 ms), so with the pointer away from the Dock it was followed at 2 Hz.
-  - `macos::workspace::on_app_launching` observes `NSWorkspace`'s will-launch and did-launch notifications on the main queue. Will-launch arrives about 36 ms into the lift and did-launch about 72 ms in (job 019's spike), and macOS does not post will-launch for every launch, so both count. For any regular app, pinned or not (a new tile shifts the others), `dock_tracker::watch_launches` sends `TrackerMessage::AppLaunching`.
-  - `Activity::app_launching` starts or renews the launch hold: `Fast` until 1 s after the later of the latest launch and the last frame sent (`LAUNCH_SETTLE`), never more than 2 s after the latest launch (`LAUNCH_HOLD_CAP`), so a second app launched during a hold is followed to its own cap. A launch less than 250 ms after the hold's start is taken as the same app's will/did pair and is skipped (`SAME_LAUNCH`). So one app's launch costs one hold (at most 2 s of `Fast`, at most 120 reads, about 100 measured) when did-launch follows within 250 ms, as in every launch measured (35 to 158 ms over 8 apps); a slower did-launch renews the hold, so at most about 4 s. Launches that keep coming less than 2 s apart keep `Fast` running for as long as they come. `Tracker::dock_on_screen` is false while the overlay is hidden, which is whenever the last frame sent was empty: the Dock auto-hidden or in a full-screen Space, and also a Dock that cannot be read (not answering, not running, or Accessibility off). Then `PendingLaunch::hand_to` drops the launch and starts no hold: a hidden Dock shows no lift, and a hold on a Dock that cannot be read would only run fast reads that fail. The reveal rules take over when the Dock shows. Known limit: a launch made from a full-screen Space arrives while the overlay is hidden, so if macOS then switches to a desktop Space where the icon still bounces, that lift is read at 2 Hz; a follow-up could treat the Space-change notice like the hover notice.
-  - The message ends a long wait under the hover rule (`Woken::AppLaunch`), and `drain_inbox_until` records the first launch of the wait in a `tracker::PendingLaunch` even when the wait is not cut, so the next tick starts the hold.
-- Get the native window with `window.ns_window()` and cast it to `&NSWindow` inside `macos/overlay.rs` only.
+- Use the `objc2-*` framework crates, never `cocoa` or `objc`.
+- Every `unsafe` block is in `macos/`, as small as the call it wraps, with a `// SAFETY:` comment. The item holding it opts in with `#[expect(unsafe_code, reason = "...")]`.
+- AppKit runs on the main thread: take a `MainThreadMarker`, and reach it from elsewhere with `app.run_on_main_thread`.
+- AX calls are blocking IPC to the Dock. Never make them on the main thread. Release CF objects through `CFRetained`, never `CFRelease`.
+- Every AX read costs the Dock CPU. Read fast only while something moves. Any new reason to poll fast must be bounded in time and go in `tracker.rs`'s `Activity` with table tests (ADR-0012). Only `DockHoverChanged` and `AppLaunching` may cut a wait short, and never to less than one `Fast` interval after the last read (ADR-0007, ADR-0017).
+- The `dock-observer` is optional (polling is the fallback), runs on its own `CFRunLoop`, and registers only when `dock::HoverObserverGate` allows.
+- Cast `window.ns_window()` to `&NSWindow` only in `macos/overlay.rs`.
 
-## Tauri 2 conventions
+## Tauri
 
-- **Commands:** use `async fn` with owned arguments. Shared state goes in through `app.manage(...)` and comes out as `State<'_, T>`. Use `std::sync::Mutex` when the lock never crosses an `.await`; use `tokio::sync::Mutex` only when it does.
-- **Spawning:** use `tauri::async_runtime::spawn`. A bare `tokio::spawn` panics inside `setup()` because no runtime context exists there yet.
-- **Rust → webview:** stream state the webview needs from its first frame over a `tauri::ipc::Channel` that a `watch_*` command hands to the owning thread: Dock geometry with `watch_dock`, and each Dock app's growth with `watch_growth`. Send a frame only when it differs from the last one sent, so the webview render loop can stay idle (see Battery in `SUMMARY.md`). A new call replaces the channel and gets the current frame at once, so a reloaded webview resubscribes (ADR-0007). For the same reason `src/overlay.ts` subscribes once per channel and passes each frame to every consumer (the renderer, and the debug layer in dev builds). Send only what the webview draws: `DockItem::app_path` stays in Rust (`#[serde(skip_serializing)]`), because a path can hold the user's name. An event sent before the webview's listener exists is lost, so use `Emitter::emit_to("overlay", ...)` only for one-off events the webview can afford to miss.
-- **Capabilities:** each window gets its own file in `capabilities/`, scoped by window label.
-  - The overlay webview only renders, so it gets the smallest permission set that lets it receive events, plus `allow-watch-dock` and `allow-watch-growth` (the commands that hand Rust its `Channel`s).
-  - The settings window gets `allow-get-settings`, `allow-save-settings`, `allow-set-launch-at-login` and `core:window:allow-close`, and no plugin permissions: Rust validates and writes every setting (ADR-0014) and changes the login item (ADR-0016).
-  - `core:window:allow-close` lets a webview name any window's label, so the overlay refuses `CloseRequested` (`prevent_close`). Quitting goes through `app.exit`, which does not send it.
-  - Neither window can call the other's commands. App commands are listed in the app manifest in `build.rs`, which makes Tauri generate an `allow-<command>` permission for each one and deny any app command in a window whose capability doesn't grant it. A new command needs both its `build.rs` entry and a grant in the capability of the window that calls it.
-- **Frontend:** import from `@tauri-apps/api/core` / `/event` (v2 paths). Keep every `invoke` call in one typed module (`src/ipc.ts`) that mirrors the Rust command signatures. Dev-only code (the Dock item outlines, growth labels and `VITE_DOCKMOSS_OVERGROWTH`) lives in `src/debug.ts` and loads only through `import()` under `import.meta.env.DEV`, so `pnpm build` drops it; never import it statically (ADR-0011). A build-only Vite plugin (`noDevOnlyModuleInBuild` in `vite.config.ts`) fails `pnpm build` if `src/debug.ts` or any module under `src/icon/` is anywhere in the module graph. The settings entry never imports `debug.ts`, the renderer or `overlay.ts`. Put Dock data into the DOM with `textContent` only.
-- **Renderer constants have one source.** The moss's palette, layers, anchor layout, props and its 24 level steps live in `src/render/generator.ts`; the bake size and the two-bakes-a-frame budget in `atlas.ts`. The shader's constants (`MIP_LOD_BIAS`, `SHRIVEL_FRONT_WIDTH`, `WITHER_TINT`) live in `src/render/model.ts`, and `glslConstants()` writes them into `moss.frag.glsl` at `#pragma moss_constants`; never declare one again in GLSL, and its tests fail a constant the shader uses but nobody generated, or one generated that the shader does not use. The per-instance buffer is `INSTANCE_ATTRIBUTES` in `model.ts`: the bake box, the atlas layer, the wither and what a shrivel leaves (`a_box`, `a_layer`, `a_wither`, `a_remaining`), and its test pins it to `moss.vert.glsl`'s `in` list. Every mossy icon is one instance of one `drawArraysInstanced` call that samples its layer of one texture array (ADR-0012, ADR-0018), shrivelling ones included.
-- **One DockMoss at a time** (ADR-0015). `tauri-plugin-single-instance` is registered first in the Builder. A second launch reaches the running copy's socket (`/tmp/app_dockmoss_DockMoss_si.sock`, derived from the identifier) and exits 0 inside the plugin's setup, before any other plugin and before `setup()` opens a file, builds the tray or creates a window, so it leaves no log of its own. The running copy opens or focuses Settings on a second launch (the plugin callback, sent to the main thread) and on `RunEvent::Reopen`, which is what a Finder double-click, Spotlight or `open` sends to a running app. The callback never logs its `argv` or `cwd`, which can hold the user's name. DockMoss never records its own bundle ID as used, so a second copy starting up is not a launch (`usage::tracked_bundle_id`).
-- **Navigation guard:** both window builders pass `.on_navigation(is_app_url)`, which allows only the bundled `tauri:` origin, plus localhost in debug builds (`navigation::is_app_origin`, table-tested).
-- **The shrivel is inferred, not sent.** The webview starts one when an icon it drew as mossy comes back clean in the growth stream; Rust sends no event for it (ADR-0013). It draws from the icon's bake, and the shader browns it (`WITHER_TINT`) while a front eases down over it to the bottom edge (ADR-0018). So any drop of a mossy icon to 0 shrivels, including one a setting causes: an exclusion, intensity 0, or higher thresholds (ADR-0016). Its 600 ms run is one more condition of `createRenderer`'s time-limited loop, and the loop stops when the last shrivel draws the icon clean.
+- **Commands:** `async fn` with owned arguments, thin, delegating to modules. `std::sync::Mutex` unless a lock crosses an `.await`.
+- **Spawning:** `tauri::async_runtime::spawn`, never bare `tokio::spawn` (panics in `setup()`).
+- **Rust → webview:** stream over a `tauri::ipc::Channel` handed over by a `watch_*` command. Send a frame only when it changed. A new call replaces the channel and gets the current frame at once. `src/overlay.ts` subscribes once per channel and fans out. Use `emit_to` only for one-off events the webview can miss.
+- **Capabilities:** one file per window. A new command needs both its `build.rs` app-manifest entry and a grant in the calling window's capability. `core:window:allow-close` can name any window, so the overlay must keep refusing `CloseRequested`.
+- **Frontend:** v2 import paths (`@tauri-apps/api/core`, `/event`). Every `invoke` lives in `src/ipc.ts`. Dev-only code (`src/debug.ts`, `src/icon/`) loads only via `import()` under `import.meta.env.DEV`, never statically; `pnpm build` fails otherwise. The settings entry never imports `debug.ts`, the renderer or `overlay.ts`. Put Dock data into the DOM with `textContent` only.
+- **Renderer constants have one source.** Shader constants live in `src/render/model.ts` and are written into `moss.frag.glsl` at `#pragma moss_constants`; never declare one in GLSL. `INSTANCE_ATTRIBUTES` in `model.ts` is pinned to `moss.vert.glsl` by test. All mossy icons are one `drawArraysInstanced` call.
+- **The shrivel is inferred** by the webview from the growth stream. Don't add a Rust event for it (ADR-0013).
+- **One copy at a time:** `tauri-plugin-single-instance` is registered first. Its callback never logs `argv` or `cwd`.
+- **Navigation:** both windows pass `.on_navigation(is_app_url)`.
 
-## macOS overlay gotchas
+## macOS gotchas
 
-- **Transparency** needs `"macOSPrivateApi": true` under `app` in `tauri.conf.json`, plus `transparent: true` on the window and a transparent `body` background in CSS. Private API rules out the Mac App Store. Distribution is Developer ID only.
-- **Overlay window:** `decorations: false`, `shadow: false`, `focus: false`, `skipTaskbar: true`, then `set_ignore_cursor_events(true)` and `set_visible_on_all_workspaces(true)`. Set the `NSWindow` level above the Dock (`kCGDockWindowLevel + 1`) and the collection behavior to `canJoinAllSpaces | stationary | fullScreenAuxiliary | ignoresCycle` through objc2. Tauri's `always_on_top` level sits below the Dock.
-- **No Dock icon of our own:** call `app.set_activation_policy(ActivationPolicy::Accessory)` in `setup()`. The menu-bar tray (`TrayIconBuilder`, `tray-icon` feature) holds Settings… and Quit DockMoss, plus Grant Accessibility Access… while untrusted, and a disabled line at the top for each of the launch log and the settings that the data move left behind (`MoveReport::left_behind_data`): "Usage history wasn’t moved, so no moss is shown" and "Saved settings weren’t moved, so changes won’t save", both when both are left, then one separator. Each says the effect and names no path. Only the main thread touches the tray: other threads look it up with `app.tray_by_id(TRAY_ID)` inside `run_on_main_thread`, because its handle is not thread-safe.
-- **Settings window:** a normal titled window (label `settings`), created on Settings… and destroyed on close. It is 440 × 760 pt, or shorter to fit the primary display's work area, and then the form scrolls (`geometry::settings_window_height`). `set_focus()` already activates the Accessory app, so no extra activation call is needed. An Accessory app has no menu bar, so the page handles ⌘W itself.
-- **Focus hand-back on close** (ADR-0014, amended). The return target has one source: `LastOtherApp`, the last activated regular app that is neither this process nor another copy of DockMoss (`focus::is_return_target`, fed by `macos::workspace::on_app_activated` and seeded with the front app at startup). Nothing is captured when Settings opens, so the tray, a second launch and Reopen all get the right target even when DockMoss or an exiting copy is already in front. When the window is destroyed, `focus::on_settings_closed` decides:
-  - DockMoss is not the active app: leave the user where they are, so closing Settings from behind never pulls an old app forward.
-  - The same bundle ID still runs at the remembered pid (`macos::app::app_at`): activate it.
-  - Otherwise (no target, it quit, or macOS gave its pid to another app), or if the activation fails (`focus::hides`): hide DockMoss, so macOS brings the next app forward. A windowless DockMoss is never left in front. The overlay sets `canHide = false` (`macos/overlay.rs`), so hiding the app leaves the moss on screen.
-- **Coordinates:** AX reports global points with a top-left origin on the primary display. Cocoa uses a bottom-left origin. Tauri distinguishes `Logical` from `Physical` sizes. The one conversion function is the pure `geometry::to_overlay_local` in `src-tauri/src/geometry.rs`, outside `macos/` so it can be unit-tested with fixed displays. `macos/` only supplies the raw AX rects, and `lib.rs` supplies the display values Tauri reports. Its tests use multi-display and Retina fixtures, and the overlay's own frame comes from the same `Display::frame`.
-- **Accessibility grant:** TCC ties the grant to the code signature and to the *responsible process*. Under `tauri dev` started from a terminal, the grant goes to the terminal app. An ad-hoc-signed bundle loses the grant on every rebuild. Check with `AXIsProcessTrustedWithOptions` at startup and show a clear prompt instead of failing silently. Test the real flow with a bundle signed by a stable identity.
-- **Bundle identifier** (`identifier` in `tauri.conf.json`) is `app.dockmoss.DockMoss` (job 014), and it is permanent from now on. Changing it resets the Accessibility grant (a new TCC entry), moves the app data and log folders, and moves the single-instance socket, so an old-identifier copy can run beside the new one. Code never hard-codes it: own-ID checks read `app.config().identifier`. The only literal is `usage::migrate`'s `OLD_IDENTIFIER` (`com.dockmoss.app`), the folder the one-time move reads (see "Usage data rules").
-- **Launch at login** (ADR-0016) is `SMAppService.mainApp` through `objc2-service-management`, in `macos/login_item.rs`. DockMoss then shows under System Settings → General → Login Items → Open at Login, with no Automation or other prompt. The state lives in macOS, not in `settings.json`: `get_settings` reads it as `launchAtLogin` (below), and `set_launch_at_login(enabled)` returns what macOS reports after the change (`login_item::outcome`), or `login_item_not_changed` when that differs from what was asked. Both send the status as `login_item::LaunchAtLogin`, the string `"on"`, `"off"` or `"needsApproval"` (`RequiresApproval`: registered, but the user must approve it in System Settings; the box shows off with a note that says where). The note under the box is a `role="status"` region that stays in the tree and collapses when empty; a change that ends in `needsApproval` announces it again (`announceLoginNote`). The System Settings path in the note and the notice uses no-break spaces, so it never breaks across lines. Judging by the status read afterwards matters: unregistering an item that was never registered fails, yet ends in the asked state, and an item left waiting for approval is not a failure either way. The page says "Try again" only for a failure a retry can fix (`ipc_failed`, a settings save); `login_item_not_changed` points to System Settings › General › Login Items instead (`saveNotice`). The status read after a change goes through the same `read_alone` slot and 500 ms bound; when it does not answer, the command returns `login_status_unknown`. The change ran, but how it ended is unknown, and a retry would meet the same stalled read, so the page puts the card in its unknown state (box disabled, the unknown note, announced) and shows no red notice (`launchAtLoginShown` returns null; `launchAtLoginError` in `ipc.ts` maps the kinds, table-tested). `set` refuses unless the main bundle's path ends in `.app` (`login_item::is_app_bundle`), so `tauri dev`'s bare binary is never registered and the toggle reports the failure. An `NSError` is kept and logged only as its domain and code (`RedactedNsError`), because its description can name a path. Leave the real login item off when you test it.
-- **Release bundle:** `pnpm tauri build` builds an unsigned `DockMoss.app` only (`bundle.targets` is `["app"]`; DMG, signing and notarization are milestone 7), with release `opt-level = "s"`. No `Info.plist` is added: macOS has no usage-description key for Accessibility.
+- **Overlay window:** transparency needs `macOSPrivateApi` (no Mac App Store; Developer ID only). Set the level to `kCGDockWindowLevel + 1` and the collection behavior through objc2; Tauri's `always_on_top` sits below the Dock.
+- **Tray:** the app is `ActivationPolicy::Accessory`. Only the main thread touches the tray (`app.tray_by_id(TRAY_ID)` inside `run_on_main_thread`). An Accessory app has no menu bar, so the Settings page handles ⌘W itself.
+- **Focus:** closing Settings never leaves a windowless DockMoss in front. Rules are in `focus.rs` (ADR-0014).
+- **Coordinates:** AX is top-left global, Cocoa bottom-left. `geometry::to_overlay_local` is the one conversion.
+- **Accessibility grant:** under `tauri dev` it goes to the terminal; an ad-hoc-signed bundle loses it on every rebuild. Check with `AXIsProcessTrustedWithOptions` and prompt clearly, never fail silently.
+- **Bundle identifier** `app.dockmoss.DockMoss` is permanent. Changing it resets the Accessibility grant and moves the data, logs and single-instance socket. Never hard-code it: read `app.config().identifier`. The only literal is `usage::migrate`'s `OLD_IDENTIFIER`.
+- **Launch at login** is `SMAppService.mainApp` in `macos/login_item.rs`. Its state lives in macOS, not `settings.json`. Judge a change by the status read afterwards (`login_item::outcome`), not by the call's result. Only a `.app` may register. Leave the real login item off when testing.
 
-## Usage data rules (code-level)
+## Privacy
 
-- The launch log is the source of truth (see `SUMMARY.md`). It lives at `app.path().app_data_dir()/launch_log.json` (`~/Library/Application Support/app.dockmoss.DockMoss/`). Every data path comes from `DataDir::file` in `lib.rs`, and only `moved_app_data_dir` makes a `DataDir`, after the one-time move, so nothing can read or write app data before the move. Write it atomically (temp file in the same directory, then `rename`), so a crash mid-write can't destroy history. `usage::save` removes a stale temp file and creates the new one with `create_new` and mode 0600; do not change that to `File::create`, which would keep an old mode and follow a planted link.
-- The file is versioned JSON (`version: 1`, ADR-0009, amended by ADR-0010). It holds `baseline_at` (set at the first run; it marks the first run as done and is not a last-used time), `last_launched`, `first_seen` and `spotlight_seed`. The last two are optional on read, so older files load.
-- Every map value and `baseline_at` is read as a `serde_json::Value` and checked on its own. A value that is not a string, a bad bundle ID, an RFC 3339 timestamp that does not parse, or one more than `FUTURE_TOLERANCE` (5 minutes) after now is dropped and logged, and the rest of the file loads. jiff's `serde` feature stays off, so nothing panics. A file that does not decode at all is renamed to `launch_log.json.corrupt`, never deleted.
-- When decode drops anything, `load_or_set_aside` copies the bytes it read to `launch_log.json.dropped` before the next save can rewrite the file. It uses the same `write_private` as the temp file (stale file removed, `create_new`, mode 0600).
-- DockMoss never records its own bundle ID: `usage::tracked_bundle_id` drops it, so another copy of DockMoss (a second launch is a regular app until it exits) is never recorded as used. Lookalike IDs (`app.dockmoss.DockMoss.helper`) are other apps and are recorded, and so is a copy built with the old identifier `com.dockmoss.app`.
-- `BundleId::new` refuses an empty ID or one over 255 bytes, so the Dock, workspace events and decode all share one cap.
-- A `SpotlightSeed` is made only by `usage::spotlight::sane_seeds` (future dates dropped, one date per bundle ID, then every date dropped on a migration batch) or, for a seed already stored, by log decode through `assume_sane`.
-- Only the `launch-log` thread in `lib.rs` touches the `UsageState` (the log, the running set and the Dock list). Everything else sends it `WriterMessage::{Used, DockApps, ListDockApps, WatchGrowth, Settings, Flush}` over its channel. `ListDockApps` carries a reply sender; `get_settings` waits for the reply on a `spawn_blocking` thread for up to 500 ms and treats no reply as an unknown Dock list. The first-run Spotlight read runs on a short-lived `spotlight-seed` thread, one `mdls` per distinct bundle ID with a 2 s timeout, and returns its readings through its `JoinHandle`. The writer holds no sender to its own inbox.
-- **Jitter must be stable across runs and Rust versions.** It is FNV-1a 64 of the bundle ID's UTF-8 bytes, mapped to whole seconds in ±1 day (`growth/jitter.rs`). Never use `std::hash::DefaultHasher` or an RNG. Changing the hash or the mapping moves every user's moss, and the golden-value tests in `growth/jitter.rs`'s test module fail by design.
-- Test migration detection and the growth curve with table-driven tests over fixed timestamps, including the edge cases from `SUMMARY.md`: null Spotlight dates, 5+ apps within seconds, first-run grace, and apps running at startup.
+Paths can contain the user's name. Never log or send a path, `argv` or `cwd`. Log an `NSError` only as domain and code. `DockItem::app_path` stays in Rust (`#[serde(skip_serializing)]`). A settings `warn` never contains an excluded bundle ID.
 
-**The one-time data move** (job 014, ADR-0016):
-- At startup, before `load_settings` and `start_launch_log`, `usage::move_old_data` moves the names in `usage::migrate::MOVED_FILES` (`launch_log.json`, `settings.json`, `launch_log.json.corrupt`, `launch_log.json.dropped`) from the sibling `com.dockmoss.app` folder into the new one. It never moves a `.tmp` or any other name. `LAUNCH_LOG_FILE` and `SETTINGS_FILE` are defined there and imported by `lib.rs`, so the guarded names have one source.
-- Each move is `fs::hard_link`, then `fs::remove_file` of the old name. The link fails with `AlreadyExists` when the name is taken, so the move never overwrites. A volume that makes no hard links (exFAT, some network homes) answers `ENOTSUP`, which std reports as `Uncategorized`, so `link_error` checks the raw code too. Only then does the move copy the file into the new name, opened `create_new` with mode 0600 and synced, then remove the old one (`copy_into_new_file`). `create_new` refuses a name that exists, so even a name made during the move is kept, never overwritten; macOS's exclusive rename (`renamex_np` with `RENAME_EXCL`) would also do, but exFAT refuses it with `ENOTSUP`. The copy and both reads of the interrupted-copy comparison open their files through one `open_regular` (`O_NOFOLLOW | O_NONBLOCK`, then a regular-file check), like the plan's check, so a link or FIFO swapped in at either name is never followed or blocked on. A copy that fails removes the file it made, so the next start retries. A copy cut short by a crash is redone at the next start: a new file that is empty or a strict byte prefix of the old one, and not already a whole JSON document (`is_interrupted_copy`, table-tested), is removed and the move runs again; every byte of such a file is also in the old one, so nothing is lost. The comparison runs once per name and reads at most 1 MiB of each file (`MAX_COMPARED_BYTES`, the launch log's read cap). Only a regular file moves (`symlink_metadata`); a link or anything else stays, with a `warn`. A name already in the new folder is kept and the old file left. The new folder is made 0700 by `usage::private_dir`, which refuses a link. If it is not usable, every planned move counts as failed, and so does an interrupted copy, which is then left behind and not redone through that folder. The old folder is removed only when empty (`fs::remove_dir`). Do not change the move to `rename`: it replaces an existing name.
-- Log lines name the file and the `io::ErrorKind`, never a path. A start with nothing to do logs only at `debug` (`MoveReport::worth_reporting`).
-- A file whose move failed is **left behind**: `MoveReport::file_in` gives no path for it. With the launch log left behind, usage tracking stays off for that session; with `settings.json` left behind, settings are the defaults and saving is off. The tray says which of the two is still in the old folder. Nothing writes a replacement, which the next start would keep while the user's file stayed stranded, and the next start retries the move. The `.corrupt` and `.dropped` copies are not guarded: they are never read back.
-- Known limits (ADR-0016, amended in job 019): on a volume without POSIX permissions (exFAT) the 0600 and 0700 modes are not stored. Old files over 1 MiB (the launch log's read cap) are never compared, so a copy of one cut short would be kept. The JSON check covers all four names, so a `.corrupt` copy cut short at a point where it still parses as JSON is kept too; it is never read back, and the whole copy stays in the old folder. A copy cut short by a power loss rather than a crash may not be a prefix (exFAT can leave zeros at the end); it is then kept, and the old file stays unread in the old folder. A failed `remove_file` after a successful link leaves a frozen copy in the old folder, which keeps that folder from being removed. The old log folder `~/Library/Logs/com.dockmoss.app` is left as it is.
+## Usage data
 
-**Settings file** (ADR-0014):
-- Rust owns settings. The webview reads them with `get_settings` (settings, `limits` from the Rust constants, the Dock apps by name, or `null` while the Dock list is unknown, and `launchAtLogin` from macOS as `"on"`, `"off"` or `"needsApproval"`, or `null` when it does not answer within 500 ms) and writes them only through `save_settings`. The login status is read alongside the Dock list through `bounded::read_alone`, so a stalled ServiceManagement disables only that box, and while one read is still stalled, opening Settings again starts no other; the page then says why (`launchAtLoginBox`). There is no `tauri-plugin-store` and no store permission.
-- `settings.json` lives in `app_data_dir`. It is versioned JSON (`version: 1`) with one key per setting in the webview's camelCase shape: `thresholds`, `intensityPercent`, `excluded` (sorted) and `fastForward`.
-- Only `save_settings` writes it, through `usage::write_atomically`: the same `write_private` temp file as the launch log (stale file removed, `create_new`, mode 0600), synced, then `rename`. Nothing writes it at startup or at quit.
-- Save is all or nothing. `Settings::parse` checks every field through its constructor (`Thresholds::new`, `Intensity::new`, `FastForward::from_factor`, `BundleId::new`, at most 256 exclusions, and lists over 4 × 256 entries refused before reading). Then `settings::commit` writes, and only after the write succeeds replaces the settings in memory. A failed write returns `settings_not_saved` with a fixed message; the cause, which can hold a path, is logged. The managed `Mutex<Settings>` is held through the write, on a `spawn_blocking` thread.
-- Load never fails and never writes. `settings::load_file` reads through `usage::read_capped` at 256 KiB (`settings::MAX_FILE_BYTES`).
-  - A missing file gives defaults silently.
-  - An unreadable or oversized file, one that is not a JSON object, or one without `version: 1` (`{}` included) gives defaults with one `warn`.
-  - Otherwise each field is checked on its own: a missing or invalid field gets its default with a `warn` naming the field, and a bad excluded bundle ID drops only that entry.
-  - A `warn` never contains an excluded bundle ID.
-  - A bad file stays on disk until the user's next save replaces it.
+- The launch log is the source of truth. Every data path comes from `DataDir::file` in `lib.rs`, which exists only after the one-time data move.
+- Write user data atomically through `usage::store` (stale temp removed, `create_new`, mode 0600, sync, `rename`). Never change it to `File::create`.
+- Decode checks each value on its own and drops bad ones; nothing panics (jiff's `serde` feature stays off). A file that doesn't decode is renamed to `.corrupt`, never deleted. When anything is dropped, the bytes read are copied to `.dropped` before the next save.
+- DockMoss never records its own bundle ID (`usage::tracked_bundle_id`).
+- A `SpotlightSeed` is made only by `spotlight::sane_seeds` or, on decode, `assume_sane`.
+- Only the `launch-log` thread touches `UsageState`. Everything else sends it a `WriterMessage`.
+- **Jitter must stay stable** across runs and Rust versions: FNV-1a 64 of the bundle ID. Never use `DefaultHasher` or an RNG. Its golden-value tests fail by design if it changes.
+- Test migration detection and the growth curve with table tests over fixed timestamps, covering `SUMMARY.md`'s edge cases.
+
+**The one-time data move** (`usage::migrate`, ADR-0016) runs before anything reads app data. It must never overwrite: `hard_link` then `remove_file`, or a `create_new` copy where links are unsupported. Never change it to `rename`. A file that fails to move is left behind with no replacement written, and the next start retries.
+
+**Settings** (ADR-0014):
+- Only `save_settings` writes `settings.json`. A save is all or nothing: validate every field through its constructor, write, then replace the in-memory settings.
+- Load never fails and never writes: a bad file gives defaults, a bad field its default.
 - No settings type derives a `Deserialize` that skips its constructor.
-- Saved settings apply at once (ADR-0016). After `settings::commit` writes, `save_settings` sends `WriterMessage::Settings` to the launch-log thread while it still holds the settings lock (`apply_to_growth` takes the guard), so saves apply in the order they were written. The thread recomputes at once, resets the recompute timer for the new fast-forward, and sends a growth frame only if it changed. While usage tracking is off, the save persists and the send is skipped with a `debug`.
-- `UsageState::growth(now, &Settings)` applies them, in Rust only; the webview, renderer and shaders are unchanged.
-  - The thresholds and fast-forward drive the curve.
-  - An excluded Dock app keeps its entry, with overgrowth 0 and stage `clean`.
-  - Intensity scales the sent overgrowth (`Intensity::scale`, clamped through `Overgrowth::new`) and leaves the stage, so an Overgrown app keeps its props at any intensity above 0. Intensity 0 draws no moss.
-- In debug builds, a valid `DOCKMOSS_FAST_FORWARD` replaces the saved speed (`Settings::applied`). An invalid one is ignored with a `warn`, and the saved speed applies. Release builds ignore the variable. The dev overrides (`DOCKMOSS_FAST_FORWARD`, `VITE_DOCKMOSS_*`) never read or write settings.
+- `save_settings` sends `WriterMessage::Settings` while still holding the settings lock, so saves apply in order. Settings are applied to growth in Rust only.
+- `DOCKMOSS_FAST_FORWARD` works in debug builds only and never reads or writes settings.

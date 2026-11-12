@@ -90,6 +90,29 @@ enum Sighting {
     },
 }
 
+impl Sighting {
+    fn of_read(frame: &[DockItem], bounds: Option<ScreenRect>, display: ScreenRect) -> Self {
+        if !frame.is_empty() {
+            Self::OnScreen
+        } else if bounds.is_some_and(|bounds| !overlaps(bounds, display)) {
+            Self::OffScreen
+        } else {
+            Self::Unknown
+        }
+    }
+
+    fn is_held(self) -> bool {
+        matches!(self, Self::Held { .. })
+    }
+}
+
+/// A Dock that comes back with the pointer away from the bottom edge came
+/// back with a Space switch, not an auto-hide reveal. An unknown pointer
+/// counts as a reveal, as before the hold existed.
+fn is_space_switch(cursor: Option<ScreenPoint>, display: ScreenRect) -> bool {
+    cursor.is_some_and(|cursor| !near_bottom_edge(cursor, display, REVEAL_REACH))
+}
+
 pub struct Tracker {
     display: Display,
     last_sent: Option<Vec<DockItem>>,
@@ -158,7 +181,8 @@ impl Tracker {
                 (Vec::new(), None, log)
             }
         };
-        let frame = if self.sight(&frame, bounds, cursor, now) {
+        let seen = Sighting::of_read(&frame, bounds, self.display.frame());
+        let frame = if self.follow(seen, cursor, now).is_held() {
             Vec::new()
         } else {
             frame
@@ -186,7 +210,7 @@ impl Tracker {
     }
 
     pub fn awaits_switch_end(&self) -> bool {
-        matches!(self.sighting, Sighting::Held { .. })
+        self.sighting.is_held()
     }
 
     pub fn read_due(&self, scheduled: Instant) -> Instant {
@@ -198,26 +222,12 @@ impl Tracker {
         }
     }
 
-    fn sight(
-        &mut self,
-        frame: &[DockItem],
-        bounds: Option<ScreenRect>,
-        cursor: Option<ScreenPoint>,
-        now: Instant,
-    ) -> bool {
-        let display = self.display.frame();
-        let seen = if !frame.is_empty() {
-            Sighting::OnScreen
-        } else if bounds.is_some_and(|bounds| !overlaps(bounds, display)) {
-            Sighting::OffScreen
-        } else {
-            Sighting::Unknown
-        };
+    fn follow(&mut self, seen: Sighting, cursor: Option<ScreenPoint>, now: Instant) -> Sighting {
         let ended = std::mem::take(&mut self.switch_ended);
-        let switching =
-            cursor.is_some_and(|cursor| !near_bottom_edge(cursor, display, REVEAL_REACH));
         self.sighting = match (self.sighting, seen) {
-            (Sighting::OffScreen, Sighting::OnScreen) if switching && !ended => {
+            (Sighting::OffScreen, Sighting::OnScreen)
+                if !ended && is_space_switch(cursor, self.display.frame()) =>
+            {
                 Sighting::Held { since: now }
             }
             (Sighting::Held { since }, Sighting::OnScreen)
@@ -227,7 +237,7 @@ impl Tracker {
             }
             (_, seen) => seen,
         };
-        matches!(self.sighting, Sighting::Held { .. })
+        self.sighting
     }
 
     fn apps_changed(&mut self, sent: &[DockItem]) -> Option<Vec<DockApp>> {

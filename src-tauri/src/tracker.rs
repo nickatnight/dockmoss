@@ -86,7 +86,7 @@ pub struct Tick {
     /// The Dock is hidden and the pointer is at the edge it slides in from.
     pub awaits_reveal: bool,
     pub dock_on_screen: bool,
-    pub left_dock: bool,
+    pub pointer_left_shown_dock: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,7 +214,8 @@ impl Tracker {
             && cursor
                 .zip(bounds)
                 .is_some_and(|(cursor, bounds)| distance(cursor, bounds) <= OVER_DOCK_MARGIN);
-        let left_dock = self.pointer_over_dock && dock_on_screen && cursor.is_some() && !over_dock;
+        let pointer_left_shown_dock =
+            self.pointer_over_dock && dock_on_screen && cursor.is_some() && !over_dock;
         self.pointer_over_dock = over_dock;
         Tick {
             send,
@@ -224,7 +225,7 @@ impl Tracker {
             proximity_rate: poll_rate(cursor, bounds, self.display),
             awaits_reveal: awaits_reveal(cursor, bounds, self.display),
             dock_on_screen,
-            left_dock,
+            pointer_left_shown_dock,
         }
     }
 
@@ -1517,7 +1518,7 @@ mod tests {
 
         for (case, read, cursor, expected) in steps {
             assert_eq!(
-                tracker.tick(read, cursor, now).left_dock,
+                tracker.tick(read, cursor, now).pointer_left_shown_dock,
                 expected,
                 "{case}"
             );

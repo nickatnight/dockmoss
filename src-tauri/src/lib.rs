@@ -787,7 +787,7 @@ mod dock_tracker {
             });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
             let tick = tracker.tick(read, cursor, started);
-            if tick.left_dock {
+            if tick.pointer_left_shown_dock {
                 let auto_hide = macos::dock_prefs::auto_hide();
                 tracing::debug!(auto_hide, "pointer left the dock");
                 if auto_hide {

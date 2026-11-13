@@ -403,7 +403,7 @@ pub struct Activity {
     hide_hold: Option<HideHold>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct HideHold {
     since: Instant,
     reads: u32,

@@ -787,6 +787,9 @@ mod dock_tracker {
             });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
             let tick = tracker.tick(read, cursor, started);
+            if tick.left_dock {
+                activity.dock_left(started);
+            }
             let next_rate = activity.rate(
                 tick.proximity_rate,
                 tick.awaits_reveal,

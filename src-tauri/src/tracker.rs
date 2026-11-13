@@ -33,6 +33,12 @@ const REVEAL_REACH: f64 = 150.0;
 /// the first read can see the Dock 25 ms after it began, so a switch's hold
 /// lasts at most about 950 ms. The cap bounds a notice that never comes.
 const SWITCH_HOLD_CAP: Duration = Duration::from_millis(1200);
+/// An auto-hidden Dock slides out, and a magnified one shrinks back, after
+/// the pointer has left it, often with the pointer already past the band.
+/// `Fast` holds until this long after the later of the pointer leaving the
+/// band and the last frame sent, so a slide under way is followed to its end.
+const DEPARTURE_SETTLE: Duration = Duration::from_millis(500);
+const DEPARTURE_CAP: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -75,6 +81,9 @@ pub struct Tick {
     pub proximity_rate: PollRate,
     /// The Dock is hidden and the pointer is at the edge it slides in from.
     pub awaits_reveal: bool,
+    /// The pointer was near the Dock on screen at the last read and is now
+    /// out of every band, so the Dock may be about to hide.
+    pub left_dock: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +133,7 @@ pub struct Tracker {
     before_order: Visibility,
     sighting: Sighting,
     switch_end_recorded: bool,
+    near_dock: bool,
 }
 
 impl Tracker {
@@ -142,6 +152,7 @@ impl Tracker {
                 Visibility::Hidden => Sighting::Unknown,
             },
             switch_end_recorded: false,
+            near_dock: false,
         }
     }
 
@@ -195,14 +206,23 @@ impl Tracker {
         };
         let overlay = send.as_deref().and_then(|sent| self.order(sent));
         let apps = send.as_deref().and_then(|sent| self.apps_changed(sent));
+        let proximity_rate = poll_rate(cursor, bounds, self.display);
         Tick {
             send,
             log,
             overlay,
             apps,
-            proximity_rate: poll_rate(cursor, bounds, self.display),
+            proximity_rate,
             awaits_reveal: awaits_reveal(cursor, bounds, self.display),
+            left_dock: self.left_dock(proximity_rate, bounds),
         }
+    }
+
+    fn left_dock(&mut self, proximity_rate: PollRate, bounds: Option<ScreenRect>) -> bool {
+        let near = proximity_rate == PollRate::Fast;
+        let on_screen = bounds.is_some_and(|bounds| overlaps(bounds, self.display.frame()));
+        let was_near = std::mem::replace(&mut self.near_dock, near && on_screen);
+        was_near && !near && bounds.is_some()
     }
 
     /// Records the Space notice or the Dock's hover notice, so the next read
@@ -376,6 +396,21 @@ pub struct Activity {
     last_sent: Option<Instant>,
     resting: bool,
     launch_hold_started: Option<Instant>,
+    departed: Option<Instant>,
+}
+
+/// A hold started at `started` lasts until `settle` after the later of its
+/// start and the last frame sent, and never past `cap` after its start.
+fn holds(
+    started: Instant,
+    last_sent: Option<Instant>,
+    settle: Duration,
+    cap: Duration,
+    now: Instant,
+) -> bool {
+    let settles_from = last_sent.map_or(started, |sent| sent.max(started));
+    now.saturating_duration_since(started) <= cap
+        && now.saturating_duration_since(settles_from) <= settle
 }
 
 impl Activity {
@@ -390,11 +425,18 @@ impl Activity {
     }
 
     fn holding_for_launch(&self, now: Instant) -> bool {
-        self.launch_hold_started.is_some_and(|since| {
-            let settles_from = self.last_sent.map_or(since, |sent| sent.max(since));
-            now.saturating_duration_since(since) <= LAUNCH_HOLD_CAP
-                && now.saturating_duration_since(settles_from) <= LAUNCH_SETTLE
-        })
+        self.launch_hold_started
+            .is_some_and(|since| holds(since, self.last_sent, LAUNCH_SETTLE, LAUNCH_HOLD_CAP, now))
+    }
+
+    /// The pointer left the band of a Dock on screen (`Tick::left_dock`).
+    pub fn dock_left(&mut self, at: Instant) {
+        self.departed = Some(at);
+    }
+
+    fn following_departure(&self, now: Instant) -> bool {
+        self.departed
+            .is_some_and(|since| holds(since, self.last_sent, DEPARTURE_SETTLE, DEPARTURE_CAP, now))
     }
 
     pub fn rate(
@@ -425,7 +467,11 @@ impl Activity {
         if !launching {
             self.launch_hold_started = None;
         }
-        if (near && moving) || launching {
+        let departing = self.following_departure(now);
+        if !departing {
+            self.departed = None;
+        }
+        if (near && moving) || launching || departing {
             PollRate::Fast
         } else {
             PollRate::Slow
@@ -939,6 +985,55 @@ mod tests {
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
             assert_eq!(
                 tracker.tick(read, cursor, now).awaits_reveal,
+                expected,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn tick_reports_the_pointer_leaving_the_band_of_a_dock_on_screen() {
+        let now = Instant::now();
+        let shown = || Ok(vec![raw_app("Safari", 700.0)]);
+        let hidden = || {
+            Ok(vec![RawDockChild {
+                rect: Some(rect(700.0, 990.0, 56.0, 56.0)),
+                ..raw_app("Safari", 700.0)
+            }])
+        };
+        let near = Some(point(720.0, 850.0));
+        let far = Some(point(720.0, 300.0));
+        let cases = [
+            ("near the Dock on screen", shown(), near, false),
+            ("out of the band", shown(), far, true),
+            ("still out of the band", shown(), far, false),
+            ("back near the Dock", shown(), near, false),
+            (
+                "the Dock slid out, the pointer still in the bottom band",
+                hidden(),
+                near,
+                false,
+            ),
+            (
+                "out of the bottom band of a hidden Dock",
+                hidden(),
+                far,
+                false,
+            ),
+            ("near the Dock on screen again", shown(), near, false),
+            (
+                "a failed read with the pointer away",
+                Err(DockError::CannotComplete),
+                far,
+                false,
+            ),
+            ("an unknown pointer", shown(), None, false),
+        ];
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+
+        for (case, read, cursor, expected) in cases {
+            assert_eq!(
+                tracker.tick(read, cursor, now).left_dock,
                 expected,
                 "{case}"
             );
@@ -1815,6 +1910,118 @@ mod tests {
 
         assert_eq!(first, ms(420));
         assert_eq!(second, ms(421) + PollRate::Fast.interval());
+    }
+
+    struct DepartureStep {
+        case: &'static str,
+        left: bool,
+        sent: bool,
+        at_ms: u64,
+        expected: PollRate,
+    }
+
+    fn run_departure_steps(steps: impl IntoIterator<Item = DepartureStep>) {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut activity = Activity::default();
+        activity.rate(PollRate::Fast, false, Some(IN_BAND), true, start);
+        for step in steps {
+            let now = at(step.at_ms);
+            if step.left {
+                activity.dock_left(now);
+            }
+            let rate = activity.rate(PollRate::Slow, false, Some(FAR), step.sent, now);
+            assert_eq!(rate, step.expected, "{}", step.case);
+        }
+    }
+
+    #[test]
+    fn leaving_the_dock_holds_fast_until_half_a_second_after_the_last_moved_frame() {
+        let step = |case, left, sent, at_ms, expected| DepartureStep {
+            case,
+            left,
+            sent,
+            at_ms,
+            expected,
+        };
+        run_departure_steps([
+            step(
+                "far, nothing left: Slow",
+                false,
+                false,
+                1000,
+                PollRate::Slow,
+            ),
+            step(
+                "the pointer leaves the band",
+                true,
+                false,
+                1100,
+                PollRate::Fast,
+            ),
+            step(
+                "the Dock starts to slide out",
+                false,
+                true,
+                1300,
+                PollRate::Fast,
+            ),
+            step("still sliding", false, true, 1700, PollRate::Fast),
+            step("the slide's last frame", false, true, 1900, PollRate::Fast),
+            step(
+                "half a second after the last frame",
+                false,
+                false,
+                2400,
+                PollRate::Fast,
+            ),
+            step("the hold has ended", false, false, 2401, PollRate::Slow),
+        ]);
+    }
+
+    #[test]
+    fn leaving_a_dock_that_does_not_move_holds_fast_for_half_a_second() {
+        let step = |case, left, at_ms, expected| DepartureStep {
+            case,
+            left,
+            sent: false,
+            at_ms,
+            expected,
+        };
+        run_departure_steps([
+            step("the pointer leaves the band", true, 1000, PollRate::Fast),
+            step("half a second later", false, 1500, PollRate::Fast),
+            step("the hold has ended", false, 1501, PollRate::Slow),
+            step(
+                "a later departure starts a new one",
+                true,
+                2000,
+                PollRate::Fast,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn the_departure_hold_never_outlasts_one_and_a_half_seconds() {
+        let step = |case, left, at_ms, expected| DepartureStep {
+            case,
+            left,
+            sent: true,
+            at_ms,
+            expected,
+        };
+        run_departure_steps([
+            step(
+                "the pointer leaves, the Dock moving",
+                true,
+                1000,
+                PollRate::Fast,
+            ),
+            step("still moving", false, 2000, PollRate::Fast),
+            step("1.5 s after leaving", false, 2500, PollRate::Fast),
+            step("moving past the cap: Slow", false, 2501, PollRate::Slow),
+            step("still moving: Slow", false, 3000, PollRate::Slow),
+        ]);
     }
 
     struct LaunchStep {

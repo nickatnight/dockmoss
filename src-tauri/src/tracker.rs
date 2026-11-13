@@ -432,13 +432,6 @@ impl Activity {
     /// The pointer has just left the Dock, and the Dock auto-hides, so it is
     /// about to slide off screen. Reads hold `Fast` until one sees it gone,
     /// for at most `HIDE_WAIT`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "called once the dock tracker reads the auto-hide setting"
-        )
-    )]
     pub fn dock_hiding(&mut self, at: Instant) {
         self.hide_hold = Some(HideHold {
             since: at,

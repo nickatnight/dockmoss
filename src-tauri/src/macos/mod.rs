@@ -3,6 +3,7 @@ pub mod ax;
 pub mod cursor;
 pub mod dock;
 pub mod dock_observer;
+pub mod dock_prefs;
 pub mod login_item;
 pub mod overlay;
 pub mod screen;

@@ -1,5 +1,4 @@
-//! The Dock's own settings, read from its preferences domain. These are
-//! local reads through `cfprefsd`; the Dock process is not asked.
+//! Local reads through `cfprefsd`; the Dock process is not asked.
 
 use objc2_core_foundation::{
     CFBoolean, CFPreferencesAppSynchronize, CFPreferencesCopyAppValue, CFString,

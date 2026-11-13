@@ -85,10 +85,7 @@ pub struct Tick {
     pub proximity_rate: PollRate,
     /// The Dock is hidden and the pointer is at the edge it slides in from.
     pub awaits_reveal: bool,
-    /// The Dock's bounds are on the display.
     pub dock_on_screen: bool,
-    /// The pointer was over the shown Dock at the last read and is now
-    /// outside it, with the Dock still shown.
     pub left_dock: bool,
 }
 
@@ -430,9 +427,6 @@ impl Activity {
         })
     }
 
-    /// The pointer has just left the Dock, and the Dock auto-hides, so it is
-    /// about to slide off screen. Reads hold `Fast` until one sees it gone,
-    /// for at most `HIDE_WAIT`.
     pub fn dock_hiding(&mut self, at: Instant) {
         self.hide_hold = Some(HideHold {
             since: at,
@@ -1562,7 +1556,6 @@ mod tests {
 
     struct HideStep {
         case: &'static str,
-        /// The read saw the pointer leave the Dock, and the Dock auto-hides.
         left: bool,
         dock_on_screen: bool,
         sent: bool,
@@ -1588,7 +1581,6 @@ mod tests {
         }
     }
 
-    /// The pointer rests far above the Dock, so only a hold reads `Fast`.
     fn run_hide_steps(steps: impl IntoIterator<Item = HideStep>) {
         let start = Instant::now();
         let mut activity = Activity::default();
@@ -1613,8 +1605,6 @@ mod tests {
     #[test]
     fn an_auto_hidden_dock_is_read_fast_from_the_exit_until_a_read_sees_it_off_screen() {
         use PollRate::{Fast, Slow};
-        // Job 022: the Dock's AX rect began to move 13 to 15 ms after the
-        // exit and left the display 268 to 273 ms after it.
         run_hide_steps([
             hide_step("the pointer leaves", true, true, false, 0, Fast),
             hide_step("the slide begins", false, true, true, 17, Fast),

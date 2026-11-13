@@ -38,9 +38,10 @@ const SWITCH_HOLD_CAP: Duration = Duration::from_millis(1200);
 /// close to the Dock's bounds counts as over it.
 const OVER_DOCK_MARGIN: f64 = 8.0;
 /// After the pointer leaves an auto-hidden Dock, it slides off screen: its
-/// AX rect left the display 268 to 273 ms after the exit (job 022). `Fast`
-/// holds until a read sees it gone, or this long, so a Dock held open by a
-/// menu or a drag goes back to `Slow`.
+/// AX rect left the display 268 to 273 ms after the exit with 63 pt tiles,
+/// and 215 to 217 ms after it with 12 pt tiles (job 022). `Fast` holds until
+/// a read sees it gone, or this long, so a Dock held open by a menu or a
+/// drag goes back to `Slow`.
 const HIDE_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

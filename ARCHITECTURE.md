@@ -46,7 +46,7 @@ Threads talk over channels. Nothing else touches the launch-log thread's state; 
 
 Every Accessibility read costs the Dock process CPU, so the tracker reads fast only while something on screen can move (`tracker.rs`, `Activity`):
 
-- **60 Hz** while the pointer is near the Dock and moving, within 250 ms of the last frame sent, while the pointer waits at a hidden Dock's edge (for 1 s), or during an app launch (about 2 s, so the bouncing icon is followed).
+- **60 Hz** while the pointer is near the Dock and moving, within 250 ms of the last frame sent, while the pointer waits at a hidden Dock's edge (for 1 s), during an app launch (about 2 s, so the bouncing icon is followed), or after the pointer leaves a Dock that auto-hides, until a read sees the Dock off screen (at most 1 s, so its slide out is followed). The auto-hide setting is read from the Dock's preferences (`macos/dock_prefs.rs`) on that exit only, never on every read.
 - **10 Hz pointer-only checks**, with no Dock read, while the pointer rests near the Dock.
 - **2 Hz** otherwise.
 

@@ -1,6 +1,8 @@
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior, NSWindowLevel};
+use objc2_app_kit::{
+    NSWindow, NSWindowAnimationBehavior, NSWindowCollectionBehavior, NSWindowLevel,
+};
 use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey};
 use tauri::WebviewWindow;
 
@@ -41,6 +43,11 @@ pub fn pin_above_dock(
     // Closing Settings with no app to hand focus back to hides the app; the
     // moss must stay.
     ns_window.setCanHide(false);
+
+    // AppKit's default animation scales the window in from about 99% over
+    // about 90 ms at each order-in, which moves moss at the bottom of the
+    // screen up to 5 pt off its icon (job 021).
+    ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
 
     let overlay = ns_window.level();
     ensure_raised(dock, overlay)?;

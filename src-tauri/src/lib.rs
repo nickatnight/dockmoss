@@ -714,6 +714,7 @@ mod dock_tracker {
             .name("dock-tracker".into())
             .spawn(move || track_dock(&tracked, &messages, display, overlay))?;
         watch_launches(inbox.clone(), mtm);
+        watch_space_changes(inbox.clone(), mtm);
         if let Err(error) = spawn_observer(app.clone(), inbox) {
             tracing::warn!(%error, "dock hover observer not started; entry is polled");
         }
@@ -725,6 +726,17 @@ mod dock_tracker {
             move |app| {
                 if app.can_have_dock_icon && tracker.send(TrackerMessage::AppLaunching).is_err() {
                     tracing::debug!("app launch not passed on: the dock tracker stopped");
+                }
+            },
+            mtm,
+        );
+    }
+
+    fn watch_space_changes(tracker: Sender<TrackerMessage>, mtm: macos::MainThreadMarker) {
+        macos::workspace::on_active_space_changed(
+            move || {
+                if tracker.send(TrackerMessage::SpaceChanged).is_err() {
+                    tracing::debug!("space change not passed on: the dock tracker stopped");
                 }
             },
             mtm,
@@ -774,7 +786,7 @@ mod dock_tracker {
                 reader.read()
             });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
-            let tick = tracker.tick(read, cursor);
+            let tick = tracker.tick(read, cursor, started);
             let next_rate = activity.rate(
                 tick.proximity_rate,
                 tick.awaits_reveal,
@@ -789,7 +801,7 @@ mod dock_tracker {
             perform(app, tick, &mut watcher);
             let now = Instant::now();
             deadline = activity.wait_for_read(
-                tracker::next_deadline(deadline, rate, now),
+                tracker.read_due(tracker::next_deadline(deadline, rate, now)),
                 now,
                 |until| {
                     drain_inbox_until(
@@ -803,7 +815,7 @@ mod dock_tracker {
                 },
                 macos::cursor::location,
             );
-            launched.hand_to(&mut activity, tracker.dock_on_screen());
+            launched.hand_to(&mut activity, tracker.overlay_shown());
         }
     }
 
@@ -825,12 +837,19 @@ mod dock_tracker {
                 Ok(TrackerMessage::ScreenParametersChanged) => *screen_changed = true,
                 Ok(TrackerMessage::OverlayOrderFailed) => tracker.order_failed(),
                 Ok(TrackerMessage::DockHoverChanged) => {
+                    tracker.record_switch_end();
                     return Woken::DockHover { at: Instant::now() };
                 }
                 Ok(TrackerMessage::AppLaunching) => {
                     let at = Instant::now();
                     launched.record(at);
                     return Woken::AppLaunch { at };
+                }
+                Ok(TrackerMessage::SpaceChanged) => {
+                    if tracker.awaits_switch_end() {
+                        tracker.record_switch_end();
+                        return Woken::SpaceChanged { at: Instant::now() };
+                    }
                 }
                 Err(RecvTimeoutError::Timeout) => return Woken::Due,
                 Err(RecvTimeoutError::Disconnected) => {
@@ -975,7 +994,7 @@ mod dock_tracker {
         use super::drain_inbox_until;
         use crate::commands::TrackerMessage;
         use crate::dock::RawDockChild;
-        use crate::geometry::{Display, ScreenRect};
+        use crate::geometry::{Display, ScreenPoint, ScreenRect};
         use crate::tracker::{PendingLaunch, Tracker, Visibility, Woken};
 
         const PRIMARY_2X: Display = Display {
@@ -1068,6 +1087,128 @@ mod dock_tracker {
             assert!(screen_changed);
         }
 
+        const FAR: Option<ScreenPoint> = Some(ScreenPoint { x: 720.0, y: 300.0 });
+
+        /// A tracker whose overlay is held after a switch from a full-screen
+        /// Space: the Dock read off screen at `start`, back 300 ms later.
+        fn held_after_a_switch(start: Instant) -> Tracker {
+            let off_screen = RawDockChild {
+                rect: Some(ScreenRect {
+                    y: 990.0,
+                    ..safari().rect.expect("a rect")
+                }),
+                ..safari()
+            };
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            tracker.tick(Ok(vec![off_screen]), FAR, start);
+            let held = tracker.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(300));
+            assert_eq!(held.overlay, None, "held");
+            tracker
+        }
+
+        #[test]
+        fn a_dock_hover_change_brings_a_held_overlay_in_on_the_next_read() {
+            let (inbox, messages) = mpsc::channel();
+            let start = Instant::now();
+            let mut tracker = held_after_a_switch(start);
+            inbox
+                .send(TrackerMessage::DockHoverChanged)
+                .expect("the receiver is alive");
+            let mut watcher = None;
+            let mut screen_changed = false;
+            let mut launched = PendingLaunch::default();
+
+            drain_inbox_until(
+                Instant::now() + Duration::from_secs(5),
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+            let next = tracker.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(900));
+
+            assert_eq!(next.overlay, Some(Visibility::Shown));
+        }
+
+        #[test]
+        fn a_space_change_ends_the_wait_only_while_the_overlay_is_held() {
+            let start = Instant::now();
+            let mut shown = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            shown.tick(Ok(vec![safari()]), FAR, start);
+            let mut held = held_after_a_switch(start);
+            let delay = Duration::from_millis(50);
+
+            for (case, tracker, ends_at_once) in [
+                ("Dock shown: no cut", &mut shown, false),
+                ("overlay held: read now", &mut held, true),
+            ] {
+                let (inbox, messages) = mpsc::channel();
+                inbox
+                    .send(TrackerMessage::SpaceChanged)
+                    .expect("the receiver is alive");
+                let mut watcher = None;
+                let mut screen_changed = false;
+                let mut launched = PendingLaunch::default();
+
+                let waited = Instant::now();
+                let woken = drain_inbox_until(
+                    waited + delay,
+                    &messages,
+                    tracker,
+                    &mut watcher,
+                    &mut screen_changed,
+                    &mut launched,
+                );
+
+                assert_eq!(
+                    matches!(woken, Woken::SpaceChanged { .. }),
+                    ends_at_once,
+                    "{case}: {woken:?}"
+                );
+                if !ends_at_once {
+                    assert!(waited.elapsed() >= delay, "{case}: the wait ran out");
+                }
+            }
+            let next = held.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(900));
+            assert_eq!(next.overlay, Some(Visibility::Shown), "the next read");
+        }
+
+        #[test]
+        fn a_space_change_while_nothing_is_held_does_not_cancel_the_next_hold() {
+            let start = Instant::now();
+            let off_screen = RawDockChild {
+                rect: Some(ScreenRect {
+                    y: 990.0,
+                    ..safari().rect.expect("a rect")
+                }),
+                ..safari()
+            };
+            let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+            tracker.tick(Ok(vec![off_screen]), FAR, start);
+            let (inbox, messages) = mpsc::channel();
+            inbox
+                .send(TrackerMessage::SpaceChanged)
+                .expect("the receiver is alive");
+            let mut watcher = None;
+            let mut screen_changed = false;
+            let mut launched = PendingLaunch::default();
+
+            let woken = drain_inbox_until(
+                Instant::now() + Duration::from_millis(20),
+                &messages,
+                &mut tracker,
+                &mut watcher,
+                &mut screen_changed,
+                &mut launched,
+            );
+            let back = tracker.tick(Ok(vec![safari()]), FAR, start + Duration::from_millis(400));
+
+            assert_eq!(woken, Woken::Due, "not held: no wake");
+            assert_eq!(back.overlay, None, "the switch back is held");
+            assert!(tracker.awaits_switch_end());
+        }
+
         #[test]
         fn an_app_launch_ends_the_wait_at_once_and_is_kept_for_the_next_tick() {
             let (inbox, messages) = mpsc::channel();
@@ -1143,10 +1284,11 @@ mod dock_tracker {
 
         #[test]
         fn a_new_watcher_gets_the_current_frame_on_the_next_tick() {
+            let now = Instant::now();
             let (inbox, messages) = mpsc::channel();
             let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
-            let first = tracker.tick(Ok(vec![safari()]), None);
-            let unchanged = tracker.tick(Ok(vec![safari()]), None);
+            let first = tracker.tick(Ok(vec![safari()]), None, now);
+            let unchanged = tracker.tick(Ok(vec![safari()]), None, now);
             inbox
                 .send(TrackerMessage::Watch(Channel::new(|_| Ok(()))))
                 .expect("the receiver is alive");
@@ -1162,7 +1304,7 @@ mod dock_tracker {
                 &mut screen_changed,
                 &mut launched,
             );
-            let after_watch = tracker.tick(Ok(vec![safari()]), None);
+            let after_watch = tracker.tick(Ok(vec![safari()]), None, now);
 
             assert!(first.send.is_some() && unchanged.send.is_none(), "baseline");
             assert!(watcher.is_some(), "the watcher is stored");

@@ -42,7 +42,7 @@ All objc2, AppKit and AX calls, the `mdls` subprocess, and every `unsafe` block 
 - Every `unsafe` block is in `macos/`, as small as the call it wraps, with a `// SAFETY:` comment. The item holding it opts in with `#[expect(unsafe_code, reason = "...")]`.
 - AppKit runs on the main thread: take a `MainThreadMarker`, and reach it from elsewhere with `app.run_on_main_thread`.
 - AX calls are blocking IPC to the Dock. Never make them on the main thread. Release CF objects through `CFRetained`, never `CFRelease`.
-- Every AX read costs the Dock CPU. Read fast only while something moves. Any new reason to poll fast must be bounded in time and go in `tracker.rs`'s `Activity` with table tests (ADR-0012). Only `DockHoverChanged` and `AppLaunching` may cut a wait short, and never to less than one `Fast` interval after the last read (ADR-0007, ADR-0017).
+- Every AX read costs the Dock CPU. Read fast only while something moves. Any new reason to poll fast must be bounded in time and go in `tracker.rs`'s `Activity` with table tests (ADR-0012). Only `DockHoverChanged`, `AppLaunching` and, while the overlay is held after a Space switch, `SpaceChanged` may cut a wait short, and never to less than one `Fast` interval after the last read (ADR-0007, ADR-0017, ADR-0020).
 - The `dock-observer` is optional (polling is the fallback), runs on its own `CFRunLoop`, and registers only when `dock::HoverObserverGate` allows.
 - Cast `window.ns_window()` to `&NSWindow` only in `macos/overlay.rs`.
 

@@ -10,7 +10,7 @@ DockMoss is a Tauri 2 app with a Rust backend and two webviews: a transparent ov
           │       │                                   │
    reads  │       │ hover changed                     │ app used
           ▼       ▼                                   ▼
-   ┌──────────────────┐  app launching      ┌──────────────────┐
+   ┌──────────────────┐ app launch, Space   ┌──────────────────┐
    │   dock-tracker   │◄────────────────────│    main thread   │
    │  (+dock-observer)│                     │ AppKit, tray,    │
    └────────┬─────────┘                     │ windows          │
@@ -50,13 +50,15 @@ Every Accessibility read costs the Dock process CPU, so the tracker reads fast o
 - **10 Hz pointer-only checks**, with no Dock read, while the pointer rests near the Dock.
 - **2 Hz** otherwise.
 
-Two notices end a slow wait early: the Dock's hover change (via `dock-observer`) and an app launch. Neither can make reads closer than 1/60 s apart.
+Two notices end a slow wait early: the Dock's hover change (via `dock-observer`) and an app launch. A third, the Space change, does so only while the overlay is held after a Space switch (below). None can make reads closer than 1/60 s apart.
 
 The Dock reports rects in global top-left coordinates. `geometry::to_overlay_local` is the one place that converts them to overlay pixels.
 
 ## The overlay
 
-A transparent, click-through window covers the main display one level above the Dock, on every Space. It is ordered out while the Dock is hidden or can't be read.
+A transparent, click-through window covers the main display one level above the Dock, on every Space. It is ordered out while the Dock is hidden or can't be read, and it is ordered in without AppKit's appear animation.
+
+Every window DockMoss can own slides with a Space switch's animation; only the Dock stays still. So when the Dock comes back from off screen (a switch from a full-screen Space) with the pointer more than 150 pt above the bottom edge, the tracker keeps the overlay out, and the webview keeps the empty frame it got when the Dock left, until the switch ends: the Dock's hover notice or `NSWorkspace`'s Space notice, both posted at the end of the animation, or 1.2 s. A notice counts only while the overlay is held, so one left over from the switch to full screen cannot cancel the hold of a quick switch back. Then it orders the overlay in with a fresh frame, so the moss appears in place. With the pointer nearer the edge the return is taken as an auto-hide reveal, and the moss follows the Dock up at once (`tracker.rs`, `Sighting`; ADR-0020).
 
 The renderer (`src/render/`) has no frame loop while nothing changes. It redraws only when a new Dock or growth frame arrives:
 

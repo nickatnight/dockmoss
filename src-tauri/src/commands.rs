@@ -27,6 +27,7 @@ pub enum TrackerMessage {
     OverlayOrderFailed,
     DockHoverChanged,
     AppLaunching,
+    SpaceChanged,
 }
 
 pub struct TrackerInbox(pub Sender<TrackerMessage>);

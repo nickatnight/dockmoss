@@ -429,9 +429,15 @@ impl Activity {
             .is_some_and(|since| holds(since, self.last_sent, LAUNCH_SETTLE, LAUNCH_HOLD_CAP, now))
     }
 
-    /// The pointer left the band of a Dock on screen (`Tick::left_dock`).
-    pub fn dock_left(&mut self, at: Instant) {
-        self.departed = Some(at);
+    /// Starts the departure hold when the pointer left the band of a Dock on
+    /// screen (`Tick::left_dock`), and ends it once the overlay is out: a Dock
+    /// that has slid off screen has nothing left to follow.
+    pub fn departure(&mut self, left_dock: bool, overlay_shown: bool, at: Instant) {
+        if !overlay_shown {
+            self.departed = None;
+        } else if left_dock {
+            self.departed = Some(at);
+        }
     }
 
     fn following_departure(&self, now: Instant) -> bool {
@@ -1915,6 +1921,7 @@ mod tests {
     struct DepartureStep {
         case: &'static str,
         left: bool,
+        shown: bool,
         sent: bool,
         at_ms: u64,
         expected: PollRate,
@@ -1927,9 +1934,7 @@ mod tests {
         activity.rate(PollRate::Fast, false, Some(IN_BAND), true, start);
         for step in steps {
             let now = at(step.at_ms);
-            if step.left {
-                activity.dock_left(now);
-            }
+            activity.departure(step.left, step.shown, now);
             let rate = activity.rate(PollRate::Slow, false, Some(FAR), step.sent, now);
             assert_eq!(rate, step.expected, "{}", step.case);
         }
@@ -1940,6 +1945,7 @@ mod tests {
         let step = |case, left, sent, at_ms, expected| DepartureStep {
             case,
             left,
+            shown: true,
             sent,
             at_ms,
             expected,
@@ -1984,6 +1990,7 @@ mod tests {
         let step = |case, left, at_ms, expected| DepartureStep {
             case,
             left,
+            shown: true,
             sent: false,
             at_ms,
             expected,
@@ -2002,10 +2009,55 @@ mod tests {
     }
 
     #[test]
+    fn the_departure_hold_ends_once_the_dock_has_slid_off_screen() {
+        let step = |case, left, shown, at_ms, expected| DepartureStep {
+            case,
+            left,
+            shown,
+            sent: true,
+            at_ms,
+            expected,
+        };
+        run_departure_steps([
+            step(
+                "the pointer leaves the band",
+                true,
+                true,
+                1000,
+                PollRate::Fast,
+            ),
+            step("the Dock slides out", false, true, 1200, PollRate::Fast),
+            step(
+                "the empty frame orders the overlay out: Slow at once",
+                false,
+                false,
+                1340,
+                PollRate::Slow,
+            ),
+            step(
+                "a departure reported with the overlay out starts no hold",
+                true,
+                false,
+                1400,
+                PollRate::Slow,
+            ),
+            step("the Dock back on screen", false, true, 2000, PollRate::Slow),
+            step(
+                "a later departure holds again",
+                true,
+                true,
+                2100,
+                PollRate::Fast,
+            ),
+        ]);
+    }
+
+    #[test]
     fn the_departure_hold_never_outlasts_one_and_a_half_seconds() {
         let step = |case, left, at_ms, expected| DepartureStep {
             case,
             left,
+            shown: true,
             sent: true,
             at_ms,
             expected,

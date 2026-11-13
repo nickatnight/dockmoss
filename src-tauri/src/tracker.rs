@@ -39,9 +39,9 @@ const SWITCH_HOLD_CAP: Duration = Duration::from_millis(1200);
 const OVER_DOCK_MARGIN: f64 = 8.0;
 /// After the pointer leaves an auto-hidden Dock, it slides off screen: its
 /// AX rect left the display 268 to 273 ms after the exit with 63 pt tiles,
-/// and 215 to 217 ms after it with 12 pt tiles (job 022). `Fast` holds until
-/// a read sees it gone, or this long, so a Dock held open by a menu or a
-/// drag goes back to `Slow`.
+/// 269 to 274 ms with 59 pt tiles, and 215 to 217 ms with 12 pt tiles
+/// (job 022). `Fast` holds until a read sees it gone, or this long, so a
+/// Dock held open by a menu or a drag goes back to `Slow`.
 const HIDE_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1728,60 +1728,43 @@ mod tests {
     }
 
     /// One hide through `Tracker::tick` and `Activity::rate_after_tick`, as
-    /// the dock tracker runs it: the pointer rests on the shown Dock, moves
-    /// 300 pt up, and the Dock slides to the bottom edge and off it. Returns
-    /// the rate after each read from the exit on, and how often the
-    /// auto-hide setting was asked for.
+    /// the dock tracker runs it: the pointer rests on the shown Dock, then
+    /// moves 300 pt up at 1000 ms, and `after_exit` gives each later read and
+    /// its time after the exit. Returns the rate after each read from the
+    /// exit on, and how often the auto-hide setting was asked for.
     fn follow_a_hide(
         auto_hide: bool,
-        slide: Vec<Result<Vec<RawDockChild>, DockError>>,
+        after_exit: Vec<(Result<Vec<RawDockChild>, DockError>, u64)>,
     ) -> (Vec<PollRate>, u32) {
+        const EXIT_MS: u64 = 1000;
         let start = Instant::now();
-        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let over = point(720.0, 950.0);
+        let up_300 = point(720.0, 650.0);
+        let before_exit = [
+            (Ok(dock_at(920.0)), over, 0),
+            (Ok(dock_at(920.0)), over, 500),
+            (Ok(dock_at(920.0)), up_300, EXIT_MS),
+        ];
+        let reads = before_exit.into_iter().chain(
+            after_exit
+                .into_iter()
+                .map(|(children, ms_after)| (children, up_300, EXIT_MS + ms_after)),
+        );
         let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
         let mut activity = Activity::default();
         let mut asked = 0;
-        let mut read = |activity: &mut Activity,
-                        tracker: &mut Tracker,
-                        children: Result<Vec<RawDockChild>, DockError>,
-                        cursor: ScreenPoint,
-                        at: Instant| {
+        let mut rates = Vec::new();
+        for (children, cursor, at_ms) in reads {
+            let at = start.checked_add(ms(at_ms)).expect("in range");
             let tick = tracker.tick(children, Some(cursor), at);
-            activity.rate_after_tick(
-                &tick,
-                Some(cursor),
-                || {
-                    asked += 1;
-                    auto_hide
-                },
-                at,
-            )
-        };
-        let over = point(720.0, 950.0);
-        let up_300 = point(720.0, 650.0);
-        read(&mut activity, &mut tracker, Ok(dock_at(920.0)), over, at(0));
-        read(
-            &mut activity,
-            &mut tracker,
-            Ok(dock_at(920.0)),
-            over,
-            at(500),
-        );
-        let mut rates = vec![read(
-            &mut activity,
-            &mut tracker,
-            Ok(dock_at(920.0)),
-            up_300,
-            at(1000),
-        )];
-        for (step, children) in (1..).zip(slide) {
-            rates.push(read(
-                &mut activity,
-                &mut tracker,
-                children,
-                up_300,
-                at(1000 + 17 * step),
-            ));
+            let ask = || {
+                asked += 1;
+                auto_hide
+            };
+            let rate = activity.rate_after_tick(&tick, Some(cursor), ask, at);
+            if at_ms >= EXIT_MS {
+                rates.push(rate);
+            }
         }
         (rates, asked)
     }
@@ -1789,7 +1772,13 @@ mod tests {
     #[test]
     fn a_hide_through_tick_and_activity_reads_fast_only_when_the_dock_auto_hides() {
         use PollRate::{Fast, Slow};
-        let slide = || vec![Ok(dock_at(940.0)), Ok(dock_at(965.0)), Ok(dock_at(987.0))];
+        let slide = || {
+            vec![
+                (Ok(dock_at(940.0)), 17),
+                (Ok(dock_at(965.0)), 34),
+                (Ok(dock_at(987.0)), 51),
+            ]
+        };
 
         assert_eq!(
             follow_a_hide(true, slide()),
@@ -1804,12 +1793,24 @@ mod tests {
     }
 
     #[test]
+    fn a_hold_started_through_tick_and_activity_runs_one_second_from_the_exit() {
+        use PollRate::{Fast, Slow};
+        let held_open = vec![(Ok(dock_at(920.0)), 1000), (Ok(dock_at(920.0)), 1017)];
+
+        assert_eq!(
+            follow_a_hide(true, held_open).0,
+            vec![Fast, Fast, Slow],
+            "the cap counts from the exit read"
+        );
+    }
+
+    #[test]
     fn a_failed_read_during_a_hide_ends_the_hold() {
         use PollRate::{Fast, Slow};
         let slide = vec![
-            Ok(dock_at(940.0)),
-            Err(DockError::CannotComplete),
-            Ok(dock_at(965.0)),
+            (Ok(dock_at(940.0)), 17),
+            (Err(DockError::CannotComplete), 34),
+            (Ok(dock_at(965.0)), 51),
         ];
 
         assert_eq!(

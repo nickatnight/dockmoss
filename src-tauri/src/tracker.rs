@@ -1557,7 +1557,7 @@ mod tests {
 
     struct HideStep {
         case: &'static str,
-        left: bool,
+        dock_hiding: bool,
         dock_on_screen: bool,
         sent: bool,
         at_ms: u64,
@@ -1566,7 +1566,7 @@ mod tests {
 
     fn hide_step(
         case: &'static str,
-        left: bool,
+        dock_hiding: bool,
         dock_on_screen: bool,
         sent: bool,
         at_ms: u64,
@@ -1574,7 +1574,7 @@ mod tests {
     ) -> HideStep {
         HideStep {
             case,
-            left,
+            dock_hiding,
             dock_on_screen,
             sent,
             at_ms,
@@ -1588,7 +1588,7 @@ mod tests {
         activity.rate(PollRate::Slow, false, true, Some(FAR), false, start);
         for step in steps {
             let at = start.checked_add(ms(1000 + step.at_ms)).expect("in range");
-            if step.left {
+            if step.dock_hiding {
                 activity.dock_hiding(at);
             }
             let rate = activity.rate(

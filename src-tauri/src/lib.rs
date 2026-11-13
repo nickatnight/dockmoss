@@ -787,21 +787,7 @@ mod dock_tracker {
             });
             tracing::debug!(elapsed_us = micros(started.elapsed()), ?rate, "dock read");
             let tick = tracker.tick(read, cursor, started);
-            if tick.pointer_left_shown_dock {
-                let auto_hide = macos::dock_prefs::auto_hide();
-                tracing::debug!(auto_hide, "pointer left the dock");
-                if auto_hide {
-                    activity.dock_hiding(started);
-                }
-            }
-            let next_rate = activity.rate(
-                tick.proximity_rate,
-                tick.awaits_reveal,
-                tick.dock_on_screen,
-                cursor,
-                tick.send.is_some(),
-                started,
-            );
+            let next_rate = activity.rate_after_tick(&tick, cursor, read_auto_hide, started);
             if next_rate != rate {
                 tracing::debug!(rate = ?next_rate, "dock poll rate changed");
                 rate = next_rate;
@@ -985,6 +971,17 @@ mod dock_tracker {
         if inbox.0.send(TrackerMessage::OverlayOrderFailed).is_err() {
             tracing::warn!("overlay ordering not retried: the dock tracker stopped");
         }
+    }
+
+    fn read_auto_hide() -> bool {
+        let asked = Instant::now();
+        let auto_hide = macos::dock_prefs::auto_hide();
+        tracing::debug!(
+            auto_hide,
+            elapsed_us = micros(asked.elapsed()),
+            "pointer left the dock"
+        );
+        auto_hide
     }
 
     fn micros(duration: Duration) -> u64 {

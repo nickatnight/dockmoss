@@ -428,14 +428,48 @@ impl Activity {
         })
     }
 
-    pub fn dock_hiding(&mut self, at: Instant) {
+    /// A Dock that auto-hides slides off screen once the pointer leaves it,
+    /// so the exit starts a hide hold; one that does not starts nothing. A
+    /// later exit restarts the hold.
+    pub fn pointer_left_dock(&mut self, at: Instant, auto_hide: bool) {
+        if !auto_hide {
+            return;
+        }
+        if let Some(replaced) = self.hide_hold.take() {
+            tracing::debug!(reads = replaced.reads, "dock hide hold restarted");
+        }
         self.hide_hold = Some(HideHold {
             since: at,
             reads: 0,
         });
     }
 
-    fn holding_for_hide(&mut self, dock_on_screen: bool, now: Instant) -> bool {
+    /// The rate after `tick`, read at `now`. `auto_hide` is asked only when
+    /// the tick reports the pointer leaving the shown Dock, never per read.
+    pub fn rate_after_tick(
+        &mut self,
+        tick: &Tick,
+        cursor: Option<ScreenPoint>,
+        auto_hide: impl FnOnce() -> bool,
+        now: Instant,
+    ) -> PollRate {
+        if tick.pointer_left_shown_dock {
+            self.pointer_left_dock(now, auto_hide());
+        }
+        self.rate(
+            tick.proximity_rate,
+            tick.awaits_reveal,
+            tick.dock_on_screen,
+            cursor,
+            tick.send.is_some(),
+            now,
+        )
+    }
+
+    /// Counts this read into a running hide hold, or ends the hold when the
+    /// read did not find the Dock on screen (off it, or a failed read) or
+    /// the cap has passed.
+    fn advance_hide_hold(&mut self, dock_on_screen: bool, now: Instant) -> bool {
         let Some(hold) = self.hide_hold.as_mut() else {
             return false;
         };
@@ -447,7 +481,7 @@ impl Activity {
         tracing::debug!(
             reads = hold.reads,
             held_ms = u64::try_from(held_for.as_millis()).unwrap_or(u64::MAX),
-            off_screen = !dock_on_screen,
+            dock_on_screen,
             "dock hide hold ended"
         );
         self.hide_hold = None;
@@ -483,7 +517,7 @@ impl Activity {
         if !launching {
             self.launch_hold_started = None;
         }
-        let hiding = self.holding_for_hide(dock_on_screen, now);
+        let hiding = self.advance_hide_hold(dock_on_screen, now);
         if (near && moving) || launching || hiding {
             PollRate::Fast
         } else {
@@ -1499,6 +1533,19 @@ mod tests {
             ("300 pt up from that strip", shown(), up_300, true),
             ("still outside: no second report", shown(), up_300, false),
             ("back over the Dock", shown(), over, false),
+            (
+                "6 pt above the tiles: still over",
+                shown(),
+                Some(point(720.0, 914.0)),
+                false,
+            ),
+            (
+                "10 pt above the tiles",
+                shown(),
+                Some(point(720.0, 910.0)),
+                true,
+            ),
+            ("over it once more", shown(), over, false),
             ("100 pt up", shown(), Some(point(720.0, 850.0)), true),
             ("the Dock is off screen", hidden(), up_300, false),
             ("revealed, the pointer over it", shown(), over, false),
@@ -1555,9 +1602,19 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    enum Exit {
+        /// No exit at this read.
+        Stays,
+        /// The pointer left the Dock, and the Dock auto-hides.
+        AutoHiding,
+        /// The pointer left the Dock, which does not auto-hide.
+        NotAutoHiding,
+    }
+
     struct HideStep {
         case: &'static str,
-        dock_hiding: bool,
+        exit: Exit,
         dock_on_screen: bool,
         at_ms: u64,
         expected: PollRate,
@@ -1565,14 +1622,14 @@ mod tests {
 
     fn hide_step(
         case: &'static str,
-        dock_hiding: bool,
+        exit: Exit,
         dock_on_screen: bool,
         at_ms: u64,
         expected: PollRate,
     ) -> HideStep {
         HideStep {
             case,
-            dock_hiding,
+            exit,
             dock_on_screen,
             at_ms,
             expected,
@@ -1585,8 +1642,10 @@ mod tests {
         activity.rate(PollRate::Slow, false, true, Some(FAR), false, start);
         for step in steps {
             let at = start.checked_add(ms(1000 + step.at_ms)).expect("in range");
-            if step.dock_hiding {
-                activity.dock_hiding(at);
+            match step.exit {
+                Exit::Stays => {}
+                Exit::AutoHiding => activity.pointer_left_dock(at, true),
+                Exit::NotAutoHiding => activity.pointer_left_dock(at, false),
             }
             let rate = activity.rate(
                 PollRate::Slow,
@@ -1602,48 +1661,162 @@ mod tests {
 
     #[test]
     fn an_auto_hidden_dock_is_read_fast_from_the_exit_until_a_read_sees_it_off_screen() {
+        use Exit::{AutoHiding, Stays};
         use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", true, true, 0, Fast),
-            hide_step("the slide begins", false, true, 17, Fast),
-            hide_step("still sliding", false, true, 267, Fast),
-            hide_step("a read sees it off screen", false, false, 283, Slow),
-            hide_step("hidden, nothing moves", false, false, 300, Slow),
+            hide_step("the pointer leaves", AutoHiding, true, 0, Fast),
+            hide_step("the slide begins", Stays, true, 17, Fast),
+            hide_step("still sliding", Stays, true, 267, Fast),
+            hide_step("a read sees it off screen", Stays, false, 283, Slow),
+            hide_step("hidden, nothing moves", Stays, false, 300, Slow),
         ]);
     }
 
     #[test]
     fn a_dock_that_stays_shown_is_read_fast_for_at_most_one_second_after_the_exit() {
+        use Exit::{AutoHiding, Stays};
         use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", true, true, 0, Fast),
-            hide_step("held open, 500 ms", false, true, 500, Fast),
-            hide_step("held open, 1000 ms", false, true, 1000, Fast),
-            hide_step("held open past the cap", false, true, 1017, Slow),
-            hide_step("no restart while it stays", false, true, 1500, Slow),
+            hide_step("the pointer leaves", AutoHiding, true, 0, Fast),
+            hide_step("held open, 500 ms", Stays, true, 500, Fast),
+            hide_step("held open, 1000 ms", Stays, true, 1000, Fast),
+            hide_step("held open past the cap", Stays, true, 1017, Slow),
+            hide_step("no restart while it stays", Stays, true, 1500, Slow),
         ]);
     }
 
     #[test]
     fn each_exit_from_an_auto_hidden_dock_starts_its_own_hold() {
+        use Exit::{AutoHiding, Stays};
         use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", true, true, 0, Fast),
-            hide_step("off screen", false, false, 283, Slow),
-            hide_step("revealed and left again", true, true, 2000, Fast),
-            hide_step("1000 ms after the second exit", false, true, 3000, Fast),
-            hide_step("past its cap", false, true, 3017, Slow),
+            hide_step("the pointer leaves", AutoHiding, true, 0, Fast),
+            hide_step("off screen", Stays, false, 283, Slow),
+            hide_step("revealed and left again", AutoHiding, true, 2000, Fast),
+            hide_step("1000 ms after the second exit", Stays, true, 3000, Fast),
+            hide_step("past its cap", Stays, true, 3017, Slow),
+        ]);
+    }
+
+    #[test]
+    fn an_exit_during_a_hold_restarts_its_cap() {
+        use Exit::{AutoHiding, Stays};
+        use PollRate::{Fast, Slow};
+        run_hide_steps([
+            hide_step("the pointer leaves", AutoHiding, true, 0, Fast),
+            hide_step("held open, 400 ms", Stays, true, 400, Fast),
+            hide_step("back over it and out again", AutoHiding, true, 700, Fast),
+            hide_step("past the first exit's cap", Stays, true, 1017, Fast),
+            hide_step("900 ms after the second exit", Stays, true, 1600, Fast),
+            hide_step("past the second exit's cap", Stays, true, 1717, Slow),
         ]);
     }
 
     #[test]
     fn leaving_a_dock_that_does_not_auto_hide_adds_no_fast_reads() {
-        use PollRate::Slow;
+        use Exit::{AutoHiding, NotAutoHiding, Stays};
+        use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", false, true, 0, Slow),
-            hide_step("17 ms later", false, true, 17, Slow),
-            hide_step("500 ms later", false, true, 500, Slow),
+            hide_step("the pointer leaves", NotAutoHiding, true, 0, Slow),
+            hide_step("17 ms later", Stays, true, 17, Slow),
+            hide_step("500 ms later", Stays, true, 500, Slow),
         ]);
+        run_hide_steps([
+            hide_step("the same exit, auto-hide on", AutoHiding, true, 0, Fast),
+            hide_step("17 ms later", Stays, true, 17, Fast),
+        ]);
+    }
+
+    /// One hide through `Tracker::tick` and `Activity::rate_after_tick`, as
+    /// the dock tracker runs it: the pointer rests on the shown Dock, moves
+    /// 300 pt up, and the Dock slides to the bottom edge and off it. Returns
+    /// the rate after each read from the exit on, and how often the
+    /// auto-hide setting was asked for.
+    fn follow_a_hide(
+        auto_hide: bool,
+        slide: Vec<Result<Vec<RawDockChild>, DockError>>,
+    ) -> (Vec<PollRate>, u32) {
+        let start = Instant::now();
+        let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        let mut activity = Activity::default();
+        let mut asked = 0;
+        let mut read = |activity: &mut Activity,
+                        tracker: &mut Tracker,
+                        children: Result<Vec<RawDockChild>, DockError>,
+                        cursor: ScreenPoint,
+                        at: Instant| {
+            let tick = tracker.tick(children, Some(cursor), at);
+            activity.rate_after_tick(
+                &tick,
+                Some(cursor),
+                || {
+                    asked += 1;
+                    auto_hide
+                },
+                at,
+            )
+        };
+        let over = point(720.0, 950.0);
+        let up_300 = point(720.0, 650.0);
+        read(&mut activity, &mut tracker, Ok(dock_at(920.0)), over, at(0));
+        read(
+            &mut activity,
+            &mut tracker,
+            Ok(dock_at(920.0)),
+            over,
+            at(500),
+        );
+        let mut rates = vec![read(
+            &mut activity,
+            &mut tracker,
+            Ok(dock_at(920.0)),
+            up_300,
+            at(1000),
+        )];
+        for (step, children) in (1..).zip(slide) {
+            rates.push(read(
+                &mut activity,
+                &mut tracker,
+                children,
+                up_300,
+                at(1000 + 17 * step),
+            ));
+        }
+        (rates, asked)
+    }
+
+    #[test]
+    fn a_hide_through_tick_and_activity_reads_fast_only_when_the_dock_auto_hides() {
+        use PollRate::{Fast, Slow};
+        let slide = || vec![Ok(dock_at(940.0)), Ok(dock_at(965.0)), Ok(dock_at(987.0))];
+
+        assert_eq!(
+            follow_a_hide(true, slide()),
+            (vec![Fast, Fast, Fast, Slow], 1),
+            "auto-hide on: asked once, at the exit"
+        );
+        assert_eq!(
+            follow_a_hide(false, slide()),
+            (vec![Slow, Slow, Slow, Slow], 1),
+            "auto-hide off: asked once, no fast read"
+        );
+    }
+
+    #[test]
+    fn a_failed_read_during_a_hide_ends_the_hold() {
+        use PollRate::{Fast, Slow};
+        let slide = vec![
+            Ok(dock_at(940.0)),
+            Err(DockError::CannotComplete),
+            Ok(dock_at(965.0)),
+        ];
+
+        assert_eq!(
+            follow_a_hide(true, slide).0,
+            vec![Fast, Fast, Slow, Slow],
+            "the failed read ends the hold, and a later read on screen does not restart it"
+        );
     }
 
     fn wait_for_read(

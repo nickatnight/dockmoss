@@ -33,6 +33,15 @@ const REVEAL_REACH: f64 = 150.0;
 /// the first read can see the Dock 25 ms after it began, so a switch's hold
 /// lasts at most about 950 ms. The cap bounds a notice that never comes.
 const SWITCH_HOLD_CAP: Duration = Duration::from_millis(1200);
+/// A bottom Dock's tiles end 5 pt above the display's edge (job 022), and a
+/// pointer in that strip keeps an auto-hidden Dock shown. A pointer this
+/// close to the Dock's bounds counts as over it.
+const OVER_DOCK_MARGIN: f64 = 8.0;
+/// After the pointer leaves an auto-hidden Dock, it slides off screen: its
+/// AX rect left the display 268 to 273 ms after the exit (job 022). `Fast`
+/// holds until a read sees it gone, or this long, so a Dock held open by a
+/// menu or a drag goes back to `Slow`.
+const HIDE_WAIT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollRate {
@@ -75,6 +84,11 @@ pub struct Tick {
     pub proximity_rate: PollRate,
     /// The Dock is hidden and the pointer is at the edge it slides in from.
     pub awaits_reveal: bool,
+    /// The Dock's bounds are on the display.
+    pub dock_on_screen: bool,
+    /// The pointer was over the shown Dock at the last read and is now
+    /// outside it, with the Dock still shown.
+    pub left_dock: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +138,7 @@ pub struct Tracker {
     before_order: Visibility,
     sighting: Sighting,
     switch_end_recorded: bool,
+    pointer_over_dock: bool,
 }
 
 impl Tracker {
@@ -142,6 +157,7 @@ impl Tracker {
                 Visibility::Hidden => Sighting::Unknown,
             },
             switch_end_recorded: false,
+            pointer_over_dock: false,
         }
     }
 
@@ -195,6 +211,13 @@ impl Tracker {
         };
         let overlay = send.as_deref().and_then(|sent| self.order(sent));
         let apps = send.as_deref().and_then(|sent| self.apps_changed(sent));
+        let dock_on_screen = bounds.is_some_and(|bounds| overlaps(bounds, self.display.frame()));
+        let over_dock = dock_on_screen
+            && cursor
+                .zip(bounds)
+                .is_some_and(|(cursor, bounds)| distance(cursor, bounds) <= OVER_DOCK_MARGIN);
+        let left_dock = self.pointer_over_dock && dock_on_screen && cursor.is_some() && !over_dock;
+        self.pointer_over_dock = over_dock;
         Tick {
             send,
             log,
@@ -202,6 +225,8 @@ impl Tracker {
             apps,
             proximity_rate: poll_rate(cursor, bounds, self.display),
             awaits_reveal: awaits_reveal(cursor, bounds, self.display),
+            dock_on_screen,
+            left_dock,
         }
     }
 
@@ -376,6 +401,13 @@ pub struct Activity {
     last_sent: Option<Instant>,
     resting: bool,
     launch_hold_started: Option<Instant>,
+    hide_hold: Option<HideHold>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HideHold {
+    since: Instant,
+    reads: u32,
 }
 
 impl Activity {
@@ -397,10 +429,47 @@ impl Activity {
         })
     }
 
+    /// The pointer has just left the Dock, and the Dock auto-hides, so it is
+    /// about to slide off screen. Reads hold `Fast` until one sees it gone,
+    /// for at most `HIDE_WAIT`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "called once the dock tracker reads the auto-hide setting"
+        )
+    )]
+    pub fn dock_hiding(&mut self, at: Instant) {
+        self.hide_hold = Some(HideHold {
+            since: at,
+            reads: 0,
+        });
+    }
+
+    fn holding_for_hide(&mut self, dock_on_screen: bool, now: Instant) -> bool {
+        let Some(hold) = self.hide_hold.as_mut() else {
+            return false;
+        };
+        let held_for = now.saturating_duration_since(hold.since);
+        if dock_on_screen && held_for <= HIDE_WAIT {
+            hold.reads = hold.reads.saturating_add(1);
+            return true;
+        }
+        tracing::debug!(
+            reads = hold.reads,
+            held_ms = u64::try_from(held_for.as_millis()).unwrap_or(u64::MAX),
+            off_screen = !dock_on_screen,
+            "dock hide hold ended"
+        );
+        self.hide_hold = None;
+        false
+    }
+
     pub fn rate(
         &mut self,
         proximity_rate: PollRate,
         awaits_reveal: bool,
+        dock_on_screen: bool,
         cursor: Option<ScreenPoint>,
         sent: bool,
         now: Instant,
@@ -425,7 +494,8 @@ impl Activity {
         if !launching {
             self.launch_hold_started = None;
         }
-        if (near && moving) || launching {
+        let hiding = self.holding_for_hide(dock_on_screen, now);
+        if (near && moving) || launching || hiding {
             PollRate::Fast
         } else {
             PollRate::Slow
@@ -1250,7 +1320,14 @@ mod tests {
 
         for step in cases {
             let now = start.checked_add(ms(step.at_ms)).expect("in range");
-            let rate = activity.rate(step.proximity_rate, false, step.cursor, step.sent, now);
+            let rate = activity.rate(
+                step.proximity_rate,
+                false,
+                true,
+                step.cursor,
+                step.sent,
+                now,
+            );
             assert_eq!(rate, step.expected, "{}", step.case);
         }
     }
@@ -1344,7 +1421,14 @@ mod tests {
 
         for step in cases {
             let now = start.checked_add(ms(step.at_ms)).expect("in range");
-            let rate = activity.rate(PollRate::Fast, step.awaits_reveal, step.cursor, false, now);
+            let rate = activity.rate(
+                PollRate::Fast,
+                step.awaits_reveal,
+                !step.awaits_reveal,
+                step.cursor,
+                false,
+                now,
+            );
             assert_eq!(rate, step.expected, "{}", step.case);
         }
     }
@@ -1400,6 +1484,191 @@ mod tests {
                 "{case}"
             );
         }
+    }
+
+    #[test]
+    fn tick_reports_the_pointer_leaving_the_shown_dock_once_per_exit() {
+        let now = Instant::now();
+        let shown = || Ok(vec![raw_app("Safari", 700.0)]);
+        let hidden = || {
+            Ok(vec![RawDockChild {
+                rect: Some(rect(700.0, 987.0, 56.0, 56.0)),
+                ..raw_app("Safari", 700.0)
+            }])
+        };
+        let over = Some(point(720.0, 950.0));
+        let up_300 = Some(point(720.0, 650.0));
+        let steps = [
+            ("over the shown Dock", shown(), over, false),
+            ("still over it", shown(), over, false),
+            (
+                "in the 5 pt strip under the tiles, which keeps the Dock shown",
+                shown(),
+                Some(point(720.0, 981.0)),
+                false,
+            ),
+            ("300 pt up from that strip", shown(), up_300, true),
+            ("still outside: no second report", shown(), up_300, false),
+            ("back over the Dock", shown(), over, false),
+            ("100 pt up", shown(), Some(point(720.0, 850.0)), true),
+            ("the Dock is off screen", hidden(), up_300, false),
+            ("revealed, the pointer over it", shown(), over, false),
+            ("the Dock left first", hidden(), up_300, false),
+            ("over the shown Dock again", shown(), over, false),
+            (
+                "the read failed",
+                Err(DockError::CannotComplete),
+                up_300,
+                false,
+            ),
+            ("over the shown Dock again", shown(), over, false),
+            ("the pointer is unknown", shown(), None, false),
+            ("outside, after an unknown pointer", shown(), up_300, false),
+        ];
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+
+        for (case, read, cursor, expected) in steps {
+            assert_eq!(
+                tracker.tick(read, cursor, now).left_dock,
+                expected,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn tick_reports_whether_the_dock_is_on_screen() {
+        let now = Instant::now();
+        let mut tracker = Tracker::new(PRIMARY_2X, Visibility::Shown);
+        let below = RawDockChild {
+            rect: Some(rect(700.0, 982.0, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        };
+        let last_row = RawDockChild {
+            rect: Some(rect(700.0, 981.0, 56.0, 56.0)),
+            ..raw_app("Safari", 700.0)
+        };
+
+        let cases = [
+            ("shown", Ok(vec![raw_app("Safari", 700.0)]), true),
+            ("one point still on the display", Ok(vec![last_row]), true),
+            ("at the bottom edge", Ok(vec![below]), false),
+            ("no children", Ok(vec![]), false),
+            ("the read failed", Err(DockError::CannotComplete), false),
+        ];
+
+        for (case, read, expected) in cases {
+            assert_eq!(
+                tracker.tick(read, Some(FAR), now).dock_on_screen,
+                expected,
+                "{case}"
+            );
+        }
+    }
+
+    struct HideStep {
+        case: &'static str,
+        /// The read saw the pointer leave the Dock, and the Dock auto-hides.
+        left: bool,
+        dock_on_screen: bool,
+        sent: bool,
+        at_ms: u64,
+        expected: PollRate,
+    }
+
+    fn hide_step(
+        case: &'static str,
+        left: bool,
+        dock_on_screen: bool,
+        sent: bool,
+        at_ms: u64,
+        expected: PollRate,
+    ) -> HideStep {
+        HideStep {
+            case,
+            left,
+            dock_on_screen,
+            sent,
+            at_ms,
+            expected,
+        }
+    }
+
+    /// The pointer rests far above the Dock, so only a hold reads `Fast`.
+    fn run_hide_steps(steps: impl IntoIterator<Item = HideStep>) {
+        let start = Instant::now();
+        let mut activity = Activity::default();
+        activity.rate(PollRate::Slow, false, true, Some(FAR), false, start);
+        for step in steps {
+            let at = start.checked_add(ms(1000 + step.at_ms)).expect("in range");
+            if step.left {
+                activity.dock_hiding(at);
+            }
+            let rate = activity.rate(
+                PollRate::Slow,
+                false,
+                step.dock_on_screen,
+                Some(FAR),
+                step.sent,
+                at,
+            );
+            assert_eq!(rate, step.expected, "{}", step.case);
+        }
+    }
+
+    #[test]
+    fn an_auto_hidden_dock_is_read_fast_from_the_exit_until_a_read_sees_it_off_screen() {
+        use PollRate::{Fast, Slow};
+        // Job 022: the Dock's AX rect began to move 13 to 15 ms after the
+        // exit and left the display 268 to 273 ms after it.
+        run_hide_steps([
+            hide_step("the pointer leaves", true, true, false, 0, Fast),
+            hide_step("the slide begins", false, true, true, 17, Fast),
+            hide_step("still sliding", false, true, true, 267, Fast),
+            hide_step("a read sees it off screen", false, false, true, 283, Slow),
+            hide_step("hidden, nothing moves", false, false, false, 300, Slow),
+        ]);
+    }
+
+    #[test]
+    fn a_dock_that_stays_shown_is_read_fast_for_at_most_one_second_after_the_exit() {
+        use PollRate::{Fast, Slow};
+        run_hide_steps([
+            hide_step("the pointer leaves", true, true, false, 0, Fast),
+            hide_step("held open, 500 ms", false, true, false, 500, Fast),
+            hide_step("held open, 1000 ms", false, true, false, 1000, Fast),
+            hide_step("held open past the cap", false, true, false, 1017, Slow),
+            hide_step("no restart while it stays", false, true, false, 1500, Slow),
+        ]);
+    }
+
+    #[test]
+    fn each_exit_from_an_auto_hidden_dock_starts_its_own_hold() {
+        use PollRate::{Fast, Slow};
+        run_hide_steps([
+            hide_step("the pointer leaves", true, true, false, 0, Fast),
+            hide_step("off screen", false, false, true, 283, Slow),
+            hide_step("revealed and left again", true, true, true, 2000, Fast),
+            hide_step(
+                "1000 ms after the second exit",
+                false,
+                true,
+                false,
+                3000,
+                Fast,
+            ),
+            hide_step("past its cap", false, true, false, 3017, Slow),
+        ]);
+    }
+
+    #[test]
+    fn leaving_a_dock_that_does_not_auto_hide_adds_no_fast_reads() {
+        use PollRate::Slow;
+        run_hide_steps([
+            hide_step("the pointer leaves", false, true, false, 0, Slow),
+            hide_step("17 ms later", false, true, false, 17, Slow),
+            hide_step("500 ms later", false, true, false, 500, Slow),
+        ]);
     }
 
     fn wait_for_read(
@@ -1541,10 +1810,11 @@ mod tests {
         } in cases
         {
             let mut activity = Activity::default();
-            activity.rate(proximity_rate, false, cursor_at_read, false, start);
+            activity.rate(proximity_rate, false, true, cursor_at_read, false, start);
             let rate = activity.rate(
                 proximity_rate,
                 false,
+                true,
                 cursor_at_read,
                 false,
                 start.checked_add(ms(NOW_MS)).expect("in range"),
@@ -1566,6 +1836,7 @@ mod tests {
         let rate = activity.rate(
             PollRate::Fast,
             false,
+            true,
             Some(point(720.0, 850.0)),
             false,
             start,
@@ -1584,11 +1855,12 @@ mod tests {
         let rest = Some(point(720.0, 850.0));
         let moved = Some(point(724.0, 850.0));
         let mut activity = Activity::default();
-        activity.rate(PollRate::Fast, false, rest, false, start);
+        activity.rate(PollRate::Fast, false, true, rest, false, start);
         assert_eq!(
             activity.rate(
                 PollRate::Fast,
                 false,
+                true,
                 rest,
                 false,
                 start.checked_add(ms(300)).expect("in range")
@@ -1600,6 +1872,7 @@ mod tests {
         let rate = activity.rate(
             PollRate::Fast,
             false,
+            true,
             moved,
             false,
             start.checked_add(ms(read)).expect("in range"),
@@ -1619,10 +1892,11 @@ mod tests {
         now_ms: u64,
     ) -> Activity {
         let mut activity = Activity::default();
-        activity.rate(proximity_rate, false, cursor, false, start);
+        activity.rate(proximity_rate, false, true, cursor, false, start);
         activity.rate(
             proximity_rate,
             false,
+            true,
             cursor,
             false,
             start.checked_add(ms(now_ms)).expect("in range"),
@@ -1651,10 +1925,11 @@ mod tests {
     fn moving_in_band(start: Instant) -> (Activity, ScreenPoint) {
         let moved = point(724.0, 850.0);
         let mut activity = Activity::default();
-        activity.rate(PollRate::Fast, false, Some(IN_BAND), false, start);
+        activity.rate(PollRate::Fast, false, true, Some(IN_BAND), false, start);
         let rate = activity.rate(
             PollRate::Fast,
             false,
+            true,
             Some(moved),
             false,
             start.checked_add(ms(HOVER_NOW_MS)).expect("in range"),
@@ -1834,12 +2109,19 @@ mod tests {
             FAR
         });
         let mut activity = Activity::default();
-        activity.rate(proximity_rate, false, cursor, false, start);
+        activity.rate(proximity_rate, false, true, cursor, false, start);
         for step in steps {
             for launch in step.launches_ms {
                 activity.app_launching(at(launch));
             }
-            let rate = activity.rate(proximity_rate, false, cursor, step.sent, at(step.at_ms));
+            let rate = activity.rate(
+                proximity_rate,
+                false,
+                true,
+                cursor,
+                step.sent,
+                at(step.at_ms),
+            );
             assert_eq!(rate, step.expected, "{}", step.case);
         }
     }
@@ -2169,14 +2451,14 @@ mod tests {
         let start = Instant::now();
         let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
         let mut activity = Activity::default();
-        activity.rate(PollRate::Slow, false, Some(FAR), false, start);
+        activity.rate(PollRate::Slow, false, true, Some(FAR), false, start);
         let mut pending = PendingLaunch::default();
 
         pending.record(at(1000));
         pending.hand_to(&mut activity, false);
 
         assert_eq!(
-            activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010)),
+            activity.rate(PollRate::Slow, false, true, Some(FAR), false, at(1010)),
             PollRate::Slow
         );
     }
@@ -2186,16 +2468,16 @@ mod tests {
         let start = Instant::now();
         let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
         let mut activity = Activity::default();
-        activity.rate(PollRate::Slow, false, Some(FAR), true, start);
+        activity.rate(PollRate::Slow, false, true, Some(FAR), true, start);
 
         activity.app_launching(at(5000));
 
         assert_eq!(
-            activity.rate(PollRate::Slow, false, Some(FAR), false, at(5010)),
+            activity.rate(PollRate::Slow, false, true, Some(FAR), false, at(5010)),
             PollRate::Fast
         );
         assert_eq!(
-            activity.rate(PollRate::Slow, false, Some(FAR), false, at(6001)),
+            activity.rate(PollRate::Slow, false, true, Some(FAR), false, at(6001)),
             PollRate::Slow
         );
     }
@@ -2205,20 +2487,20 @@ mod tests {
         let start = Instant::now();
         let at = |offset_ms: u64| start.checked_add(ms(offset_ms)).expect("in range");
         let mut activity = Activity::default();
-        activity.rate(PollRate::Slow, false, Some(FAR), false, start);
+        activity.rate(PollRate::Slow, false, true, Some(FAR), false, start);
         let mut pending = PendingLaunch::default();
 
         pending.record(at(1000));
         pending.hand_to(&mut activity, true);
-        activity.rate(PollRate::Slow, false, Some(FAR), false, at(1010));
-        activity.rate(PollRate::Slow, false, Some(FAR), false, at(3100));
+        activity.rate(PollRate::Slow, false, true, Some(FAR), false, at(1010));
+        activity.rate(PollRate::Slow, false, true, Some(FAR), false, at(3100));
         pending.record(at(4000));
         pending.hand_to(&mut activity, false);
         pending.record(at(6000));
         pending.hand_to(&mut activity, true);
 
         assert_eq!(
-            activity.rate(PollRate::Slow, false, Some(FAR), false, at(6010)),
+            activity.rate(PollRate::Slow, false, true, Some(FAR), false, at(6010)),
             PollRate::Fast
         );
     }
@@ -2997,6 +3279,7 @@ mod tests {
             let rate = activity.rate(
                 tick.proximity_rate,
                 tick.awaits_reveal,
+                tick.dock_on_screen,
                 Some(FAR),
                 tick.send.is_some(),
                 at(at_ms),

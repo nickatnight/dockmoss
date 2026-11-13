@@ -790,6 +790,7 @@ mod dock_tracker {
             let next_rate = activity.rate(
                 tick.proximity_rate,
                 tick.awaits_reveal,
+                tick.dock_on_screen,
                 cursor,
                 tick.send.is_some(),
                 started,

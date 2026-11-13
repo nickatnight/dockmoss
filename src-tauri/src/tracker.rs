@@ -1559,7 +1559,6 @@ mod tests {
         case: &'static str,
         dock_hiding: bool,
         dock_on_screen: bool,
-        sent: bool,
         at_ms: u64,
         expected: PollRate,
     }
@@ -1568,7 +1567,6 @@ mod tests {
         case: &'static str,
         dock_hiding: bool,
         dock_on_screen: bool,
-        sent: bool,
         at_ms: u64,
         expected: PollRate,
     ) -> HideStep {
@@ -1576,7 +1574,6 @@ mod tests {
             case,
             dock_hiding,
             dock_on_screen,
-            sent,
             at_ms,
             expected,
         }
@@ -1596,7 +1593,7 @@ mod tests {
                 false,
                 step.dock_on_screen,
                 Some(FAR),
-                step.sent,
+                false,
                 at,
             );
             assert_eq!(rate, step.expected, "{}", step.case);
@@ -1607,11 +1604,11 @@ mod tests {
     fn an_auto_hidden_dock_is_read_fast_from_the_exit_until_a_read_sees_it_off_screen() {
         use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", true, true, false, 0, Fast),
-            hide_step("the slide begins", false, true, true, 17, Fast),
-            hide_step("still sliding", false, true, true, 267, Fast),
-            hide_step("a read sees it off screen", false, false, true, 283, Slow),
-            hide_step("hidden, nothing moves", false, false, false, 300, Slow),
+            hide_step("the pointer leaves", true, true, 0, Fast),
+            hide_step("the slide begins", false, true, 17, Fast),
+            hide_step("still sliding", false, true, 267, Fast),
+            hide_step("a read sees it off screen", false, false, 283, Slow),
+            hide_step("hidden, nothing moves", false, false, 300, Slow),
         ]);
     }
 
@@ -1619,11 +1616,11 @@ mod tests {
     fn a_dock_that_stays_shown_is_read_fast_for_at_most_one_second_after_the_exit() {
         use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", true, true, false, 0, Fast),
-            hide_step("held open, 500 ms", false, true, false, 500, Fast),
-            hide_step("held open, 1000 ms", false, true, false, 1000, Fast),
-            hide_step("held open past the cap", false, true, false, 1017, Slow),
-            hide_step("no restart while it stays", false, true, false, 1500, Slow),
+            hide_step("the pointer leaves", true, true, 0, Fast),
+            hide_step("held open, 500 ms", false, true, 500, Fast),
+            hide_step("held open, 1000 ms", false, true, 1000, Fast),
+            hide_step("held open past the cap", false, true, 1017, Slow),
+            hide_step("no restart while it stays", false, true, 1500, Slow),
         ]);
     }
 
@@ -1631,18 +1628,11 @@ mod tests {
     fn each_exit_from_an_auto_hidden_dock_starts_its_own_hold() {
         use PollRate::{Fast, Slow};
         run_hide_steps([
-            hide_step("the pointer leaves", true, true, false, 0, Fast),
-            hide_step("off screen", false, false, true, 283, Slow),
-            hide_step("revealed and left again", true, true, true, 2000, Fast),
-            hide_step(
-                "1000 ms after the second exit",
-                false,
-                true,
-                false,
-                3000,
-                Fast,
-            ),
-            hide_step("past its cap", false, true, false, 3017, Slow),
+            hide_step("the pointer leaves", true, true, 0, Fast),
+            hide_step("off screen", false, false, 283, Slow),
+            hide_step("revealed and left again", true, true, 2000, Fast),
+            hide_step("1000 ms after the second exit", false, true, 3000, Fast),
+            hide_step("past its cap", false, true, 3017, Slow),
         ]);
     }
 
@@ -1650,9 +1640,9 @@ mod tests {
     fn leaving_a_dock_that_does_not_auto_hide_adds_no_fast_reads() {
         use PollRate::Slow;
         run_hide_steps([
-            hide_step("the pointer leaves", false, true, false, 0, Slow),
-            hide_step("17 ms later", false, true, false, 17, Slow),
-            hide_step("500 ms later", false, true, false, 500, Slow),
+            hide_step("the pointer leaves", false, true, 0, Slow),
+            hide_step("17 ms later", false, true, 17, Slow),
+            hide_step("500 ms later", false, true, 500, Slow),
         ]);
     }
 

@@ -85,7 +85,11 @@ pub struct Tick {
     pub proximity_rate: PollRate,
     /// The Dock is hidden and the pointer is at the edge it slides in from.
     pub awaits_reveal: bool,
+    /// The Dock's bounds overlap the display; false after a failed read.
     pub dock_on_screen: bool,
+    /// Set once per exit: at the last read the pointer was within
+    /// `OVER_DOCK_MARGIN` of the shown Dock, and at this one it is known and
+    /// outside, with the Dock still on screen.
     pub pointer_left_shown_dock: bool,
 }
 
@@ -431,7 +435,7 @@ impl Activity {
     /// A Dock that auto-hides slides off screen once the pointer leaves it,
     /// so the exit starts a hide hold; one that does not starts nothing. A
     /// later exit restarts the hold.
-    pub fn pointer_left_dock(&mut self, at: Instant, auto_hide: bool) {
+    fn pointer_left_dock(&mut self, at: Instant, auto_hide: bool) {
         if !auto_hide {
             return;
         }
@@ -488,7 +492,7 @@ impl Activity {
         false
     }
 
-    pub fn rate(
+    fn rate(
         &mut self,
         proximity_rate: PollRate,
         awaits_reveal: bool,

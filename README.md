@@ -66,7 +66,7 @@ Dev builds also outline each Dock icon and label it with its overgrowth and stag
 | Command | Runs |
 |---|---|
 | `pnpm tauri dev` | The app, with Vite on `localhost:5110` |
-| `pnpm check` | fmt, clippy, layout guards, `tsc` |
+| `pnpm check` | fmt, clippy in the dev and release profiles, layout guards, `tsc` |
 | `pnpm test` | vitest over the frontend's pure modules |
 | `pnpm check:task` | `check` plus tests, a clean `pnpm build`, `cargo test`, `cargo deny`, `pnpm audit`, gitleaks |
 | `pnpm coverage` | Rust line coverage, on demand, no threshold |

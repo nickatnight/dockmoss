@@ -111,6 +111,7 @@ impl FastForward {
         }
     }
 
+    #[cfg(any(debug_assertions, test))]
     pub fn parse(text: &str) -> Option<Self> {
         text.trim().parse().ok().and_then(Self::from_factor)
     }

@@ -8,11 +8,12 @@ macOS-only Tauri 2 app: a transparent, click-through overlay that grows moss on 
 
 ## Checks
 
-Run from `src-tauri/`. All four must pass before a change is done:
+Run from `src-tauri/`. All five must pass before a change is done:
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
+cargo clippy --release --all-targets -- -D warnings
 cargo test
 cargo build
 ```

@@ -30,7 +30,7 @@ xmllint --noout src-tauri/icons/source/app-icon.svg
 
 ## Banner
 
-`docs/readme/banner.svg`, the animation at the top of the repo's README, is generated too, so don't edit it by hand. `bannerMaster()` in `src/icon/banner.ts` writes it. Every tile's moss is the generator's output, seeded from `fnv1a32("banner#<i>")` for the tile at Dock position `i`, and the Dock's last tile is the app icon's stone (`STONE_TILE` from `app-icon.ts`). The shrivel uses the renderer's `SHRIVEL_MS`, `SHRIVEL_WITHER_END`, `SHRIVEL_FRONT_WIDTH` and `WITHER_TINT`, and the luma weights it reads from `moss.frag.glsl`. The animation is SMIL on one 12 s clock. GitHub plays SMIL inside an `<img>` but strips `<script>`, `<foreignObject>` and external references, and the tests refuse all three.
+`docs/readme/banner.svg`, the animation at the top of the repo's README, is generated too, so don't edit it by hand. `bannerMaster()` in `src/icon/banner.ts` writes it. Every tile's moss is the generator's output, seeded from `fnv1a32("banner#<i>")` for the tile at Dock position `i`, and the Dock's last tile is the app icon's stone (`STONE_TILE` from `app-icon.ts`). The shrivel uses the renderer's own curves and constants from `src/render/model.ts` (`shrivelRemaining`, `shrivelWither`, `shrivelFront`, `SHRIVEL_MS`, `SHRIVEL_FRONT_WIDTH`, `WITHER_TINT`, `REC709_LUMA`), the same ones `moss.frag.glsl` gets at `#pragma moss_constants`. The animation is SMIL on one 12 s clock. GitHub plays SMIL inside an `<img>` but strips `<script>`, `<foreignObject>` and external references, and the tests refuse all three.
 
 A vitest file snapshot fails `pnpm test` when the banner is stale, and a pinned SHA-256 fails it on any change to the art or the generator. After a deliberate change:
 

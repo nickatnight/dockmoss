@@ -91,10 +91,14 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         run: pnpm coverage:lcov
 
+      # Keep this the job's last step: the action writes the token to
+      # $GITHUB_ENV as CC_TOKEN, so every later step would see it.
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         with:
+          # The Codecov CLI the action downloads, pinned like gitleaks. Bump it on purpose.
+          version: v11.3.2
           token: ${{ secrets.CODECOV_TOKEN }}
           files: src-tauri/target/lcov.info
           disable_search: true

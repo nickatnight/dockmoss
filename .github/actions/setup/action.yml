@@ -23,8 +23,6 @@ runs:
         node-version: 22
         cache: pnpm
 
-    # Pinned like the runner image, so a new Rust release can't add clippy
-    # lints and turn main red with no code change. Bump it on purpose.
     - name: Install Rust
       if: inputs.rust == 'true'
       shell: bash

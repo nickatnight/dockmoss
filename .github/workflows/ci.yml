@@ -19,8 +19,6 @@ defaults:
     shell: bash
 
 jobs:
-  # The jobs below start at once. Each runs one named part of package.json's
-  # check:task, so the local bar and CI run the same commands.
   lint:
     name: Lint
     runs-on: macos-26
@@ -36,9 +34,6 @@ jobs:
 
       - run: pnpm check:fast
 
-  # check:task runs plain cargo test locally. Here the same suite runs once,
-  # under cargo llvm-cov, which fails the job if any test fails. The crate has
-  # no doctests (cargo test reports 0), so llvm-cov runs every test there is.
   rust-tests:
     name: Rust tests and coverage
     runs-on: macos-26
@@ -117,14 +112,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      # gitleaks scans the whole history.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      # cargo deny needs cargo for the dependency graph. deny.toml fixes the
-      # graph to the two macOS targets, so Linux checks the same crates.
       - uses: ./.github/actions/setup
 
       - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
@@ -176,8 +168,6 @@ jobs:
             exit 1
           fi
 
-  # One stable check name for branch protection: it fails unless every job
-  # above succeeded (a failed, cancelled or skipped job all count as failure).
   ci:
     name: CI
     if: always()

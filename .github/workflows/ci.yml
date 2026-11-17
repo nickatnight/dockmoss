@@ -19,10 +19,30 @@ defaults:
     shell: bash
 
 jobs:
-  checks:
-    name: Checks
+  # The jobs below start at once. Each runs one named part of package.json's
+  # check:task, so the local bar and CI run the same commands.
+  lint:
+    name: Lint
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          rust-components: rustfmt,clippy
+
+      - run: pnpm check:fast
+
+  # check:task runs plain cargo test locally. Here the same suite runs once,
+  # under cargo llvm-cov, which fails the job if any test fails. The crate has
+  # no doctests (cargo test reports 0), so llvm-cov runs every test there is.
+  rust-tests:
+    name: Rust tests and coverage
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,50 +51,21 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          rust-components: rustfmt,clippy,llvm-tools-preview
+          rust-components: llvm-tools-preview
 
       - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
-          tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.1
+          tool: cargo-llvm-cov@0.9.1
           fallback: none
 
-      - name: Install gitleaks 8.30.1
-        env:
-          GITLEAKS_SHA256: b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5
-        run: |
-          dir="$RUNNER_TEMP/gitleaks"
-          mkdir -p "$dir"
-          cd "$dir"
-          curl -fsSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz
-          echo "$GITLEAKS_SHA256  gitleaks.tar.gz" | shasum -a 256 -c
-          tar -xzf gitleaks.tar.gz gitleaks
-          echo "$dir" >> "$GITHUB_PATH"
-
-      - run: pnpm check:task
-
-      - run: cargo build
-        working-directory: src-tauri
-
-      # The only build with cfg(dev) off. Cargo caps lints for registry
-      # dependencies, so a warning line here comes from this project or from
-      # cargo itself. Colour stays off on the command so the grep can match.
-      - name: Release build, no warnings
-        run: |
-          log="$RUNNER_TEMP/release-build.log"
-          CARGO_TERM_COLOR=never pnpm tauri build --no-bundle 2>&1 | tee "$log"
-          if grep -n '^warning' "$log"; then
-            echo "::error::the release build printed warnings"
-            exit 1
-          fi
-
-      - name: Coverage
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      - name: Rust tests with coverage
         run: pnpm coverage:lcov
 
       # The Codecov CLI, pinned like gitleaks: checked against a sha256 kept
       # here and moved into place only if it matches. A failed download or a
       # mismatch fails this step, so the upload below doesn't run, and
       # continue-on-error keeps CI green. Bump the version and hash together.
+      # Fork PRs get no token, so they skip the install and the upload.
       - name: Install Codecov CLI 11.3.2
         id: codecov_cli
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -105,3 +96,98 @@ jobs:
           files: src-tauri/target/lcov.info
           disable_search: true
           fail_ci_if_error: true
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          rust: 'false'
+
+      - run: pnpm check:web
+
+  deps-and-secrets:
+    name: Deps and secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # gitleaks scans the whole history.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # cargo deny needs cargo for the dependency graph. deny.toml fixes the
+      # graph to the two macOS targets, so Linux checks the same crates.
+      - uses: ./.github/actions/setup
+
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
+      # The sha256 is the linux_x64 line of the release's
+      # gitleaks_8.30.1_checksums.txt, which matches GitHub's asset digest.
+      - name: Install gitleaks 8.30.1
+        env:
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          dir="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl -fsSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "$GITLEAKS_SHA256  gitleaks.tar.gz" | sha256sum -c
+          tar -xzf gitleaks.tar.gz gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - run: pnpm check:deps
+
+      - run: pnpm check:secrets
+
+  release:
+    name: Release build
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - run: cargo build
+        working-directory: src-tauri
+
+      # The only build with cfg(dev) off. Cargo caps lints for registry
+      # dependencies, so a warning line here comes from this project or from
+      # cargo itself. Colour stays off on the command so the grep can match.
+      - name: Release build, no warnings
+        run: |
+          log="$RUNNER_TEMP/release-build.log"
+          CARGO_TERM_COLOR=never pnpm tauri build --no-bundle 2>&1 | tee "$log"
+          if grep -n '^warning' "$log"; then
+            echo "::error::the release build printed warnings"
+            exit 1
+          fi
+
+  # One stable check name for branch protection: it fails unless every job
+  # above succeeded (a failed, cancelled or skipped job all count as failure).
+  ci:
+    name: CI
+    if: always()
+    needs: [lint, rust-tests, web, deps-and-secrets, release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null

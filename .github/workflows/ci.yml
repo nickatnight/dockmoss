@@ -10,8 +10,6 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR cancels that PR's older run. Every other run gets its own
-# group, so a run on main is never cancelled.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
@@ -23,14 +21,11 @@ defaults:
 jobs:
   checks:
     name: Checks
-    # The crate links AppKit, so it only builds on macOS. The label is pinned so
-    # an image migration can't change the toolchain under us.
     runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # gitleaks scans the whole history, as it does locally.
           fetch-depth: 0
           persist-credentials: false
 

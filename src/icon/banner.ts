@@ -290,6 +290,24 @@ function bounceFrames(at: number): Frame[] {
   return [...hop(at, 0.5, TILE * 0.4, 0), ...hop(at + 0.5, 0.4, TILE * 0.22, 1)];
 }
 
+/** The dot under a running app: always for one in daily use, from the click for the one that launches. */
+function runningDot(tile: BannerTile, launches: boolean, centre: string): string {
+  const dot = `${centre} r="3" fill="#1D2430" fill-opacity="0.7"`;
+  if (tile.running) {
+    return `<circle ${dot}/>`;
+  }
+  if (!launches) {
+    return "";
+  }
+  const lit = animatedAttribute("opacity", [
+    [LAUNCH + 0.15, 0],
+    [LAUNCH + 0.35, 1],
+    [RESET, 1],
+    [RESET + 0.3, 0],
+  ]);
+  return `<circle ${dot} ${lit.attribute}>${lit.animation}</circle>`;
+}
+
 function tileSvg(tile: BannerTile, index: number): string {
   const launches = tile === BANNER_LAUNCH.tile;
   const rect = tileRectAt(index);
@@ -311,19 +329,7 @@ function tileSvg(tile: BannerTile, index: number): string {
     stages.length === 0
       ? ""
       : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / ICON_UNITS)})">${stages.join("\n")}</g>`;
-  const dotAt = `cx="${n(rect.x + TILE / 2)}" cy="${n(art.y + art.height + 6)}" r="3" fill="#1D2430" fill-opacity="0.7"`;
-  let dot = "";
-  if (tile.running) {
-    dot = `<circle ${dotAt}/>`;
-  } else if (launches) {
-    const lit = animatedAttribute("opacity", [
-      [LAUNCH + 0.15, 0],
-      [LAUNCH + 0.35, 1],
-      [RESET, 1],
-      [RESET + 0.3, 0],
-    ]);
-    dot = `<circle ${dotAt} ${lit.attribute}>${lit.animation}</circle>`;
-  }
+  const dot = runningDot(tile, launches, `cx="${n(rect.x + TILE / 2)}" cy="${n(art.y + art.height + 6)}"`);
   const lifted = launches ? animatedTransform("translate", bounceFrames(LAUNCH)) : undefined;
   return lifted === undefined
     ? `<g>${face}${mossLayer}</g>${dot}`

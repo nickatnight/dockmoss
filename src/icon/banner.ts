@@ -364,14 +364,18 @@ const WINDOW_SHOWN = animatedAttribute("opacity", [
   [RESET + 0.3, 1],
   [RESET + 0.4, 0],
 ]);
-const [WW, WH] = [WINDOW_SIZE.width, WINDOW_SIZE.height];
+const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = WINDOW_SIZE;
+const [LEFT, TOP, RIGHT] = [-WINDOW_WIDTH / 2, -WINDOW_HEIGHT / 2, WINDOW_WIDTH / 2];
 const NOTE_LINES = [0.82, 0.64, 0.74, 0.5]
-  .map((share, line) => `<rect x="${-WW / 2 + 36}" y="${-WH / 2 + 86 + line * 44}" width="${n((WW - 72) * share)}" height="12" rx="6"/>`)
+  .map(
+    (share, line) =>
+      `<rect x="${LEFT + 36}" y="${TOP + 86 + line * 44}" width="${n((WINDOW_WIDTH - 72) * share)}" height="12" rx="6"/>`,
+  )
   .join("");
 const APP_WINDOW = `<g ${WINDOW_SHOWN.attribute}>${WINDOW_SHOWN.animation}<g ${WINDOW_MOVE.attribute}>${WINDOW_MOVE.animation}<g ${WINDOW_SCALE.attribute}>${WINDOW_SCALE.animation}
-<rect x="${-WW / 2}" y="${-WH / 2}" width="${WW}" height="${WH}" rx="14" fill="#FFFDF6"/>
-<path d="M${-WW / 2} ${-WH / 2 + 14}Q${-WW / 2} ${-WH / 2} ${-WW / 2 + 14} ${-WH / 2}H${WW / 2 - 14}Q${WW / 2} ${-WH / 2} ${WW / 2} ${-WH / 2 + 14}V${-WH / 2 + 46}H${-WW / 2}Z" fill="#F6C443"/>
-<g fill="#FFFFFF" fill-opacity="0.75"><circle cx="${-WW / 2 + 24}" cy="${-WH / 2 + 23}" r="6"/><circle cx="${-WW / 2 + 44}" cy="${-WH / 2 + 23}" r="6"/><circle cx="${-WW / 2 + 64}" cy="${-WH / 2 + 23}" r="6"/></g>
+<rect x="${LEFT}" y="${TOP}" width="${WINDOW_WIDTH}" height="${WINDOW_HEIGHT}" rx="14" fill="#FFFDF6"/>
+<path d="M${LEFT} ${TOP + 14}Q${LEFT} ${TOP} ${LEFT + 14} ${TOP}H${RIGHT - 14}Q${RIGHT} ${TOP} ${RIGHT} ${TOP + 14}V${TOP + 46}H${LEFT}Z" fill="#F6C443"/>
+<g fill="#FFFFFF" fill-opacity="0.75"><circle cx="${LEFT + 24}" cy="${TOP + 23}" r="6"/><circle cx="${LEFT + 44}" cy="${TOP + 23}" r="6"/><circle cx="${LEFT + 64}" cy="${TOP + 23}" r="6"/></g>
 <g fill="#5C5446" fill-opacity="0.28">${NOTE_LINES}</g></g></g></g>`;
 
 const WALL = "#EDE7DC";

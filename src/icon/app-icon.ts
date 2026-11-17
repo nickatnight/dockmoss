@@ -8,8 +8,8 @@ export const APP_ICON_MOSS: SceneInput = {
   overgrown: false,
 };
 
-export const SIDE = 1024;
-const scale = SIDE / TILE_UNITS;
+const TILE_SIDE = 1024;
+const scale = TILE_SIDE / TILE_UNITS;
 const inset = OVERHANG_UNITS * scale;
 const iconSide = ICON_UNITS * scale;
 const px = (value: number) => Number(value.toFixed(4));
@@ -18,9 +18,10 @@ const STONE_ORIGIN = 100;
 const STONE_SIDE = 824;
 const STONE_END = STONE_ORIGIN + STONE_SIDE;
 const STONE_RADIUS = 185;
+const SHADOW = "drop";
 
-export const STONE_TILE = `<g transform="translate(${px(inset)} ${px(inset)}) scale(${px(iconSide / STONE_SIDE)}) translate(-${STONE_ORIGIN} -${STONE_ORIGIN})">
-<rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}" fill="url(#stone)" filter="url(#drop)"/>
+const STONE_MARKUP = `<g transform="translate(${px(inset)} ${px(inset)}) scale(${px(iconSide / STONE_SIDE)}) translate(-${STONE_ORIGIN} -${STONE_ORIGIN})">
+<rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}" fill="url(#stone)" filter="url(#${SHADOW})"/>
 <g clip-path="url(#tile)">
 <rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" fill="url(#sheen)"/>
 <circle cx="260" cy="230" r="5" fill="#FFFFFF" fill-opacity="0.16"/>
@@ -34,7 +35,7 @@ export const STONE_TILE = `<g transform="translate(${px(inset)} ${px(inset)}) sc
 </g>
 </g>`;
 
-export const STONE_DEFS = `<linearGradient id="stone" x1="0" y1="${STONE_ORIGIN}" x2="0" y2="${STONE_END}" gradientUnits="userSpaceOnUse">
+const STONE_DEFS = `<linearGradient id="stone" x1="0" y1="${STONE_ORIGIN}" x2="0" y2="${STONE_END}" gradientUnits="userSpaceOnUse">
 <stop offset="0" stop-color="#7C8994"/>
 <stop offset="1" stop-color="#5B6873"/>
 </linearGradient>
@@ -45,19 +46,25 @@ export const STONE_DEFS = `<linearGradient id="stone" x1="0" y1="${STONE_ORIGIN}
 <clipPath id="tile">
 <rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}"/>
 </clipPath>
-<filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+<filter id="${SHADOW}" x="-10%" y="-10%" width="120%" height="125%">
 <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.3"/>
 </filter>`;
 
+/**
+ * The stone tile drawn in a `side`-wide Dock tile, its art laid out as the overlay lays it. `svg` only
+ * renders inside a document that also holds `defs` (ids stone, sheen, tile and `shadow`).
+ */
+export const STONE_TILE = { side: TILE_SIDE, defs: STONE_DEFS, svg: STONE_MARKUP, shadow: SHADOW } as const;
+
 const DEFS = `<defs>
-${STONE_DEFS}
+${STONE_TILE.defs}
 </defs>`;
 
 export function appIconSvg(moss: SceneInput = APP_ICON_MOSS): string {
   const scene = sceneSvg(mossScene(moss));
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIDE}" height="${SIDE}" viewBox="0 0 ${SIDE} ${SIDE}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_SIDE}" height="${TILE_SIDE}" viewBox="0 0 ${TILE_SIDE} ${TILE_SIDE}">
 ${DEFS}
-${STONE_TILE}
+${STONE_TILE.svg}
 <g transform="scale(${px(scale)}) translate(${px(OVERHANG_UNITS)} ${px(OVERHANG_UNITS)})">${scene}</g>
 </svg>
 `;

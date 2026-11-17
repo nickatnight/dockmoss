@@ -11,7 +11,7 @@ import {
   WITHER_TINT,
 } from "../render/model";
 import fragmentSource from "../render/moss.frag.glsl?raw";
-import { SIDE as STONE_TILE_SIDE, STONE_DEFS, STONE_TILE } from "./app-icon";
+import { STONE_TILE } from "./app-icon";
 import { ICON_CLIP_PATH, sceneSvg } from "./svg";
 
 const WIDTH = 1600;
@@ -102,7 +102,7 @@ const tileBase = (top: string, bottom: string, id: string): string =>
   `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bottom}"/></linearGradient>`;
 
 const tileRect = (id: string): string =>
-  `<rect width="100" height="100" rx="${n(TILE_RADIUS)}" fill="url(#${id})" filter="url(#drop)"/>`;
+  `<rect width="100" height="100" rx="${n(TILE_RADIUS)}" fill="url(#${id})" filter="url(#${STONE_TILE.shadow})"/>`;
 
 const headerBand = (height: number, color: string): string =>
   `<path d="M0 ${n(TILE_RADIUS)}A${n(TILE_RADIUS)} ${n(TILE_RADIUS)} 0 0 1 ${n(TILE_RADIUS)} 0H${n(100 - TILE_RADIUS)}A${n(TILE_RADIUS)} ${n(TILE_RADIUS)} 0 0 1 100 ${n(TILE_RADIUS)}V${height}H0Z" fill="${color}"/>`;
@@ -267,7 +267,7 @@ function tileSvg(tile: BannerTile, index: number): string {
   const art = artBox(rect);
   const face =
     tile.glyph === "stone"
-      ? `<g transform="translate(${n(rect.x)} ${n(art.y - (TILE - art.width) / 2)}) scale(${n(TILE / STONE_TILE_SIDE)})">${STONE_TILE}</g>`
+      ? `<g transform="translate(${n(rect.x)} ${n(art.y - (TILE - art.width) / 2)}) scale(${n(TILE / STONE_TILE.side)})">${STONE_TILE.svg}</g>`
       : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / 100)})">${tile.glyph}</g>`;
   const stages = tile.stages.map(({ step }, stageIndex) => {
     const shown = animated("opacity", stageFrames(tile.stages, stageIndex));
@@ -467,7 +467,7 @@ const LAPTOP_LID = `<rect x="282" y="88" width="1036" height="660" rx="26" fill=
 <rect x="286" y="92" width="1028" height="652" rx="23" fill="#121416"/>`;
 
 const DEFS = `<defs>
-${STONE_DEFS}
+${STONE_TILE.defs}
 ${ICON_CLIP_PATH}
 ${SHRIVEL_DEFS}
 <clipPath id="${SCREEN_CLIP}"><rect x="${SCREEN.x}" y="${SCREEN.y}" width="${SCREEN.width}" height="${SCREEN.height}" rx="6"/></clipPath>

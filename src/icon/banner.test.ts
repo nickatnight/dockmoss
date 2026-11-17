@@ -50,7 +50,8 @@ describe("the README banner", () => {
   });
 
   it("puts the app icon's stone tile in the Dock", () => {
-    expect(svg).toContain(STONE_TILE);
+    expect(svg).toContain(STONE_TILE.svg);
+    expect(svg).toContain(STONE_TILE.defs);
   });
 
   it("draws each tile's moss with the app's generator, seeded per tile, at every stage it reaches", () => {

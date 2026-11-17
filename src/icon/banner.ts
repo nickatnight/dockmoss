@@ -29,19 +29,22 @@ type Frame = readonly [at: number, value: Value];
 
 const formatValue = (value: Value): string => (typeof value === "number" ? n(value) : value.map(n).join(" "));
 
+function mix(from: Value, to: Value, k: number): Value {
+  const lerp = (a: number, b: number): number => a + (b - a) * k;
+  if (typeof from === "number" && typeof to === "number") {
+    return lerp(from, to);
+  }
+  const ends = [to].flat();
+  return [from].flat().map((a, index) => lerp(a, ends[index] ?? a));
+}
+
 function valueAt(frames: readonly Frame[], at: number): Value {
   const after = frames.findIndex(([time]) => time > at);
   if (after <= 0) {
     return frames[after === 0 ? 0 : frames.length - 1][1];
   }
   const [[t0, v0], [t1, v1]] = [frames[after - 1], frames[after]];
-  const k = (at - t0) / (t1 - t0);
-  const mix = (a: number, b: number): number => a + (b - a) * k;
-  if (typeof v0 === "number" && typeof v1 === "number") {
-    return mix(v0, v1);
-  }
-  const [a, b] = [[v0].flat(), [v1].flat()];
-  return a.map((value, index) => mix(value, b[index] ?? value));
+  return mix(v0, v1, (at - t0) / (t1 - t0));
 }
 
 function animated(
@@ -72,15 +75,10 @@ function animated(
 }
 
 function eased(from: number, to: number, start: Value, end: Value, samples = 8): Frame[] {
-  return Array.from({ length: samples + 1 }, (_, index): Frame => {
-    const k = smoothstep(0, 1, index / samples);
-    const lerp = (a: number, b: number): number => a + (b - a) * k;
-    const value: Value =
-      typeof start === "number" && typeof end === "number"
-        ? lerp(start, end)
-        : [start].flat().map((a, i) => lerp(a, [end].flat()[i] ?? a));
-    return [from + ((to - from) * index) / samples, value];
-  });
+  return Array.from({ length: samples + 1 }, (_, index): Frame => [
+    from + ((to - from) * index) / samples,
+    mix(start, end, smoothstep(0, 1, index / samples)),
+  ]);
 }
 
 export interface Stage {

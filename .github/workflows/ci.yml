@@ -76,11 +76,12 @@ jobs:
         working-directory: src-tauri
 
       # The only build with cfg(dev) off. Cargo caps lints for registry
-      # dependencies, so a warning line here comes from this project.
+      # dependencies, so a warning line here comes from this project or from
+      # cargo itself. Colour stays off on the command so the grep can match.
       - name: Release build, no warnings
         run: |
           log="$RUNNER_TEMP/release-build.log"
-          pnpm tauri build --no-bundle 2>&1 | tee "$log"
+          CARGO_TERM_COLOR=never pnpm tauri build --no-bundle 2>&1 | tee "$log"
           if grep -n '^warning' "$log"; then
             echo "::error::the release build printed warnings"
             exit 1

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { LEVEL_STEPS, mossScene } from "../render/generator";
 import { fnv1a32 } from "../render/model";
 import { STONE_TILE } from "./app-icon";
-import { BANNER_SECONDS, BANNER_TILES, bannerMaster, bannerSvg } from "./banner";
+import { BANNER_LAUNCH, BANNER_SECONDS, BANNER_TILES, bannerMaster, bannerSvg } from "./banner";
 import { SHARED_ICON_CLIP } from "./svg";
 
 describe("the README banner", () => {
@@ -86,13 +86,12 @@ describe("the README banner", () => {
     }
   });
 
-  it("launches exactly one tile, and that tile is Overgrown when it launches", () => {
-    const launching = BANNER_TILES.filter(({ launchesAt }) => launchesAt !== undefined);
-    expect(launching).toHaveLength(1);
-    const [{ stages, launchesAt = 0 }] = launching;
-    const last = stages[stages.length - 1];
+  it("launches a tile of the Dock that is Overgrown by then", () => {
+    const { tile, at } = BANNER_LAUNCH;
+    const last = tile.stages[tile.stages.length - 1];
+    expect(BANNER_TILES).toContain(tile);
     expect(last.step).toBe(LEVEL_STEPS);
-    expect(last.at).toBeLessThan(launchesAt);
+    expect(last.at).toBeLessThan(at);
   });
 });
 

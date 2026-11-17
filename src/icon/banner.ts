@@ -94,7 +94,6 @@ export interface BannerTile {
   face: TileFace;
   stages: readonly Stage[];
   running: boolean;
-  launchesAt?: number;
 }
 
 const CALENDAR_PAGES: readonly (readonly [at: number, day: number])[] = [
@@ -154,6 +153,12 @@ const MUSIC = `<g fill="#FFFFFF"><ellipse cx="36" cy="70" rx="10" ry="7.5" trans
 const PHOTOS = `<circle cx="67" cy="34" r="10" fill="#F6C445"/>
 <path d="M14 80L38 46L52 64L64 52L88 80Z" fill="#9FB6D6"/><path d="M14 80L38 46L48 60L36 80Z" fill="#DDE7F3"/>`;
 
+const NOTES_TILE: BannerTile = {
+  face: drawn("tile-2", "#FFE07A", "#F6C443", NOTES),
+  stages: [stage(5, 6), stage(12, 12), stage(23, LEVEL_STEPS)],
+  running: false,
+};
+
 export const BANNER_TILES: readonly BannerTile[] = [
   { face: drawn("tile-0", "#5B9BE0", "#2F6FB8", FILES), stages: [], running: true },
   {
@@ -161,12 +166,7 @@ export const BANNER_TILES: readonly BannerTile[] = [
     stages: [stage(8, 6), stage(15, 12)],
     running: false,
   },
-  {
-    face: drawn("tile-2", "#FFE07A", "#F6C443", NOTES),
-    stages: [stage(5, 6), stage(12, 12), stage(23, LEVEL_STEPS)],
-    running: false,
-    launchesAt: 7.9,
-  },
+  NOTES_TILE,
   {
     face: drawn("tile-3", "#FF7A86", "#E3465A", MUSIC),
     stages: [stage(12, 6), stage(19, 12)],
@@ -195,8 +195,10 @@ const GROW = 0.4;
 const RESET = 10.9;
 const RESET_END = 11.5;
 
-const LAUNCH_INDEX = BANNER_TILES.findIndex(({ launchesAt }) => launchesAt !== undefined);
-const LAUNCH = BANNER_TILES[LAUNCH_INDEX]?.launchesAt ?? 0;
+/** The pointer opens Notes: it bounces, gets its dot, and its moss shrivels. */
+export const BANNER_LAUNCH = { tile: NOTES_TILE, at: 7.9 } as const;
+const LAUNCH = BANNER_LAUNCH.at;
+const LAUNCH_INDEX = BANNER_TILES.indexOf(BANNER_LAUNCH.tile);
 const SHRIVEL_START = LAUNCH + 0.1;
 const SHRIVEL_SECONDS = SHRIVEL_MS / 1000;
 const LAUNCH_MOSS = "launch-moss";
@@ -278,6 +280,7 @@ function bounceFrames(at: number): Frame[] {
 }
 
 function tileSvg(tile: BannerTile, index: number): string {
+  const launches = tile === BANNER_LAUNCH.tile;
   const rect = tileRectAt(index);
   const art = artBox(rect);
   const face =
@@ -287,7 +290,7 @@ function tileSvg(tile: BannerTile, index: number): string {
   const stages = tile.stages.map(({ step }, stageIndex) => {
     const shown = animated("opacity", stageFrames(tile.stages, stageIndex));
     const moss = mossAt(index, step);
-    const launchStage = tile.launchesAt !== undefined && stageIndex === tile.stages.length - 1;
+    const launchStage = launches && stageIndex === tile.stages.length - 1;
     const body = launchStage
       ? `<g mask="url(#shrivel)"><g id="${LAUNCH_MOSS}">${moss}</g><use href="#${LAUNCH_MOSS}" filter="url(#wither)" ${WITHERING.attribute}>${WITHERING.animation}</use></g>`
       : moss;
@@ -301,16 +304,16 @@ function tileSvg(tile: BannerTile, index: number): string {
   let dot = "";
   if (tile.running) {
     dot = `<circle ${dotAt}/>`;
-  } else if (tile.launchesAt !== undefined) {
+  } else if (launches) {
     const lit = animated("opacity", [
-      [tile.launchesAt + 0.15, 0],
-      [tile.launchesAt + 0.35, 1],
+      [LAUNCH + 0.15, 0],
+      [LAUNCH + 0.35, 1],
       [RESET, 1],
       [RESET + 0.3, 0],
     ]);
     dot = `<circle ${dotAt} ${lit.attribute}>${lit.animation}</circle>`;
   }
-  const lifted = tile.launchesAt === undefined ? undefined : animated("transform", bounceFrames(tile.launchesAt), "translate");
+  const lifted = launches ? animated("transform", bounceFrames(LAUNCH), "translate") : undefined;
   return lifted === undefined
     ? `<g>${face}${mossLayer}</g>${dot}`
     : `<g ${lifted.attribute}>${lifted.animation}${face}${mossLayer}</g>${dot}`;

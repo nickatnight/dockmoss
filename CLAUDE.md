@@ -20,6 +20,8 @@ cargo build
 
 Frontend: `pnpm test` (vitest), and `pnpm check:task`, which also fails if `dist/` carries the debug layer. The package manager is **pnpm** only.
 
+CI (`.github/workflows/ci.yml`) runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on Rust 1.99.1. The release build fails on any warning.
+
 Run the app with `pnpm tauri dev`. Quit any other DockMoss first: every copy shares the bundle identifier, so a second copy exits at once.
 
 ## The boundary

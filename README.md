@@ -1,5 +1,7 @@
 # DockMoss
 
+[![CI](https://github.com/nickatnight/dockmoss/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nickatnight/dockmoss/actions/workflows/ci.yml)
+
 A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened in a while. The longer an app sits unused, the more overgrown its icon gets. Open the app and the moss shrivels away.
 
 **Status:** MVP complete (slice 13 of 13). Builds are unsigned; signing, notarization and a DMG are milestone 7.
@@ -71,6 +73,8 @@ Dev builds also outline each Dock icon and label it with its overgrowth and stag
 | `pnpm check:task` | `check` plus tests, a clean `pnpm build`, `cargo test`, `cargo deny`, `pnpm audit`, gitleaks |
 | `pnpm coverage` | Rust line coverage, on demand, no threshold |
 | `pnpm tauri build` | Unsigned `src-tauri/target/release/bundle/macos/DockMoss.app` |
+
+CI runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on a macOS 26 arm64 runner with Rust pinned to 1.99.1. The release build fails on any warning. The workflow is [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 `tauri dev` skips the Content Security Policy. To test with it, run `pnpm tauri build --debug --no-bundle` and start `src-tauri/target/debug/dockmoss`. That build has the Web Inspector on, so keep it to your own machine.
 

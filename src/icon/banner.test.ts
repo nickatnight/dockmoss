@@ -144,7 +144,7 @@ describe("the README banner master", () => {
   });
 
   it("pins bannerSvg()'s SHA-256, so a change to the art or to the moss generator is deliberate", async () => {
-    const BANNER_SHA256 = "9e41a0a192172e79bc3056281c4a04686b6b1d20d1f6b97480d031fb80e397c2";
+    const BANNER_SHA256 = "d27a1b80bd7b12c48b90700fa25215e960ecfc66c284e84e6ac348e71aa7b8d0";
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bannerSvg()));
     const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(hex).toBe(BANNER_SHA256);

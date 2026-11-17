@@ -20,7 +20,6 @@ const HEIGHT = 900;
 const n = (value: number): string => String(Number(value.toFixed(2)));
 
 export const BANNER_SECONDS = 12;
-const POSTER = 7;
 const JUMP = 0.02;
 
 type Value = number | readonly number[];
@@ -199,6 +198,14 @@ const RESET_END = 11.5;
 export const BANNER_LAUNCH = { tile: NOTES_TILE, at: 7.9 } as const;
 const LAUNCH = BANNER_LAUNCH.at;
 const LAUNCH_INDEX = BANNER_TILES.indexOf(BANNER_LAUNCH.tile);
+const POINTER_SETS_OFF = LAUNCH - 1;
+
+/** What a renderer without SMIL shows: every stage grown, the pointer still at rest. */
+const POSTER = POINTER_SETS_OFF;
+const GROWN = Math.max(...BANNER_TILES.flatMap(({ stages }) => stages.map(({ at }) => at + GROW)));
+if (GROWN > POSTER) {
+  throw new Error(`the moss is still growing at ${GROWN} s, after the pointer sets off at ${POSTER} s`);
+}
 const SHRIVEL_START = LAUNCH + 0.1;
 const SHRIVEL_SECONDS = SHRIVEL_MS / 1000;
 const LAUNCH_MOSS = "launch-moss";
@@ -327,7 +334,7 @@ const POINTER_AWAY: readonly number[] = [1170, 540];
 const POINTER_PATH = animated(
   "transform",
   [
-    ...eased(LAUNCH - 1, LAUNCH - 0.2, POINTER_REST, LAUNCH_CENTRE),
+    ...eased(POINTER_SETS_OFF, LAUNCH - 0.2, POINTER_REST, LAUNCH_CENTRE),
     ...eased(LAUNCH + 1.3, LAUNCH + 2, LAUNCH_CENTRE, POINTER_AWAY),
     ...eased(RESET, RESET_END, POINTER_AWAY, POINTER_REST),
   ],

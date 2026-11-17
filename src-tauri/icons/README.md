@@ -40,7 +40,7 @@ pnpm test src/icon -u    # rewrite banner.svg (and app-icon.svg); the filter goe
 xmllint --noout docs/readme/banner.svg
 ```
 
-A test keeps the file under 1 MB; it is about 610 KB. Look at the result in a browser before you commit it: open `docs/readme/banner.svg` in Safari and in Chrome and watch a whole loop. Each animated attribute's static value is its value at 7 s, so a viewer that ignores SMIL shows the grown Dock, not a bare one. Quick Look does play SMIL: its thumbnail is the bare first frame.
+A test keeps the file under 1 MB; it is about 610 KB. Look at the result in a browser before you commit it: open `docs/readme/banner.svg` in Safari and in Chrome and watch a whole loop. Each animated attribute's static value is its value as the pointer sets off for Notes (6.9 s), so a viewer that ignores SMIL shows the grown Dock with the pointer at rest, not a bare one. Quick Look does play SMIL: its thumbnail is the bare first frame.
 
 ## Tray glyph
 

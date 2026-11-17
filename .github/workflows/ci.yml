@@ -43,10 +43,14 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install Rust stable
+      # Pinned like the runner image, so a new Rust release can't add clippy
+      # lints and turn main red with no code change. Bump it on purpose.
+      - name: Install Rust
+        env:
+          RUST_TOOLCHAIN: 1.99.1
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt,clippy
+          rustup default "$RUST_TOOLCHAIN"
           rustc --version
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

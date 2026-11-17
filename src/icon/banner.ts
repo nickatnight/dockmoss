@@ -94,7 +94,26 @@ export interface BannerTile {
   launchesAt?: number;
 }
 
-const stage = (at: number, step: number): Stage => ({ at, step: step as LevelStep });
+const CALENDAR_PAGES: readonly (readonly [at: number, day: number])[] = [
+  [0, 1],
+  [1, 5],
+  [1.8, 8],
+  [2.6, 12],
+  [3.4, 15],
+  [4.2, 19],
+  [5, 23],
+  [5.8, 26],
+  [6.6, 30],
+];
+
+/** A stage reached as the calendar turns to May `day`. */
+function stage(day: number, step: number): Stage {
+  const page = CALENDAR_PAGES.find(([, pageDay]) => pageDay === day);
+  if (page === undefined) {
+    throw new Error(`the calendar never shows May ${day}`);
+  }
+  return { at: page[0], step: step as LevelStep };
+}
 
 const TILE_RADIUS = 100 * CORNER_RADIUS_PER_SIDE;
 
@@ -131,26 +150,26 @@ export const BANNER_TILES: readonly BannerTile[] = [
   { glyph: `${tileBase("#5B9BE0", "#2F6FB8", "tile-0")}${tileRect("tile-0")}${FILES}`, stages: [], running: true },
   {
     glyph: `${tileBase("#FFFFFF", "#E6E9ED", "tile-1")}${tileRect("tile-1")}${CALENDAR}`,
-    stages: [stage(1.8, 6), stage(3.4, 12)],
+    stages: [stage(8, 6), stage(15, 12)],
     running: false,
   },
   {
     glyph: `${tileBase("#FFE07A", "#F6C443", "tile-2")}${tileRect("tile-2")}${NOTES}`,
-    stages: [stage(1, 6), stage(2.6, 12), stage(5, LEVEL_STEPS)],
+    stages: [stage(5, 6), stage(12, 12), stage(23, LEVEL_STEPS)],
     running: false,
     launchesAt: 7.9,
   },
   {
     glyph: `${tileBase("#FF7A86", "#E3465A", "tile-3")}${tileRect("tile-3")}${MUSIC}`,
-    stages: [stage(2.6, 6), stage(4.2, 12)],
+    stages: [stage(12, 6), stage(19, 12)],
     running: false,
   },
   {
     glyph: `${tileBase("#3B5C92", "#22375C", "tile-4")}${tileRect("tile-4")}${PHOTOS}`,
-    stages: [stage(1, 6)],
+    stages: [stage(5, 6)],
     running: false,
   },
-  { glyph: "stone", stages: [stage(1, 6), stage(3.4, 12), stage(5.8, 16)], running: false },
+  { glyph: "stone", stages: [stage(5, 6), stage(15, 12), stage(26, 16)], running: false },
 ];
 
 const SCREEN = { x: 300, y: 106, width: 1000, height: 625 } as const;
@@ -173,18 +192,6 @@ const LAUNCH = BANNER_TILES[LAUNCH_INDEX]?.launchesAt ?? 0;
 const SHRIVEL_START = LAUNCH + 0.1;
 const SHRIVEL_SECONDS = SHRIVEL_MS / 1000;
 const LAUNCH_MOSS = "launch-moss";
-
-const CALENDAR_PAGES: readonly (readonly [at: number, day: number])[] = [
-  [0, 1],
-  [1, 5],
-  [1.8, 8],
-  [2.6, 12],
-  [3.4, 15],
-  [4.2, 19],
-  [5, 23],
-  [5.8, 26],
-  [6.6, 30],
-];
 
 function mossAt(index: number, step: LevelStep): string {
   const scene = mossScene({ seed: fnv1a32(`banner#${index}`), step, overgrown: step === LEVEL_STEPS });

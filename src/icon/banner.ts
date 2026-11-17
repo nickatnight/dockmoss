@@ -47,11 +47,13 @@ function valueAt(frames: readonly Frame[], at: number): Value {
   return mix(v0, v1, (at - t0) / (t1 - t0));
 }
 
-function animated(
-  attribute: "opacity" | "y" | "transform",
-  frames: readonly Frame[],
-  transform?: "translate" | "scale",
-): { attribute: string; animation: string } {
+interface Animated {
+  /** The attribute at its POSTER value, for renderers that ignore SMIL. */
+  attribute: string;
+  animation: string;
+}
+
+function keyFrames(name: string, frames: readonly Frame[]): { poster: string; timing: string } {
   const [first, last] = [frames[0], frames[frames.length - 1]];
   const all: Frame[] = [
     ...(first[0] > 0 ? [[0, first[1]] as const] : []),
@@ -61,17 +63,26 @@ function animated(
   const times = all.map(([at]) => Number((at / BANNER_SECONDS).toFixed(4)));
   times.forEach((time, index) => {
     if (index > 0 && !(time > times[index - 1])) {
-      throw new Error(`key frames for ${attribute} must rise: ${all.map(([at]) => at).join(", ")}`);
+      throw new Error(`key frames for ${name} must rise: ${all.map(([at]) => at).join(", ")}`);
     }
   });
-  const poster = formatValue(valueAt(all, POSTER));
-  const timing = `dur="${BANNER_SECONDS}s" repeatCount="indefinite" keyTimes="${times.join(";")}" values="${all.map(([, value]) => formatValue(value)).join(";")}"`;
-  return transform === undefined
-    ? { attribute: `${attribute}="${poster}"`, animation: `<animate attributeName="${attribute}" ${timing}/>` }
-    : {
-        attribute: `transform="${transform}(${poster})"`,
-        animation: `<animateTransform attributeName="transform" type="${transform}" ${timing}/>`,
-      };
+  return {
+    poster: formatValue(valueAt(all, POSTER)),
+    timing: `dur="${BANNER_SECONDS}s" repeatCount="indefinite" keyTimes="${times.join(";")}" values="${all.map(([, value]) => formatValue(value)).join(";")}"`,
+  };
+}
+
+function animatedAttribute(name: "opacity" | "y", frames: readonly Frame[]): Animated {
+  const { poster, timing } = keyFrames(name, frames);
+  return { attribute: `${name}="${poster}"`, animation: `<animate attributeName="${name}" ${timing}/>` };
+}
+
+function animatedTransform(type: "translate" | "scale", frames: readonly Frame[]): Animated {
+  const { poster, timing } = keyFrames(type, frames);
+  return {
+    attribute: `transform="${type}(${poster})"`,
+    animation: `<animateTransform attributeName="transform" type="${type}" ${timing}/>`,
+  };
 }
 
 function eased(from: number, to: number, start: Value, end: Value, samples = 8): Frame[] {
@@ -242,13 +253,13 @@ function frontTop(progress: number): number {
   return BAKE_BOTTOM - shrivelFront(shrivelRemaining(progress)) * TILE_UNITS;
 }
 
-const SHRIVEL_FRONT = animated("y", [
+const SHRIVEL_FRONT = animatedAttribute("y", [
   ...SHRIVEL_SAMPLES.map((progress): Frame => [SHRIVEL_START + progress * SHRIVEL_SECONDS, frontTop(progress)]),
   [RESET_END + JUMP, frontTop(1)],
   [RESET_END + 2 * JUMP, frontTop(0)],
 ]);
 
-const WITHERING = animated("opacity", [
+const WITHERING = animatedAttribute("opacity", [
   ...SHRIVEL_SAMPLES.map((progress): Frame => [
     SHRIVEL_START + progress * SHRIVEL_SECONDS,
     shrivelWither(progress),
@@ -286,7 +297,7 @@ function tileSvg(tile: BannerTile, index: number): string {
       ? `<g transform="translate(${n(rect.x)} ${n(art.y - (TILE - art.width) / 2)}) scale(${n(TILE / STONE_TILE.side)})">${STONE_TILE.svg}</g>`
       : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / 100)})">${tile.face.svg}</g>`;
   const stages = tile.stages.map(({ step }, stageIndex) => {
-    const shown = animated("opacity", stageFrames(tile.stages, stageIndex));
+    const shown = animatedAttribute("opacity", stageFrames(tile.stages, stageIndex));
     const moss = mossAt(index, step);
     const launchStage = launches && stageIndex === tile.stages.length - 1;
     const body = launchStage
@@ -303,7 +314,7 @@ function tileSvg(tile: BannerTile, index: number): string {
   if (tile.running) {
     dot = `<circle ${dotAt}/>`;
   } else if (launches) {
-    const lit = animated("opacity", [
+    const lit = animatedAttribute("opacity", [
       [LAUNCH + 0.15, 0],
       [LAUNCH + 0.35, 1],
       [RESET, 1],
@@ -311,7 +322,7 @@ function tileSvg(tile: BannerTile, index: number): string {
     ]);
     dot = `<circle ${dotAt} ${lit.attribute}>${lit.animation}</circle>`;
   }
-  const lifted = launches ? animated("transform", bounceFrames(LAUNCH), "translate") : undefined;
+  const lifted = launches ? animatedTransform("translate", bounceFrames(LAUNCH)) : undefined;
   return lifted === undefined
     ? `<g>${face}${mossLayer}</g>${dot}`
     : `<g ${lifted.attribute}>${lifted.animation}${face}${mossLayer}</g>${dot}`;
@@ -322,40 +333,30 @@ const LAUNCH_CENTRE: readonly number[] = [LAUNCH_ART.x + LAUNCH_ART.width / 2, L
 
 const POINTER_REST: readonly number[] = [1130, 430];
 const POINTER_AWAY: readonly number[] = [1170, 540];
-const POINTER_PATH = animated(
-  "transform",
-  [
-    ...eased(POINTER_SETS_OFF, LAUNCH - 0.2, POINTER_REST, LAUNCH_CENTRE),
-    ...eased(LAUNCH + 1.3, LAUNCH + 2, LAUNCH_CENTRE, POINTER_AWAY),
-    ...eased(RESET, RESET_END, POINTER_AWAY, POINTER_REST),
-  ],
-  "translate",
-);
-const POINTER_PRESS = animated(
-  "transform",
-  [
-    [LAUNCH - 0.12, 1],
-    [LAUNCH - 0.06, 0.86],
-    [LAUNCH + 0.02, 1],
-  ],
-  "scale",
-);
+const POINTER_PATH = animatedTransform("translate", [
+  ...eased(POINTER_SETS_OFF, LAUNCH - 0.2, POINTER_REST, LAUNCH_CENTRE),
+  ...eased(LAUNCH + 1.3, LAUNCH + 2, LAUNCH_CENTRE, POINTER_AWAY),
+  ...eased(RESET, RESET_END, POINTER_AWAY, POINTER_REST),
+]);
+const POINTER_PRESS = animatedTransform("scale", [
+  [LAUNCH - 0.12, 1],
+  [LAUNCH - 0.06, 0.86],
+  [LAUNCH + 0.02, 1],
+]);
 const POINTER = `<g ${POINTER_PATH.attribute}>${POINTER_PATH.animation}<g ${POINTER_PRESS.attribute}>${POINTER_PRESS.animation}<path d="M0 0V34L8.5 26L14 38.5L20 36L14.6 23.6H26.5Z" fill="#111111" stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round"/></g></g>`;
 
 const WINDOW_CENTRE: readonly number[] = [800, 360];
 const WINDOW_SIZE = { width: 580, height: 320 } as const;
 const OPEN = LAUNCH + 0.7;
-const WINDOW_MOVE = animated(
-  "transform",
-  [...eased(OPEN, OPEN + 0.45, LAUNCH_CENTRE, WINDOW_CENTRE), ...eased(RESET, RESET + 0.4, WINDOW_CENTRE, LAUNCH_CENTRE)],
-  "translate",
-);
-const WINDOW_SCALE = animated(
-  "transform",
-  [...eased(OPEN, OPEN + 0.45, 0.1, 1), ...eased(RESET, RESET + 0.4, 1, 0.1)],
-  "scale",
-);
-const WINDOW_SHOWN = animated("opacity", [
+const WINDOW_MOVE = animatedTransform("translate", [
+  ...eased(OPEN, OPEN + 0.45, LAUNCH_CENTRE, WINDOW_CENTRE),
+  ...eased(RESET, RESET + 0.4, WINDOW_CENTRE, LAUNCH_CENTRE),
+]);
+const WINDOW_SCALE = animatedTransform("scale", [
+  ...eased(OPEN, OPEN + 0.45, 0.1, 1),
+  ...eased(RESET, RESET + 0.4, 1, 0.1),
+]);
+const WINDOW_SHOWN = animatedAttribute("opacity", [
   [OPEN, 0],
   [OPEN + 0.1, 1],
   [RESET + 0.3, 1],
@@ -450,7 +451,7 @@ const DAYS = CALENDAR_PAGES.map(([at, day], page) => {
           [next, 1],
           [next + JUMP, 0],
         ];
-  const shown = animated("opacity", frames);
+  const shown = animatedAttribute("opacity", frames);
   return `<text x="1448" y="290" ${shown.attribute}>${shown.animation}${day}</text>`;
 }).join("");
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { EMPTY_SCENE, type Paint, type Shape } from "../render/generator";
-import { sceneSvg, shapesSvg } from "./svg";
+import { ICON_CLIP_PATH, sceneSvg, shapesSvg } from "./svg";
 
 const fill = (color: string, alpha = 1): Paint => ({ kind: "fill", color, alpha });
 const dot = (x: number, paint: Paint): Shape => ({ kind: "circle", x, y: 2, r: 3, paint });
@@ -112,6 +112,12 @@ describe("sceneSvg", () => {
         '<g fill="#C8553D"><circle cx="3" cy="2" r="3"/></g>' +
         "</g>",
     );
+  });
+
+  it("with a shared clip, points the occlusion at the one clip path a document defines once", () => {
+    const scene = { occlusion: [dot(1, fill("#000", 0.2))], moss: [dot(2, fill("#3E7E2F"))], props: [] };
+    expect(ICON_CLIP_PATH).toBe('<clipPath id="icon"><rect width="112" height="112" rx="25.2"/></clipPath>');
+    expect(sceneSvg(scene, "shared")).toBe(sceneSvg(scene).replace(ICON_CLIP_PATH, ""));
   });
 
   it("leaves out the clip when nothing is occluded", () => {

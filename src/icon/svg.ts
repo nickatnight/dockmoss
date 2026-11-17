@@ -54,12 +54,18 @@ export function shapesSvg(shapes: readonly Shape[]): string {
   return open === null ? out : `${out}</g>`;
 }
 
-export function sceneSvg(scene: MossScene): string {
+export const ICON_CLIP_PATH = `<clipPath id="${CLIP_ID}"><rect width="${ICON_UNITS}" height="${ICON_UNITS}" rx="${tenths(ICON_CORNER_RADIUS)}"/></clipPath>`;
+
+/**
+ * A scene's SVG. "inline" puts the occlusion's clip path in the scene itself;
+ * "shared" leaves it out, for a document that holds many scenes and puts
+ * ICON_CLIP_PATH in its defs once.
+ */
+export function sceneSvg(scene: MossScene, clip: "inline" | "shared" = "inline"): string {
   const occlusion =
     scene.occlusion.length === 0
       ? ""
-      : `<clipPath id="${CLIP_ID}"><rect width="${ICON_UNITS}" height="${ICON_UNITS}" rx="${tenths(ICON_CORNER_RADIUS)}"/></clipPath>` +
-        `<g clip-path="url(#${CLIP_ID})">${shapesSvg(scene.occlusion)}</g>`;
+      : (clip === "inline" ? ICON_CLIP_PATH : "") + `<g clip-path="url(#${CLIP_ID})">${shapesSvg(scene.occlusion)}</g>`;
   const shapes = occlusion + shapesSvg(scene.moss) + shapesSvg(scene.props);
   return shapes === "" ? "" : `<g stroke-linecap="round" stroke-miterlimit="10">${shapes}</g>`;
 }

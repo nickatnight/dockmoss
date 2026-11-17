@@ -12,7 +12,7 @@ import {
 } from "../render/model";
 import fragmentSource from "../render/moss.frag.glsl?raw";
 import { STONE_TILE } from "./app-icon";
-import { ICON_CLIP_PATH, sceneSvg } from "./svg";
+import { SHARED_ICON_CLIP } from "./svg";
 
 const WIDTH = 1600;
 const HEIGHT = 900;
@@ -188,7 +188,7 @@ const CALENDAR_PAGES: readonly (readonly [at: number, day: number])[] = [
 
 function mossAt(index: number, step: LevelStep): string {
   const scene = mossScene({ seed: fnv1a32(`banner#${index}`), step, overgrown: step === LEVEL_STEPS });
-  return sceneSvg(scene, "shared");
+  return SHARED_ICON_CLIP.sceneSvg(scene);
 }
 
 function stageFrames(stages: readonly Stage[], index: number): Frame[] {
@@ -468,7 +468,7 @@ const LAPTOP_LID = `<rect x="282" y="88" width="1036" height="660" rx="26" fill=
 
 const DEFS = `<defs>
 ${STONE_TILE.defs}
-${ICON_CLIP_PATH}
+${SHARED_ICON_CLIP.defs}
 ${SHRIVEL_DEFS}
 <clipPath id="${SCREEN_CLIP}"><rect x="${SCREEN.x}" y="${SCREEN.y}" width="${SCREEN.width}" height="${SCREEN.height}" rx="6"/></clipPath>
 <pattern id="subway" width="160" height="80" patternUnits="userSpaceOnUse" y="560"><rect width="160" height="80" fill="#E2DCD0"/><g fill="#F6F3ED"><rect x="2" y="2" width="76" height="36" rx="3"/><rect x="82" y="2" width="76" height="36" rx="3"/><rect x="-38" y="42" width="76" height="36" rx="3"/><rect x="42" y="42" width="76" height="36" rx="3"/><rect x="122" y="42" width="76" height="36" rx="3"/></g></pattern>

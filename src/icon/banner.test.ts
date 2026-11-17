@@ -5,7 +5,7 @@ import { LEVEL_STEPS, mossScene } from "../render/generator";
 import { fnv1a32 } from "../render/model";
 import { STONE_TILE } from "./app-icon";
 import { BANNER_SECONDS, BANNER_TILES, bannerMaster, bannerSvg } from "./banner";
-import { sceneSvg } from "./svg";
+import { SHARED_ICON_CLIP } from "./svg";
 
 describe("the README banner", () => {
   const svg = bannerSvg();
@@ -59,7 +59,7 @@ describe("the README banner", () => {
     expect(mossy.length).toBeGreaterThanOrEqual(4);
     for (const [index, { stages }] of BANNER_TILES.entries()) {
       for (const { step } of stages) {
-        const moss = sceneSvg(mossScene({ seed: fnv1a32(`banner#${index}`), step, overgrown: step === LEVEL_STEPS }), "shared");
+        const moss = SHARED_ICON_CLIP.sceneSvg(mossScene({ seed: fnv1a32(`banner#${index}`), step, overgrown: step === LEVEL_STEPS }));
         expect(svg, `tile ${index} at step ${step}`).toContain(moss);
       }
     }

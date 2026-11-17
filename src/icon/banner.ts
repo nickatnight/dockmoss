@@ -4,13 +4,13 @@ import {
   artBox,
   CORNER_RADIUS_PER_SIDE,
   fnv1a32,
+  REC709_LUMA,
   SHRIVEL_FRONT_WIDTH,
   SHRIVEL_MS,
   SHRIVEL_WITHER_END,
   smoothstep,
   WITHER_TINT,
 } from "../render/model";
-import fragmentSource from "../render/moss.frag.glsl?raw";
 import { STONE_TILE } from "./app-icon";
 import { SHARED_ICON_CLIP } from "./svg";
 
@@ -258,16 +258,8 @@ const WITHERING = animated("opacity", [
   [RESET_END + 2 * JUMP, 0],
 ]);
 
-const LUMA = (() => {
-  const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource)?.[1];
-  if (weights === undefined) {
-    throw new Error("moss.frag.glsl no longer declares REC709_LUMA");
-  }
-  return weights.split(",").map(Number);
-})();
-
 const WITHER_MATRIX = [
-  ...WITHER_TINT.flatMap((tint) => [...LUMA.map((weight) => tint * weight), 0, 0]),
+  ...WITHER_TINT.flatMap((tint) => [...REC709_LUMA.map((weight) => tint * weight), 0, 0]),
   ...[0, 0, 0, 1, 0],
 ]
   .map((value) => String(Number(value.toFixed(5))))

@@ -164,7 +164,7 @@ function glslFloat(value: number): string {
 
 export function glslConstants(): string {
   const floats = { MIP_LOD_BIAS, SHRIVEL_FRONT_WIDTH };
-  const vectors = { WITHER_TINT };
+  const vectors = { WITHER_TINT, REC709_LUMA };
   return [
     ...Object.entries(floats).map(([name, value]) => `const float ${name} = ${glslFloat(value)};`),
     ...Object.entries(vectors).map(([name, components]) => {
@@ -214,6 +214,7 @@ export function mossInstances(
 export const SHRIVEL_MS = 600;
 export const SHRIVEL_WITHER_END = 0.4;
 export const WITHER_TINT = [1, 0.74, 0.42] as const;
+export const REC709_LUMA = [0.2126, 0.7152, 0.0722] as const;
 export const MIP_LOD_BIAS = -0.5;
 export const SHRIVEL_FRONT_WIDTH = 0.06;
 

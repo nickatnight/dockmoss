@@ -13,8 +13,6 @@ flat in float v_remaining;
 
 out vec4 fragColor;
 
-const vec3 REC709_LUMA = vec3(0.2126, 0.7152, 0.0722);
-
 void main() {
   vec2 uv = (gl_FragCoord.xy - v_box.xy) / v_box.zw;
   // A bake's rows run down from its top, GL's up from the bottom.

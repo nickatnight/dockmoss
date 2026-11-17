@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   INSTANCE_ATTRIBUTES,
+  REC709_LUMA,
   SHRIVEL_MS,
   WITHER_TINT,
   type MossInstance,
@@ -772,10 +773,7 @@ describe("WITHER_TINT", () => {
   // that sum to 1, the luma of a premultiplied colour is at most its
   // alpha, so a tint no channel of which is above 1 keeps it premultiplied.
   it("keeps a withered premultiplied colour premultiplied", () => {
-    const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource);
-
-    expect(weights).not.toBeNull();
-    expect(weights?.[1].split(",").map(Number).reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
+    expect(REC709_LUMA.reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
     for (const channel of WITHER_TINT) {
       expect(channel).toBeGreaterThanOrEqual(0);
       expect(channel).toBeLessThanOrEqual(1);

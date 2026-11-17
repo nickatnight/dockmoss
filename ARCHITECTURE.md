@@ -46,11 +46,15 @@ Threads talk over channels. Nothing else touches the launch-log thread's state; 
 
 Every Accessibility read costs the Dock process CPU, so the tracker reads fast only while something on screen can move (`tracker.rs`, `Activity`):
 
-- **60 Hz** while the pointer is near the Dock and moving, within 250 ms of the last frame sent, while the pointer waits at a hidden Dock's edge (for 1 s), during an app launch (about 2 s, so the bouncing icon is followed), or after the pointer leaves a Dock that auto-hides, until a read sees the Dock off screen (at most 1 s, so its slide out is followed). The auto-hide setting is read from the Dock's preferences (`macos/dock_prefs.rs`) on that exit only, never on every read.
+- **60 Hz** while something can move:
+  - the pointer is near the Dock and moving, or a frame was sent in the last 250 ms;
+  - the pointer waits at a hidden Dock's edge (up to 1 s);
+  - an app is launching (about 2 s, so the bouncing icon is followed);
+  - the pointer just left a Dock that auto-hides, until a read sees the Dock off screen (up to 1 s). The auto-hide setting is read from the Dock's preferences (`macos/dock_prefs.rs`) on that exit only.
 - **10 Hz pointer-only checks**, with no Dock read, while the pointer rests near the Dock.
 - **2 Hz** otherwise.
 
-Two notices end a slow wait early: the Dock's hover change (via `dock-observer`) and an app launch. A third, the Space change, does so only while the overlay is held after a Space switch (below). None can make reads closer than 1/60 s apart.
+Two notices end a slow wait early: the Dock's hover change (via `dock-observer`) and an app launch. The Space change does too, but only while the overlay is held after a Space switch (below). None can bring reads closer than 1/60 s apart.
 
 The Dock reports rects in global top-left coordinates. `geometry::to_overlay_local` is the one place that converts them to overlay pixels.
 
@@ -58,7 +62,7 @@ The Dock reports rects in global top-left coordinates. `geometry::to_overlay_loc
 
 A transparent, click-through window covers the main display one level above the Dock, on every Space. It is ordered out while the Dock is hidden or can't be read, and it is ordered in without AppKit's appear animation.
 
-Every window DockMoss can own slides with a Space switch's animation; only the Dock stays still. So when the Dock comes back from off screen (a switch from a full-screen Space) with the pointer more than 150 pt above the bottom edge, the tracker keeps the overlay out, and the webview keeps the empty frame it got when the Dock left, until the switch ends: the Dock's hover notice or `NSWorkspace`'s Space notice, both posted at the end of the animation, or 1.2 s. A notice counts only while the overlay is held, so one left over from the switch to full screen cannot cancel the hold of a quick switch back. Then it orders the overlay in with a fresh frame, so the moss appears in place. With the pointer nearer the edge the return is taken as an auto-hide reveal, and the moss follows the Dock up at once (`tracker.rs`, `Sighting`; ADR-0020).
+**Space switches.** Every DockMoss window slides with a Space switch's animation, but the Dock stays still. So when the Dock comes back from a full-screen Space, the tracker keeps the overlay out until the switch ends, then orders it in with a fresh frame and the moss appears in place. The pointer's height tells a switch from an auto-hide reveal, which the moss follows at once (SUMMARY.md has the rule and its limits). An end-of-switch notice counts only while the overlay is held, so one left over from an earlier switch can't cancel the next hold (`tracker.rs`, `Sighting`; ADR-0020).
 
 The renderer (`src/render/`) has no frame loop while nothing changes. It redraws only when a new Dock or growth frame arrives:
 
@@ -110,7 +114,7 @@ Launch log format (version 1, RFC 3339 UTC times, maps sorted by bundle ID):
 
 ### The one-time data move
 
-Builds before job 014 stored data under `com.dockmoss.app`. At startup, before reading anything, `usage::migrate` moves the four data files into the new folder. It hard-links then removes, falls back to a careful copy on volumes without hard links, never overwrites a file, and redoes a copy cut short by a crash. A file it can't move stays behind, and the tray menu says so: usage tracking is off for the session if the log was left, and saving is off if the settings were left. The next start retries.
+Older builds stored data under `com.dockmoss.app`. At startup, before reading anything, `usage::migrate` moves the four data files into the new folder. It hard-links then removes, or copies where hard links aren't supported. It never overwrites a file, and it redoes a copy cut short by a crash. A file it can't move stays behind and the tray menu says so: usage tracking is off for that session if the log was left, and saving is off if the settings were. The next start retries.
 
 ## Source layout
 

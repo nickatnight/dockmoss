@@ -63,7 +63,7 @@ Everything lives in `~/Library/Application Support/app.dockmoss.DockMoss/`:
 
 Logs go to `~/Library/Logs/app.dockmoss.DockMoss/DockMoss.log`.
 
-Builds before job 014 used the identifier `com.dockmoss.app`. A newer build moves that data over on its first start; quit the old build before you start the new one.
+Older builds kept their data under `com.dockmoss.app`. A newer build moves it over on its first start; quit the old build before you start the new one.
 
 ## Development
 
@@ -80,12 +80,28 @@ Dev builds also outline each Dock icon and label it with its overgrowth and stag
 | `pnpm check` | fmt, clippy in the dev and release profiles, layout guards, `tsc` |
 | `pnpm test` | vitest over the frontend's pure modules |
 | `pnpm check:task` | `check` plus tests, a clean `pnpm build`, `cargo test`, `cargo deny`, `pnpm audit`, gitleaks |
-| `pnpm check:web`, `check:rust-test`, `check:deps`, `check:secrets` | The parts of `check:task` after `check`, to rerun one red CI job locally: vitest, `pnpm build` and the `dist/` guard; `cargo test`; `cargo deny` and `pnpm audit`; gitleaks |
+| `pnpm check:web` | vitest, `pnpm build` and the `dist/` guard |
+| `pnpm check:rust-test` | `cargo test` |
+| `pnpm check:deps` | `cargo deny` and `pnpm audit` |
+| `pnpm check:secrets` | gitleaks |
 | `pnpm coverage` | Rust line coverage, on demand, no threshold |
 | `pnpm coverage:lcov` | The same, written to `src-tauri/target/lcov.info` |
 | `pnpm tauri build` | Unsigned `src-tauri/target/release/bundle/macos/DockMoss.app` |
 
-CI runs on every PR to `main` and every push to `main`, with Rust pinned to 1.99.1. Its jobs start at once. Lint (`check:fast`, which `pnpm check` runs), Web (`check:web`), and Deps and secrets (`check:deps`, `check:secrets`) run the named parts of `pnpm check:task` from `package.json`, so they run the same commands as the local bar. The Rust tests are the exception: Rust tests and coverage runs them once, under `pnpm coverage:lcov`, in place of `check:rust-test`'s plain `cargo test`. Both run the same test binaries, but `cargo llvm-cov` skips doctests (the crate has none). Lint, Rust tests and coverage, and Release build run on a macOS 26 arm64 runner, and Web and Deps and secrets on Ubuntu 24.04. Release build runs `cargo build` and `pnpm tauri build --no-bundle`, and fails on any warning. Except on PRs from forks, Rust tests and coverage then uploads the report to Codecov for the coverage badge; a failed upload never fails the run. The upload uses a Codecov CLI checked against a sha256 kept in `ci.yml`; to move to a new CLI, change its version and hash together, taking the hash from both Codecov's `SHA256SUM` and the GitHub release asset. A last job, `CI`, passes only when every other job passed, so it is the one check for branch protection to require. The workflow is [.github/workflows/ci.yml](.github/workflows/ci.yml).
+`pnpm check:task` is `check` (which is `check:fast`) followed by the four parts above, so you can rerun just the part that failed.
+
+[CI](.github/workflows/ci.yml) runs on every PR to `main` and every push to `main`, with Rust pinned to 1.99.1. Its jobs run in parallel:
+
+| Job | Runner | Runs |
+|---|---|---|
+| Lint | macOS 26 arm64 | `check:fast` |
+| Web | Ubuntu 24.04 | `check:web` |
+| Deps and secrets | Ubuntu 24.04 | `check:deps`, `check:secrets` |
+| Rust tests and coverage | macOS 26 arm64 | `pnpm coverage:lcov` in place of `check:rust-test` (the same tests, minus doctests, which the crate doesn't have), then uploads to Codecov, except on PRs from forks |
+| Release build | macOS 26 arm64 | `cargo build` and `pnpm tauri build --no-bundle`; fails on any warning |
+| CI | | Passes only when every other job passed. Branch protection should require this one. |
+
+A failed Codecov upload never fails the run. The Codecov CLI is checked against a sha256 kept in `ci.yml`. To update it, change the version and the hash together, and take the hash from both Codecov's `SHA256SUM` and the GitHub release asset.
 
 `tauri dev` skips the Content Security Policy. To test with it, run `pnpm tauri build --debug --no-bundle` and start `src-tauri/target/debug/dockmoss`. That build has the Web Inspector on, so keep it to your own machine.
 

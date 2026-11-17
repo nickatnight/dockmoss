@@ -2,7 +2,7 @@
 name = "dockmoss"
 version = "0.1.0"
 description = "Grows moss on Dock icons for apps you haven't used in a while"
-authors = ["Nick Kelly"]
+authors = ["nickatnight"]
 license = "MIT"
 edition = "2024"
 rust-version = "1.99"

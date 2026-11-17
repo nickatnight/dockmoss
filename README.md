@@ -84,7 +84,7 @@ Dev builds also outline each Dock icon and label it with its overgrowth and stag
 | `pnpm coverage:lcov` | The same, written to `src-tauri/target/lcov.info` |
 | `pnpm tauri build` | Unsigned `src-tauri/target/release/bundle/macos/DockMoss.app` |
 
-CI runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on a macOS 26 arm64 runner with Rust pinned to 1.99.1. The release build fails on any warning. Except on PRs from forks, it then runs `pnpm coverage:lcov` and uploads the report to Codecov for the coverage badge; a failed upload never fails the run. The workflow is [.github/workflows/ci.yml](.github/workflows/ci.yml).
+CI runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on a macOS 26 arm64 runner with Rust pinned to 1.99.1. The release build fails on any warning. Except on PRs from forks, it then runs `pnpm coverage:lcov` and uploads the report to Codecov for the coverage badge; a failed upload never fails the run. The upload uses a Codecov CLI checked against a sha256 kept in `ci.yml`; to move to a new CLI, change its version and hash together, taking the hash from both Codecov's `SHA256SUM` and the GitHub release asset. The workflow is [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 `tauri dev` skips the Content Security Policy. To test with it, run `pnpm tauri build --debug --no-bundle` and start `src-tauri/target/debug/dockmoss`. That build has the Web Inspector on, so keep it to your own machine.
 

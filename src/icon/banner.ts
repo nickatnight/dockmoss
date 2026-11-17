@@ -1,6 +1,16 @@
-import { ICON_UNITS, LEVEL_STEPS, type LevelStep, mossScene } from "../render/generator";
 import type { LogicalRect } from "../ipc";
-import { artBox, CORNER_RADIUS_PER_SIDE, fnv1a32 } from "../render/model";
+import { ICON_UNITS, LEVEL_STEPS, type LevelStep, mossScene, OVERHANG_UNITS, TILE_UNITS } from "../render/generator";
+import {
+  artBox,
+  CORNER_RADIUS_PER_SIDE,
+  fnv1a32,
+  SHRIVEL_FRONT_WIDTH,
+  SHRIVEL_MS,
+  SHRIVEL_WITHER_END,
+  smoothstep,
+  WITHER_TINT,
+} from "../render/model";
+import fragmentSource from "../render/moss.frag.glsl?raw";
 import { SIDE as STONE_TILE_SIDE, STONE_DEFS, STONE_TILE } from "./app-icon";
 import { ICON_CLIP_PATH, sceneSvg } from "./svg";
 
@@ -8,6 +18,78 @@ const WIDTH = 1600;
 const HEIGHT = 900;
 
 const n = (value: number): string => String(Number(value.toFixed(2)));
+
+/** The length of the loop. Every animation runs on this one clock. */
+export const BANNER_SECONDS = 12;
+/** The moment a renderer without SMIL shows: every tile at its last stage, before the launch. */
+const POSTER = 7;
+/** The shortest step between two key frames: a jump that still keeps the key times rising. */
+const JUMP = 0.02;
+
+type Value = number | readonly number[];
+type Frame = readonly [at: number, value: Value];
+
+const formatValue = (value: Value): string => (typeof value === "number" ? n(value) : value.map(n).join(" "));
+
+function valueAt(frames: readonly Frame[], at: number): Value {
+  const after = frames.findIndex(([time]) => time > at);
+  if (after <= 0) {
+    return frames[after === 0 ? 0 : frames.length - 1][1];
+  }
+  const [[t0, v0], [t1, v1]] = [frames[after - 1], frames[after]];
+  const k = (at - t0) / (t1 - t0);
+  const mix = (a: number, b: number): number => a + (b - a) * k;
+  if (typeof v0 === "number" && typeof v1 === "number") {
+    return mix(v0, v1);
+  }
+  const [a, b] = [[v0].flat(), [v1].flat()];
+  return a.map((value, index) => mix(value, b[index] ?? value));
+}
+
+/**
+ * An attribute animated through key frames in seconds, held before the first
+ * and after the last. Returns the attribute set to its value at POSTER, for
+ * renderers that ignore SMIL, and the SMIL element that animates it.
+ */
+function animated(
+  attribute: "opacity" | "y" | "transform",
+  frames: readonly Frame[],
+  transform?: "translate" | "scale",
+): { attribute: string; animation: string } {
+  const [first, last] = [frames[0], frames[frames.length - 1]];
+  const all: Frame[] = [
+    ...(first[0] > 0 ? [[0, first[1]] as const] : []),
+    ...frames,
+    ...(last[0] < BANNER_SECONDS ? [[BANNER_SECONDS, last[1]] as const] : []),
+  ];
+  const times = all.map(([at]) => Number((at / BANNER_SECONDS).toFixed(4)));
+  times.forEach((time, index) => {
+    if (index > 0 && !(time > times[index - 1])) {
+      throw new Error(`key frames for ${attribute} must rise: ${all.map(([at]) => at).join(", ")}`);
+    }
+  });
+  const poster = formatValue(valueAt(all, POSTER));
+  const timing = `dur="${BANNER_SECONDS}s" repeatCount="indefinite" keyTimes="${times.join(";")}" values="${all.map(([, value]) => formatValue(value)).join(";")}"`;
+  return transform === undefined
+    ? { attribute: `${attribute}="${poster}"`, animation: `<animate attributeName="${attribute}" ${timing}/>` }
+    : {
+        attribute: `transform="${transform}(${poster})"`,
+        animation: `<animateTransform attributeName="transform" type="${transform}" ${timing}/>`,
+      };
+}
+
+/** Frames easing from one value to another with the renderer's smoothstep. */
+function eased(from: number, to: number, start: Value, end: Value, samples = 8): Frame[] {
+  return Array.from({ length: samples + 1 }, (_, index): Frame => {
+    const k = smoothstep(0, 1, index / samples);
+    const lerp = (a: number, b: number): number => a + (b - a) * k;
+    const value: Value =
+      typeof start === "number" && typeof end === "number"
+        ? lerp(start, end)
+        : [start].flat().map((a, i) => lerp(a, [end].flat()[i] ?? a));
+    return [from + ((to - from) * index) / samples, value];
+  });
+}
 
 /** A moss stage a tile reaches, and when in the loop, in seconds. */
 export interface Stage {
@@ -20,7 +102,10 @@ export interface BannerTile {
   glyph: string | "stone";
   /** Its moss stages in order; none for an app in daily use. */
   stages: readonly Stage[];
+  /** Running all loop long, with the dot under it. */
   running: boolean;
+  /** When the pointer opens it: it bounces, gets its dot, and its moss shrivels. */
+  launchesAt?: number;
 }
 
 const stage = (at: number, step: number): Stage => ({ at, step: step as LevelStep });
@@ -59,7 +144,8 @@ const PHOTOS = `<circle cx="67" cy="34" r="10" fill="#F6C445"/>
 /**
  * The Dock, left to right. Files is in daily use and stays clean. The rest go
  * unused at staggered times, so they reach their stages out of step; Notes
- * grows all the way to Overgrown, and the stone stops at the app icon's step 16.
+ * grows all the way to Overgrown before the pointer opens it, and the stone
+ * stops at the app icon's step 16.
  */
 export const BANNER_TILES: readonly BannerTile[] = [
   { glyph: `${tileBase("#5B9BE0", "#2F6FB8", "tile-0")}${tileRect("tile-0")}${FILES}`, stages: [], running: true },
@@ -72,6 +158,7 @@ export const BANNER_TILES: readonly BannerTile[] = [
     glyph: `${tileBase("#FFE07A", "#F6C443", "tile-2")}${tileRect("tile-2")}${NOTES}`,
     stages: [stage(1, 6), stage(2.6, 12), stage(5, LEVEL_STEPS)],
     running: false,
+    launchesAt: 7.9,
   },
   {
     glyph: `${tileBase("#FF7A86", "#E3465A", "tile-3")}${tileRect("tile-3")}${MUSIC}`,
@@ -98,9 +185,116 @@ function tileRectAt(index: number): LogicalRect {
   return { x: DOCK_X + DOCK_PADDING + index * TILE, y: DOCK_Y + 1, width: TILE, height: TILE - 2 };
 }
 
+/** A stage fades in over this long, as the next bake replaces the last. */
+const GROW = 0.4;
+/** The app window closes and the moss clears, ready for the loop to start bare. */
+const RESET = 10.9;
+const RESET_END = 11.5;
+
+const LAUNCH_INDEX = BANNER_TILES.findIndex(({ launchesAt }) => launchesAt !== undefined);
+const LAUNCH = BANNER_TILES[LAUNCH_INDEX]?.launchesAt ?? 0;
+/** The overlay hears of the launch a beat after the click. */
+const SHRIVEL_START = LAUNCH + 0.1;
+const SHRIVEL_SECONDS = SHRIVEL_MS / 1000;
+const LAUNCH_MOSS = "launch-moss";
+
+/** The pages of the wall calendar. Each moss stage lands on a page turn. */
+const CALENDAR_PAGES: readonly (readonly [at: number, day: number])[] = [
+  [0, 1],
+  [1, 5],
+  [1.8, 8],
+  [2.6, 12],
+  [3.4, 15],
+  [4.2, 19],
+  [5, 23],
+  [5.8, 26],
+  [6.6, 30],
+];
+
 function mossAt(index: number, step: LevelStep): string {
   const scene = mossScene({ seed: fnv1a32(`banner#${index}`), step, overgrown: step === LEVEL_STEPS });
   return sceneSvg(scene, "shared");
+}
+
+/** Shown from `at`, faded in over GROW; hidden once the next stage has faded in, or at the reset. */
+function stageFrames(stages: readonly Stage[], index: number): Frame[] {
+  const { at } = stages[index];
+  const next = stages[index + 1];
+  const end: Frame[] =
+    next === undefined
+      ? [
+          [RESET, 1],
+          [RESET_END, 0],
+        ]
+      : [
+          [next.at + GROW, 1],
+          [next.at + GROW + JUMP, 0],
+        ];
+  return [[at, 0], [at + GROW, 1], ...end];
+}
+
+/** Samples of the shrivel's progress, from 0 at its start to 1 SHRIVEL_MS later. */
+const SHRIVEL_SAMPLES = Array.from({ length: 13 }, (_, index) => index / 12);
+
+/**
+ * The shader's shrivel: the moss browns over the first SHRIVEL_WITHER_END of
+ * it, while a front with a soft edge SHRIVEL_FRONT_WIDTH deep sweeps down the
+ * bake box from the top. In moss units the bake box is the whole tile.
+ */
+const BAKE_TOP = -OVERHANG_UNITS;
+const BAKE_BOTTOM = ICON_UNITS + OVERHANG_UNITS;
+const FRONT_DEPTH = SHRIVEL_FRONT_WIDTH * TILE_UNITS;
+const MASK_HEIGHT = TILE_UNITS + 2 * FRONT_DEPTH;
+
+/** The top of the mask's soft edge; the moss is whole below it plus FRONT_DEPTH. */
+function frontTop(progress: number): number {
+  const remaining = 1 - smoothstep(0, 1, progress);
+  return BAKE_BOTTOM - remaining * (1 + SHRIVEL_FRONT_WIDTH) * TILE_UNITS;
+}
+
+const SHRIVEL_FRONT = animated("y", [
+  ...SHRIVEL_SAMPLES.map((progress): Frame => [SHRIVEL_START + progress * SHRIVEL_SECONDS, frontTop(progress)]),
+  [RESET_END + JUMP, frontTop(1)],
+  [RESET_END + 2 * JUMP, frontTop(0)],
+]);
+
+const WITHERING = animated("opacity", [
+  ...SHRIVEL_SAMPLES.map((progress): Frame => [
+    SHRIVEL_START + progress * SHRIVEL_SECONDS,
+    smoothstep(0, SHRIVEL_WITHER_END, progress),
+  ]),
+  [RESET_END + JUMP, 1],
+  [RESET_END + 2 * JUMP, 0],
+]);
+
+/** The shader's luma weights, read from the shader so the two can't drift. */
+const LUMA = (() => {
+  const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource)?.[1];
+  if (weights === undefined) {
+    throw new Error("moss.frag.glsl no longer declares REC709_LUMA");
+  }
+  return weights.split(",").map(Number);
+})();
+
+const WITHER_MATRIX = [
+  ...WITHER_TINT.flatMap((tint) => [...LUMA.map((weight) => tint * weight), 0, 0]),
+  ...[0, 0, 0, 1, 0],
+]
+  .map((value) => String(Number(value.toFixed(5))))
+  .join(" ");
+
+const SHRIVEL_DEFS = `<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000"/><stop offset="${n(FRONT_DEPTH / MASK_HEIGHT)}" stop-color="#FFFFFF"/></linearGradient>
+<mask id="shrivel" maskUnits="userSpaceOnUse" x="${n(BAKE_TOP - FRONT_DEPTH)}" y="${n(BAKE_TOP - FRONT_DEPTH)}" width="${n(TILE_UNITS + 2 * FRONT_DEPTH)}" height="${n(TILE_UNITS + 2 * FRONT_DEPTH)}"><rect x="${n(BAKE_TOP - FRONT_DEPTH)}" ${SHRIVEL_FRONT.attribute} width="${n(TILE_UNITS + 2 * FRONT_DEPTH)}" height="${n(MASK_HEIGHT)}" fill="url(#shrivel-edge)">${SHRIVEL_FRONT.animation}</rect></mask>
+<filter id="wither" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="${WITHER_MATRIX}"/></filter>`;
+
+/** Two hops, as the Dock bounces an app while it opens. */
+function bounceFrames(at: number): Frame[] {
+  const hop = (start: number, seconds: number, height: number, from: number): Frame[] =>
+    Array.from({ length: 9 - from }, (_, index): Frame => {
+      const k = (index + from) / 8;
+      return [start + seconds * k, [0, -height * 4 * k * (1 - k)]];
+    });
+  return [...hop(at, 0.5, TILE * 0.4, 0), ...hop(at + 0.5, 0.4, TILE * 0.22, 1)];
 }
 
 function tileSvg(tile: BannerTile, index: number): string {
@@ -110,16 +304,93 @@ function tileSvg(tile: BannerTile, index: number): string {
     tile.glyph === "stone"
       ? `<g transform="translate(${n(rect.x)} ${n(art.y - (TILE - art.width) / 2)}) scale(${n(TILE / STONE_TILE_SIDE)})">${STONE_TILE}</g>`
       : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / 100)})">${tile.glyph}</g>`;
-  const last = tile.stages.length === 0 ? undefined : tile.stages[tile.stages.length - 1];
-  const moss =
-    last === undefined
+  const stages = tile.stages.map(({ step }, stageIndex) => {
+    const shown = animated("opacity", stageFrames(tile.stages, stageIndex));
+    const moss = mossAt(index, step);
+    const launchStage = tile.launchesAt !== undefined && stageIndex === tile.stages.length - 1;
+    const body = launchStage
+      ? `<g mask="url(#shrivel)"><g id="${LAUNCH_MOSS}">${moss}</g><use href="#${LAUNCH_MOSS}" filter="url(#wither)" ${WITHERING.attribute}>${WITHERING.animation}</use></g>`
+      : moss;
+    return `<g ${shown.attribute}>${shown.animation}${body}</g>`;
+  });
+  const mossLayer =
+    stages.length === 0
       ? ""
-      : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / ICON_UNITS)})">${mossAt(index, last.step)}</g>`;
-  const dot = tile.running
-    ? `<circle cx="${n(rect.x + TILE / 2)}" cy="${n(art.y + art.height + 6)}" r="3" fill="#1D2430" fill-opacity="0.7"/>`
-    : "";
-  return `<g>${face}${moss}</g>${dot}`;
+      : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / ICON_UNITS)})">${stages.join("\n")}</g>`;
+  const dotAt = `cx="${n(rect.x + TILE / 2)}" cy="${n(art.y + art.height + 6)}" r="3" fill="#1D2430" fill-opacity="0.7"`;
+  let dot = "";
+  if (tile.running) {
+    dot = `<circle ${dotAt}/>`;
+  } else if (tile.launchesAt !== undefined) {
+    const lit = animated("opacity", [
+      [tile.launchesAt + 0.15, 0],
+      [tile.launchesAt + 0.35, 1],
+      [RESET, 1],
+      [RESET + 0.3, 0],
+    ]);
+    dot = `<circle ${dotAt} ${lit.attribute}>${lit.animation}</circle>`;
+  }
+  const lifted = tile.launchesAt === undefined ? undefined : animated("transform", bounceFrames(tile.launchesAt), "translate");
+  return lifted === undefined
+    ? `<g>${face}${mossLayer}</g>${dot}`
+    : `<g ${lifted.attribute}>${lifted.animation}${face}${mossLayer}</g>${dot}`;
 }
+
+const LAUNCH_ART = artBox(tileRectAt(LAUNCH_INDEX));
+const LAUNCH_CENTRE: readonly number[] = [LAUNCH_ART.x + LAUNCH_ART.width / 2, LAUNCH_ART.y + LAUNCH_ART.height / 2];
+
+/** The pointer rests on the desktop, opens Notes, then moves off the window. */
+const POINTER_REST: readonly number[] = [1130, 430];
+const POINTER_AWAY: readonly number[] = [1170, 540];
+const POINTER_PATH = animated(
+  "transform",
+  [
+    ...eased(LAUNCH - 1, LAUNCH - 0.2, POINTER_REST, LAUNCH_CENTRE),
+    ...eased(LAUNCH + 1.3, LAUNCH + 2, LAUNCH_CENTRE, POINTER_AWAY),
+    ...eased(RESET, RESET_END, POINTER_AWAY, POINTER_REST),
+  ],
+  "translate",
+);
+const POINTER_PRESS = animated(
+  "transform",
+  [
+    [LAUNCH - 0.12, 1],
+    [LAUNCH - 0.06, 0.86],
+    [LAUNCH + 0.02, 1],
+  ],
+  "scale",
+);
+const POINTER = `<g ${POINTER_PATH.attribute}>${POINTER_PATH.animation}<g ${POINTER_PRESS.attribute}>${POINTER_PRESS.animation}<path d="M0 0V34L8.5 26L14 38.5L20 36L14.6 23.6H26.5Z" fill="#111111" stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round"/></g></g>`;
+
+/** The Notes window zooms out of its tile once the app is up, and back in at the reset. */
+const WINDOW_CENTRE: readonly number[] = [800, 360];
+const WINDOW_SIZE = { width: 580, height: 320 } as const;
+const OPEN = LAUNCH + 0.7;
+const WINDOW_MOVE = animated(
+  "transform",
+  [...eased(OPEN, OPEN + 0.45, LAUNCH_CENTRE, WINDOW_CENTRE), ...eased(RESET, RESET + 0.4, WINDOW_CENTRE, LAUNCH_CENTRE)],
+  "translate",
+);
+const WINDOW_SCALE = animated(
+  "transform",
+  [...eased(OPEN, OPEN + 0.45, 0.1, 1), ...eased(RESET, RESET + 0.4, 1, 0.1)],
+  "scale",
+);
+const WINDOW_SHOWN = animated("opacity", [
+  [OPEN, 0],
+  [OPEN + 0.1, 1],
+  [RESET + 0.3, 1],
+  [RESET + 0.4, 0],
+]);
+const [WW, WH] = [WINDOW_SIZE.width, WINDOW_SIZE.height];
+const NOTE_LINES = [0.82, 0.64, 0.74, 0.5]
+  .map((share, line) => `<rect x="${-WW / 2 + 36}" y="${-WH / 2 + 86 + line * 44}" width="${n((WW - 72) * share)}" height="12" rx="6"/>`)
+  .join("");
+const APP_WINDOW = `<g ${WINDOW_SHOWN.attribute}>${WINDOW_SHOWN.animation}<g ${WINDOW_MOVE.attribute}>${WINDOW_MOVE.animation}<g ${WINDOW_SCALE.attribute}>${WINDOW_SCALE.animation}
+<rect x="${-WW / 2}" y="${-WH / 2}" width="${WW}" height="${WH}" rx="14" fill="#FFFDF6"/>
+<path d="M${-WW / 2} ${-WH / 2 + 14}Q${-WW / 2} ${-WH / 2} ${-WW / 2 + 14} ${-WH / 2}H${WW / 2 - 14}Q${WW / 2} ${-WH / 2} ${WW / 2} ${-WH / 2 + 14}V${-WH / 2 + 46}H${-WW / 2}Z" fill="#F6C443"/>
+<g fill="#FFFFFF" fill-opacity="0.75"><circle cx="${-WW / 2 + 24}" cy="${-WH / 2 + 23}" r="6"/><circle cx="${-WW / 2 + 44}" cy="${-WH / 2 + 23}" r="6"/><circle cx="${-WW / 2 + 64}" cy="${-WH / 2 + 23}" r="6"/></g>
+<g fill="#5C5446" fill-opacity="0.28">${NOTE_LINES}</g></g></g></g>`;
 
 const WALL = "#EDE7DC";
 
@@ -142,26 +413,32 @@ const COUNTER = `<rect y="716" width="${WIDTH}" height="110" fill="#D4A66F"/>
 <g fill="#334D40"><rect x="397" y="856" width="6" height="44"/><rect x="797" y="856" width="6" height="44"/><rect x="1197" y="856" width="6" height="44"/></g>
 <g fill="#C9A24A"><rect x="330" y="868" width="44" height="7" rx="3.5"/><rect x="426" y="868" width="44" height="7" rx="3.5"/><rect x="1130" y="868" width="44" height="7" rx="3.5"/><rect x="1226" y="868" width="44" height="7" rx="3.5"/></g>`;
 
+/** Basil: broad leaves in pairs up three stems, darker low down, lighter at the tips. */
 const LEAVES: readonly (readonly [x: number, y: number, rx: number, ry: number, turn: number, color: string])[] = [
-  [128, 640, 30, 14, -35, "#3D7030"],
-  [204, 636, 30, 14, 32, "#3D7030"],
-  [112, 598, 28, 13, -52, "#4E8A3A"],
-  [220, 594, 28, 13, 50, "#4E8A3A"],
-  [150, 600, 26, 13, -70, "#67A34A"],
-  [186, 598, 26, 13, 68, "#67A34A"],
-  [138, 552, 24, 12, -60, "#4E8A3A"],
-  [196, 550, 24, 12, 58, "#4E8A3A"],
-  [166, 566, 24, 12, -90, "#86BD5E"],
-  [154, 516, 20, 10, -75, "#67A34A"],
-  [180, 514, 20, 10, 72, "#67A34A"],
-  [166, 484, 16, 9, -90, "#86BD5E"],
-  [146, 668, 26, 12, -18, "#4E8A3A"],
-  [188, 666, 26, 12, 16, "#67A34A"],
+  [122, 664, 30, 17, -20, "#3D7030"],
+  [212, 662, 30, 17, 22, "#3D7030"],
+  [146, 676, 26, 15, -8, "#467C35"],
+  [188, 676, 26, 15, 10, "#467C35"],
+  [100, 618, 28, 16, -38, "#467C35"],
+  [232, 614, 28, 16, 40, "#467C35"],
+  [136, 626, 27, 16, -24, "#4E8A3A"],
+  [198, 624, 27, 16, 26, "#4E8A3A"],
+  [114, 570, 25, 15, -48, "#4E8A3A"],
+  [222, 566, 25, 15, 50, "#4E8A3A"],
+  [148, 586, 24, 14, -30, "#5C9A43"],
+  [186, 584, 24, 14, 32, "#5C9A43"],
+  [130, 528, 22, 13, -56, "#5C9A43"],
+  [206, 524, 22, 13, 58, "#5C9A43"],
+  [154, 544, 21, 13, -38, "#67A34A"],
+  [180, 542, 21, 13, 40, "#67A34A"],
+  [150, 498, 18, 11, -62, "#77B055"],
+  [184, 496, 18, 11, 64, "#77B055"],
+  [167, 474, 15, 10, -90, "#86BD5E"],
 ];
 
 const HERB = `<ellipse cx="166" cy="808" rx="74" ry="8" fill="#000000" fill-opacity="0.12"/>
-<g fill="none" stroke="#3D7030" stroke-width="4" stroke-linecap="round"><path d="M166 700Q160 620 166 490"/><path d="M164 660Q140 610 128 560"/><path d="M168 650Q192 600 200 552"/></g>
-${LEAVES.map(([x, y, rx, ry, turn, color]) => `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" transform="rotate(${turn} ${x} ${y})" fill="${color}"/>`).join("")}
+<g fill="none" stroke="#3D7030" stroke-width="4" stroke-linecap="round"><path d="M166 700Q162 600 167 480"/><path d="M164 690Q132 630 116 570"/><path d="M168 688Q200 628 220 566"/></g>
+${LEAVES.map(([x, y, rx, ry, turn, color]) => `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" transform="rotate(${turn} ${x} ${y})" fill="${color}"/><path d="M${x - rx * 0.75} ${y}H${x + rx * 0.75}" transform="rotate(${turn} ${x} ${y})" stroke="#2F5A26" stroke-opacity="0.35" stroke-width="2"/>`).join("")}
 <path d="M100 700H232L220 806Q219 812 213 812H119Q113 812 112 806Z" fill="#EFE9DD"/>
 <rect x="104" y="736" width="124" height="14" fill="#7FA7B5"/>
 <rect x="92" y="690" width="148" height="20" rx="6" fill="#E3DACA"/>`;
@@ -179,8 +456,27 @@ const CALENDAR_CARD = `<circle cx="1448" cy="116" r="5" fill="#8A8F96"/>
 <path d="M1372 134Q1372 126 1380 126H1516Q1524 126 1524 134V172H1372Z" fill="#D8573F"/>
 <text x="1448" y="160" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="2" text-anchor="middle" fill="#FFFFFF">MAY</text>`;
 
-const DAY_TEXT = (day: number): string =>
-  `<text x="1448" y="290" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="96" font-weight="700" text-anchor="middle" fill="#2B2F36">${day}</text>`;
+const DAYS = CALENDAR_PAGES.map(([at, day], page) => {
+  const next = CALENDAR_PAGES[page + 1]?.[0] ?? RESET_END;
+  const frames: Frame[] =
+    page === 0
+      ? [
+          [next, 1],
+          [next + JUMP, 0],
+          [RESET_END, 0],
+          [RESET_END + JUMP, 1],
+        ]
+      : [
+          [at, 0],
+          [at + JUMP, 1],
+          [next, 1],
+          [next + JUMP, 0],
+        ];
+  const shown = animated("opacity", frames);
+  return `<text x="1448" y="290" ${shown.attribute}>${shown.animation}${day}</text>`;
+}).join("");
+
+const CALENDAR_DAYS_TEXT = `<g font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="96" font-weight="700" text-anchor="middle" fill="#2B2F36">${DAYS}</g>`;
 
 const SCREEN_CLIP = "screen";
 
@@ -211,21 +507,23 @@ const LAPTOP_LID = `<rect x="282" y="88" width="1036" height="660" rx="26" fill=
 const DEFS = `<defs>
 ${STONE_DEFS}
 ${ICON_CLIP_PATH}
+${SHRIVEL_DEFS}
 <clipPath id="${SCREEN_CLIP}"><rect x="${SCREEN.x}" y="${SCREEN.y}" width="${SCREEN.width}" height="${SCREEN.height}" rx="6"/></clipPath>
 <pattern id="subway" width="160" height="80" patternUnits="userSpaceOnUse" y="560"><rect width="160" height="80" fill="#E2DCD0"/><g fill="#F6F3ED"><rect x="2" y="2" width="76" height="36" rx="3"/><rect x="82" y="2" width="76" height="36" rx="3"/><rect x="-38" y="42" width="76" height="36" rx="3"/><rect x="42" y="42" width="76" height="36" rx="3"/><rect x="122" y="42" width="76" height="36" rx="3"/></g></pattern>
 </defs>`;
 
 export function bannerSvg(): string {
-  const days = DAY_TEXT(30);
   const screen = `<g clip-path="url(#${SCREEN_CLIP})">${WALLPAPER}
 ${MENU_BAR}
+${APP_WINDOW}
 ${DOCK_PANEL}
-${BANNER_TILES.map(tileSvg).join("\n")}</g>`;
+${BANNER_TILES.map(tileSvg).join("\n")}
+${POINTER}</g>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
 ${DEFS}
 ${BACKDROP}
 ${CALENDAR_CARD}
-${days}
+${CALENDAR_DAYS_TEXT}
 ${COUNTER}
 ${BOARD}
 ${HERB}

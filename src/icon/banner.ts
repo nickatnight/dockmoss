@@ -87,8 +87,11 @@ export interface Stage {
   step: LevelStep;
 }
 
+/** The app icon's stone, or a tile drawn in a 100-unit square. */
+export type TileFace = { kind: "stone" } | { kind: "drawn"; svg: string };
+
 export interface BannerTile {
-  glyph: string | "stone";
+  face: TileFace;
   stages: readonly Stage[];
   running: boolean;
   launchesAt?: number;
@@ -123,6 +126,11 @@ const tileBase = (top: string, bottom: string, id: string): string =>
 const tileRect = (id: string): string =>
   `<rect width="100" height="100" rx="${n(TILE_RADIUS)}" fill="url(#${id})" filter="url(#${STONE_TILE.shadow})"/>`;
 
+const drawn = (id: string, top: string, bottom: string, art: string): TileFace => ({
+  kind: "drawn",
+  svg: `${tileBase(top, bottom, id)}${tileRect(id)}${art}`,
+});
+
 const headerBand = (height: number, color: string): string =>
   `<path d="M0 ${n(TILE_RADIUS)}A${n(TILE_RADIUS)} ${n(TILE_RADIUS)} 0 0 1 ${n(TILE_RADIUS)} 0H${n(100 - TILE_RADIUS)}A${n(TILE_RADIUS)} ${n(TILE_RADIUS)} 0 0 1 100 ${n(TILE_RADIUS)}V${height}H0Z" fill="${color}"/>`;
 
@@ -147,29 +155,29 @@ const PHOTOS = `<circle cx="67" cy="34" r="10" fill="#F6C445"/>
 <path d="M14 80L38 46L52 64L64 52L88 80Z" fill="#9FB6D6"/><path d="M14 80L38 46L48 60L36 80Z" fill="#DDE7F3"/>`;
 
 export const BANNER_TILES: readonly BannerTile[] = [
-  { glyph: `${tileBase("#5B9BE0", "#2F6FB8", "tile-0")}${tileRect("tile-0")}${FILES}`, stages: [], running: true },
+  { face: drawn("tile-0", "#5B9BE0", "#2F6FB8", FILES), stages: [], running: true },
   {
-    glyph: `${tileBase("#FFFFFF", "#E6E9ED", "tile-1")}${tileRect("tile-1")}${CALENDAR}`,
+    face: drawn("tile-1", "#FFFFFF", "#E6E9ED", CALENDAR),
     stages: [stage(8, 6), stage(15, 12)],
     running: false,
   },
   {
-    glyph: `${tileBase("#FFE07A", "#F6C443", "tile-2")}${tileRect("tile-2")}${NOTES}`,
+    face: drawn("tile-2", "#FFE07A", "#F6C443", NOTES),
     stages: [stage(5, 6), stage(12, 12), stage(23, LEVEL_STEPS)],
     running: false,
     launchesAt: 7.9,
   },
   {
-    glyph: `${tileBase("#FF7A86", "#E3465A", "tile-3")}${tileRect("tile-3")}${MUSIC}`,
+    face: drawn("tile-3", "#FF7A86", "#E3465A", MUSIC),
     stages: [stage(12, 6), stage(19, 12)],
     running: false,
   },
   {
-    glyph: `${tileBase("#3B5C92", "#22375C", "tile-4")}${tileRect("tile-4")}${PHOTOS}`,
+    face: drawn("tile-4", "#3B5C92", "#22375C", PHOTOS),
     stages: [stage(5, 6)],
     running: false,
   },
-  { glyph: "stone", stages: [stage(5, 6), stage(15, 12), stage(26, 16)], running: false },
+  { face: { kind: "stone" }, stages: [stage(5, 6), stage(15, 12), stage(26, 16)], running: false },
 ];
 
 const SCREEN = { x: 300, y: 106, width: 1000, height: 625 } as const;
@@ -273,9 +281,9 @@ function tileSvg(tile: BannerTile, index: number): string {
   const rect = tileRectAt(index);
   const art = artBox(rect);
   const face =
-    tile.glyph === "stone"
+    tile.face.kind === "stone"
       ? `<g transform="translate(${n(rect.x)} ${n(art.y - (TILE - art.width) / 2)}) scale(${n(TILE / STONE_TILE.side)})">${STONE_TILE.svg}</g>`
-      : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / 100)})">${tile.glyph}</g>`;
+      : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / 100)})">${tile.face.svg}</g>`;
   const stages = tile.stages.map(({ step }, stageIndex) => {
     const shown = animated("opacity", stageFrames(tile.stages, stageIndex));
     const moss = mossAt(index, step);

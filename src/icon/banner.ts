@@ -7,7 +7,9 @@ import {
   REC709_LUMA,
   SHRIVEL_FRONT_WIDTH,
   SHRIVEL_MS,
-  SHRIVEL_WITHER_END,
+  shrivelFront,
+  shrivelRemaining,
+  shrivelWither,
   smoothstep,
   WITHER_TINT,
 } from "../render/model";
@@ -239,8 +241,7 @@ const FRONT_DEPTH = SHRIVEL_FRONT_WIDTH * TILE_UNITS;
 const MASK_HEIGHT = TILE_UNITS + 2 * FRONT_DEPTH;
 
 function frontTop(progress: number): number {
-  const remaining = 1 - smoothstep(0, 1, progress);
-  return BAKE_BOTTOM - remaining * (1 + SHRIVEL_FRONT_WIDTH) * TILE_UNITS;
+  return BAKE_BOTTOM - shrivelFront(shrivelRemaining(progress)) * TILE_UNITS;
 }
 
 const SHRIVEL_FRONT = animated("y", [
@@ -252,7 +253,7 @@ const SHRIVEL_FRONT = animated("y", [
 const WITHERING = animated("opacity", [
   ...SHRIVEL_SAMPLES.map((progress): Frame => [
     SHRIVEL_START + progress * SHRIVEL_SECONDS,
-    smoothstep(0, SHRIVEL_WITHER_END, progress),
+    shrivelWither(progress),
   ]),
   [RESET_END + JUMP, 1],
   [RESET_END + 2 * JUMP, 0],

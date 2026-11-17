@@ -163,7 +163,7 @@ function glslFloat(value: number): string {
 }
 
 export function glslConstants(): string {
-  const floats = { MIP_LOD_BIAS, SHRIVEL_FRONT_WIDTH };
+  const floats = { MIP_LOD_BIAS, SHRIVEL_FRONT_WIDTH, SHRIVEL_FRONT_REACH };
   const vectors = { WITHER_TINT, REC709_LUMA };
   return [
     ...Object.entries(floats).map(([name, value]) => `const float ${name} = ${glslFloat(value)};`),
@@ -217,6 +217,8 @@ export const WITHER_TINT = [1, 0.74, 0.42] as const;
 export const REC709_LUMA = [0.2126, 0.7152, 0.0722] as const;
 export const MIP_LOD_BIAS = -0.5;
 export const SHRIVEL_FRONT_WIDTH = 0.06;
+/** How far above the bake's bottom a shrivel's front starts, in bake heights: its soft edge then sits wholly above the bake. */
+export const SHRIVEL_FRONT_REACH = 1 + SHRIVEL_FRONT_WIDTH;
 
 export interface Shrivel {
   /** The icon as the canvas last drew it, at its item's tile now. */
@@ -273,6 +275,24 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** How much of a shrivel's moss is left, from 1 at its start to 0 at its end. */
+export function shrivelRemaining(progress: number): number {
+  return 1 - smoothstep(0, 1, progress);
+}
+
+/** How brown a shrivel's moss is, from 0 at its start to 1 at SHRIVEL_WITHER_END. */
+export function shrivelWither(progress: number): number {
+  return smoothstep(0, SHRIVEL_WITHER_END, progress);
+}
+
+/**
+ * The shrivel's front, in bake heights up from the bake's bottom row. The moss is whole up to
+ * `front - SHRIVEL_FRONT_WIDTH` and gone from `front` up; moss.frag.glsl draws this edge.
+ */
+export function shrivelFront(remaining: number): number {
+  return remaining * SHRIVEL_FRONT_REACH;
+}
+
 export function shrivelInstance(
   icon: MossyIcon,
   progress: number,
@@ -280,12 +300,12 @@ export function shrivelInstance(
   canvasHeight: number,
   layer: number,
 ): MossInstance | null {
-  const remaining = 1 - smoothstep(0, 1, progress);
+  const remaining = shrivelRemaining(progress);
   if (remaining <= 0) {
     return null;
   }
   const [instance] = mossInstances([icon], pixelRatio, canvasHeight, () => layer);
-  return { ...instance, wither: smoothstep(0, SHRIVEL_WITHER_END, progress), remaining };
+  return { ...instance, wither: shrivelWither(progress), remaining };
 }
 
 export function shrivelFrame(

@@ -4,6 +4,7 @@ import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   INSTANCE_ATTRIBUTES,
   REC709_LUMA,
+  SHRIVEL_FRONT_WIDTH,
   SHRIVEL_MS,
   WITHER_TINT,
   type MossInstance,
@@ -22,6 +23,7 @@ import {
   parseOvergrowthOverride,
   mossOvergrowth,
   quantize,
+  shrivelFront,
   shrivelFrame,
   shrivelInstance,
   shrivelProgress,
@@ -659,6 +661,16 @@ describe("shrivelProgress", () => {
     for (let index = 1; index < samples.length; index++) {
       expect(samples[index]).toBeGreaterThanOrEqual(samples[index - 1]);
     }
+  });
+});
+
+describe("shrivelFront", () => {
+  it("starts with its soft edge wholly above the bake, so the moss is whole", () => {
+    expect(shrivelFront(1) - SHRIVEL_FRONT_WIDTH).toBeCloseTo(1, 12);
+  });
+
+  it("ends at the bake's bottom row, so no moss is left", () => {
+    expect(shrivelFront(0)).toBe(0);
   });
 });
 

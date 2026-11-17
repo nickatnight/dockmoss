@@ -1,8 +1,8 @@
 import { XMLValidator } from "fast-xml-parser";
 import { describe, expect, it } from "vitest";
 
-import { LEVEL_STEPS, mossScene } from "../render/generator";
-import { fnv1a32 } from "../render/model";
+import { LEVEL_STEPS, mossScene, TILE_UNITS } from "../render/generator";
+import { fnv1a32, SHRIVEL_FRONT_WIDTH, smoothstep } from "../render/model";
 import { STONE_TILE } from "./app-icon";
 import { BANNER_LAUNCH, BANNER_SECONDS, BANNER_TILES, bannerMaster, bannerSvg } from "./banner";
 import { SHARED_ICON_CLIP } from "./svg";
@@ -45,6 +45,26 @@ describe("the README banner", () => {
       expect(target, `reference ${target}`).toMatch(/^#/);
       expect(ids.has(target.slice(1)), `reference ${target}`).toBe(true);
     }
+  });
+
+  it("uses every id it defines", () => {
+    const referenced = new Set(
+      [...svg.matchAll(/\s(?:xlink:)?href="#([^"]*)"|url\(#([^)]*)\)/g)].map(([, href, url]) => href ?? url),
+    );
+    for (const [, id] of svg.matchAll(/\sid="([^"]+)"/g)) expect(referenced.has(id), id).toBe(true);
+  });
+
+  it("fades the shrivel front in as the shader's smoothstep, SHRIVEL_FRONT_WIDTH of the bake deep", () => {
+    const side = Number(/<mask id="shrivel"[^>]*\sheight="([\d.]+)"/.exec(svg)?.[1]);
+    const gradient = /<linearGradient id="shrivel-edge"[^>]*>(.*?)<\/linearGradient>/.exec(svg)?.[1] ?? "";
+    const stops = [...gradient.matchAll(/offset="([\d.]+)"[^>]*stop-opacity="([\d.]+)"/g)].map(([, offset, opacity]) => [
+      (Number(offset) * side) / (SHRIVEL_FRONT_WIDTH * TILE_UNITS),
+      Number(opacity),
+    ]);
+    expect(stops.length).toBeGreaterThanOrEqual(3);
+    expect(stops[0][0]).toBe(0);
+    expect(stops[stops.length - 1][0]).toBeCloseTo(1, 2);
+    for (const [depth, opacity] of stops) expect(opacity, `at ${depth}`).toBeCloseTo(smoothstep(0, 1, depth), 2);
   });
 
   it("gives every id to one element only", () => {
@@ -120,6 +140,7 @@ describe("the banner's animation", () => {
     for (const element of animations) {
       expect(attribute(element, "dur"), element).toBe(`${BANNER_SECONDS}s`);
       expect(attribute(element, "repeatCount"), element).toBe("indefinite");
+      expect(attribute(element, "begin") ?? "0s", element).toBe("0s");
     }
   });
 

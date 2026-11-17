@@ -679,11 +679,13 @@ describe("shrivelFront", () => {
   });
 
   it("is the front moss.frag.glsl draws: what remains times SHRIVEL_FRONT_REACH, a soft edge SHRIVEL_FRONT_WIDTH deep below it", () => {
-    const code = fragmentSource.replace(/\/\/.*$/gm, "").replace(/\s+/g, " ");
-    expect(code, "the shader's front must stay shrivelFront(v_remaining)").toContain(
-      "float front = v_remaining * SHRIVEL_FRONT_REACH;",
+    const code = fragmentSource
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+      .replace(/\s+/g, " ");
+    expect(code, "the shader's front must stay shrivelFront(v_remaining), whole below its soft edge").toContain(
+      "float front = v_remaining * SHRIVEL_FRONT_REACH; moss *= 1.0 - smoothstep(front - SHRIVEL_FRONT_WIDTH, front, uv.y);",
     );
-    expect(code, "the shader's soft edge").toContain("smoothstep(front - SHRIVEL_FRONT_WIDTH, front, uv.y)");
   });
 });
 

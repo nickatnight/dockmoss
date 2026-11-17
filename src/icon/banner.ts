@@ -247,7 +247,9 @@ const SHRIVEL_SAMPLES = Array.from({ length: 13 }, (_, index) => index / 12);
 const BAKE_TOP = -OVERHANG_UNITS;
 const BAKE_BOTTOM = ICON_UNITS + OVERHANG_UNITS;
 const FRONT_DEPTH = SHRIVEL_FRONT_WIDTH * TILE_UNITS;
-const MASK_HEIGHT = TILE_UNITS + 2 * FRONT_DEPTH;
+/** The mask's square: the bake box, grown by the front's depth on every side. */
+const MASK_ORIGIN = BAKE_TOP - FRONT_DEPTH;
+const MASK_SIDE = TILE_UNITS + 2 * FRONT_DEPTH;
 
 function frontTop(progress: number): number {
   return BAKE_BOTTOM - shrivelFront(shrivelRemaining(progress)) * TILE_UNITS;
@@ -275,8 +277,8 @@ const WITHER_MATRIX = [
   .map((value) => String(Number(value.toFixed(5))))
   .join(" ");
 
-const SHRIVEL_DEFS = `<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000"/><stop offset="${n(FRONT_DEPTH / MASK_HEIGHT)}" stop-color="#FFFFFF"/></linearGradient>
-<mask id="shrivel" maskUnits="userSpaceOnUse" x="${n(BAKE_TOP - FRONT_DEPTH)}" y="${n(BAKE_TOP - FRONT_DEPTH)}" width="${n(TILE_UNITS + 2 * FRONT_DEPTH)}" height="${n(TILE_UNITS + 2 * FRONT_DEPTH)}"><rect x="${n(BAKE_TOP - FRONT_DEPTH)}" ${SHRIVEL_FRONT.attribute} width="${n(TILE_UNITS + 2 * FRONT_DEPTH)}" height="${n(MASK_HEIGHT)}" fill="url(#shrivel-edge)">${SHRIVEL_FRONT.animation}</rect></mask>
+const SHRIVEL_DEFS = `<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000"/><stop offset="${n(FRONT_DEPTH / MASK_SIDE)}" stop-color="#FFFFFF"/></linearGradient>
+<mask id="shrivel" maskUnits="userSpaceOnUse" x="${n(MASK_ORIGIN)}" y="${n(MASK_ORIGIN)}" width="${n(MASK_SIDE)}" height="${n(MASK_SIDE)}"><rect x="${n(MASK_ORIGIN)}" ${SHRIVEL_FRONT.attribute} width="${n(MASK_SIDE)}" height="${n(MASK_SIDE)}" fill="url(#shrivel-edge)">${SHRIVEL_FRONT.animation}</rect></mask>
 <filter id="wither" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="${WITHER_MATRIX}"/></filter>`;
 
 function bounceFrames(at: number): Frame[] {

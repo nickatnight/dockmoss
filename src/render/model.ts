@@ -287,7 +287,8 @@ export function shrivelWither(progress: number): number {
 
 /**
  * The shrivel's front, in bake heights up from the bake's bottom row. The moss is whole up to
- * `front - SHRIVEL_FRONT_WIDTH` and gone from `front` up; moss.frag.glsl draws this edge.
+ * `front - SHRIVEL_FRONT_WIDTH` and gone from `front` up. moss.frag.glsl repeats this product per pixel,
+ * and a model.test.ts test holds its text to it.
  */
 export function shrivelFront(remaining: number): number {
   return remaining * SHRIVEL_FRONT_REACH;

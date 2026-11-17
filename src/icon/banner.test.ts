@@ -30,10 +30,14 @@ describe("the README banner", () => {
     expect(svg).not.toMatch(/\son[a-z]+=/i);
   });
 
+  it("loads nothing from outside the file: no URL or data: URI anywhere but the SVG namespace", () => {
+    expect(svg.replace('xmlns="http://www.w3.org/2000/svg"', "")).not.toMatch(/:\/\/|data:/i);
+  });
+
   it("refers only to its own elements: every href and url() points at an id in the document", () => {
     const ids = new Set([...svg.matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id));
     const references = [
-      ...[...svg.matchAll(/\shref="([^"]*)"/g)].map(([, target]) => target),
+      ...[...svg.matchAll(/\s(?:xlink:)?href="([^"]*)"/g)].map(([, target]) => target),
       ...[...svg.matchAll(/url\(([^)]*)\)/g)].map(([, target]) => target),
     ];
     expect(references.length).toBeGreaterThan(0);
@@ -97,12 +101,19 @@ describe("the README banner", () => {
 
 describe("the banner's animation", () => {
   const svg = bannerSvg();
-  const animations = [...svg.matchAll(/<animate(?:Transform)?\s[^>]*\/>/g)].map(([element]) => element);
+  const animations = [...svg.matchAll(/<(?:animate|animateTransform|animateMotion|animateColor|set)\b[^>]*>/g)].map(
+    ([element]) => element,
+  );
   const attribute = (element: string, name: string): string | undefined =>
     new RegExp(`\\s${name}="([^"]*)"`).exec(element)?.[1];
 
   it("is SMIL, not script", () => {
     expect(animations.length).toBeGreaterThan(10);
+  });
+
+  it("checks every SMIL element: each opening tag is one of the animations below", () => {
+    const smil = svg.match(/<(?:animate\w*|set)\b/g) ?? [];
+    expect(smil).toHaveLength(animations.length);
   });
 
   it("runs every animation on one shared clock that loops forever", () => {
@@ -169,5 +180,28 @@ describe("the README banner master", () => {
     expect(XMLValidator.validate(master)).toBe(true);
     // XML forbids "--" inside a comment, and XMLValidator does not check it.
     expect(master.slice("<!--".length, master.indexOf("-->"))).not.toContain("--");
+  });
+});
+
+describe("the banner without SMIL", () => {
+  const svg = bannerSvg();
+  const shown = (pattern: RegExp): string[] => [...svg.matchAll(pattern)].map(([, value]) => value);
+
+  it("shows May 30 on the calendar, and only that page", () => {
+    expect(shown(/<text [^>]*\sopacity="1"><animate [^>]*\/>(\d+)<\/text>/g)).toEqual(["30"]);
+  });
+
+  it("shows every tile at its last stage, with the Notes window still closed", () => {
+    const window = ["0"];
+    const lastStageOnly = BANNER_TILES.flatMap(({ stages }) =>
+      stages.map((_, index) => (index === stages.length - 1 ? "1" : "0")),
+    );
+    expect(shown(/<g opacity="([\d.]+)"><animate attributeName="opacity"/g)).toEqual([...window, ...lastStageOnly]);
+  });
+
+  it("shows Notes before its launch: not lifted, not withered, no running dot", () => {
+    expect(shown(/<g transform="translate\(([^)]*)\)"><animateTransform [^>]*values="0 0;/g)).toEqual(["0 0"]);
+    expect(shown(/<use [^>]*\sopacity="([\d.]+)"/g)).toEqual(["0"]);
+    expect(shown(/<circle [^>]*\sopacity="([\d.]+)"><animate/g)).toEqual(["0"]);
   });
 });

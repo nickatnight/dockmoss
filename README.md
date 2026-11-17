@@ -1,8 +1,17 @@
-# DockMoss
-
-[![CI](https://github.com/nickatnight/dockmoss/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nickatnight/dockmoss/actions/workflows/ci.yml)
-
-A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened in a while. The longer an app sits unused, the more overgrown its icon gets. Open the app and the moss shrivels away.
+<div align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="DockMoss app icon: a grey stone tile with moss growing up from its lower edge">
+  <h1>DockMoss</h1>
+  <p>A macOS menu-bar app that grows moss on Dock icons for apps you haven't opened in a while.<br>
+  The longer an app sits unused, the more overgrown its icon gets. Open the app and the moss shrivels away.</p>
+  <p>
+    <a href="https://github.com/nickatnight/dockmoss/blob/main/package.json"><img src="https://img.shields.io/github/package-json/v/nickatnight/dockmoss" alt="Version"></a>
+    <a href="https://github.com/nickatnight/dockmoss/actions/workflows/ci.yml"><img src="https://github.com/nickatnight/dockmoss/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+    <a href="https://codecov.io/gh/nickatnight/dockmoss"><img src="https://codecov.io/gh/nickatnight/dockmoss/graph/badge.svg?branch=main" alt="Rust line coverage"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/nickatnight/dockmoss" alt="Licence: MIT"></a>
+    <a href="#requirements"><img src="https://img.shields.io/badge/macOS-15%2B-3E5B4C" alt="Platform: macOS 15 or later"></a>
+  </p>
+  <p><img src="docs/readme/banner.svg" width="900" alt="Animated illustration: a laptop on a kitchen counter with six app tiles in its Dock. As a wall calendar turns from May 1 to May 30, moss creeps over the tiles of unused apps, stage by stage, until the Notes tile is overgrown with a mushroom and a flower. The pointer opens Notes: its tile bounces, the moss browns and shrivels away, and the Notes window opens."></p>
+</div>
 
 **Status:** MVP complete (slice 13 of 13). Builds are unsigned; signing, notarization and a DMG are milestone 7.
 
@@ -72,9 +81,10 @@ Dev builds also outline each Dock icon and label it with its overgrowth and stag
 | `pnpm test` | vitest over the frontend's pure modules |
 | `pnpm check:task` | `check` plus tests, a clean `pnpm build`, `cargo test`, `cargo deny`, `pnpm audit`, gitleaks |
 | `pnpm coverage` | Rust line coverage, on demand, no threshold |
+| `pnpm coverage:lcov` | The same, written to `src-tauri/target/lcov.info` |
 | `pnpm tauri build` | Unsigned `src-tauri/target/release/bundle/macos/DockMoss.app` |
 
-CI runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on a macOS 26 arm64 runner with Rust pinned to 1.99.1. The release build fails on any warning. The workflow is [.github/workflows/ci.yml](.github/workflows/ci.yml).
+CI runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on a macOS 26 arm64 runner with Rust pinned to 1.99.1. The release build fails on any warning. Except on PRs from forks, it then runs `pnpm coverage:lcov` and uploads the report to Codecov for the coverage badge; a failed upload never fails the run. The upload uses a Codecov CLI checked against a sha256 kept in `ci.yml`; to move to a new CLI, change its version and hash together, taking the hash from both Codecov's `SHA256SUM` and the GitHub release asset. The workflow is [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 `tauri dev` skips the Content Security Policy. To test with it, run `pnpm tauri build --debug --no-bundle` and start `src-tauri/target/debug/dockmoss`. That build has the Web Inspector on, so keep it to your own machine.
 

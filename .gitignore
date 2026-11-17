@@ -7,5 +7,5 @@ dist
 .DS_Store
 *.sw?
 
-# Local-only docs (MVP spec, plan, ADRs) for now
-docs/
+docs/*
+!docs/readme/

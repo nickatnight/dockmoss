@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { AppGrowth, BundleId, DockItem } from "../ipc";
 import {
   INSTANCE_ATTRIBUTES,
+  REC709_LUMA,
+  SHRIVEL_FRONT_REACH,
+  SHRIVEL_FRONT_WIDTH,
   SHRIVEL_MS,
   WITHER_TINT,
   type MossInstance,
@@ -21,6 +24,7 @@ import {
   parseOvergrowthOverride,
   mossOvergrowth,
   quantize,
+  shrivelFront,
   shrivelFrame,
   shrivelInstance,
   shrivelProgress,
@@ -661,6 +665,30 @@ describe("shrivelProgress", () => {
   });
 });
 
+describe("shrivelFront", () => {
+  it("starts with its soft edge wholly above the bake, so the moss is whole", () => {
+    expect(shrivelFront(1) - SHRIVEL_FRONT_WIDTH).toBeCloseTo(1, 12);
+  });
+
+  it("ends at the bake's bottom row, so no moss is left", () => {
+    expect(shrivelFront(0)).toBe(0);
+  });
+
+  it("moves in step with what remains of the moss", () => {
+    expect(shrivelFront(0.5)).toBeCloseTo(SHRIVEL_FRONT_REACH / 2, 12);
+  });
+
+  it("is the front moss.frag.glsl draws: what remains times SHRIVEL_FRONT_REACH, a soft edge SHRIVEL_FRONT_WIDTH deep below it", () => {
+    const code = fragmentSource
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+      .replace(/\s+/g, " ");
+    expect(code, "the shader's front must stay shrivelFront(v_remaining), whole below its soft edge").toContain(
+      "float front = v_remaining * SHRIVEL_FRONT_REACH; moss *= 1.0 - smoothstep(front - SHRIVEL_FRONT_WIDTH, front, uv.y);",
+    );
+  });
+});
+
 describe("shrivelInstance", () => {
   const progresses = Array.from({ length: 101 }, (_, index) => index / 100);
   const overgrown = icon({ overgrowth: mossy(1), overgrown: true });
@@ -772,10 +800,7 @@ describe("WITHER_TINT", () => {
   // that sum to 1, the luma of a premultiplied colour is at most its
   // alpha, so a tint no channel of which is above 1 keeps it premultiplied.
   it("keeps a withered premultiplied colour premultiplied", () => {
-    const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource);
-
-    expect(weights).not.toBeNull();
-    expect(weights?.[1].split(",").map(Number).reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
+    expect(REC709_LUMA.reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
     for (const channel of WITHER_TINT) {
       expect(channel).toBeGreaterThanOrEqual(0);
       expect(channel).toBeLessThanOrEqual(1);

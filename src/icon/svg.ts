@@ -56,11 +56,6 @@ export function shapesSvg(shapes: readonly Shape[]): string {
 
 export const ICON_CLIP_PATH = `<clipPath id="${CLIP_ID}"><rect width="${ICON_UNITS}" height="${ICON_UNITS}" rx="${tenths(ICON_CORNER_RADIUS)}"/></clipPath>`;
 
-/**
- * A scene's SVG. "inline" puts the occlusion's clip path in the scene itself;
- * "shared" leaves it out, for a document that holds many scenes and puts
- * ICON_CLIP_PATH in its defs once.
- */
 export function sceneSvg(scene: MossScene, clip: "inline" | "shared" = "inline"): string {
   const occlusion =
     scene.occlusion.length === 0

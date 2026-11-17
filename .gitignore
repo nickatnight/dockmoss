@@ -7,6 +7,5 @@ dist
 .DS_Store
 *.sw?
 
-# Local-only docs (MVP spec, plan, ADRs) for now; the README's images are committed
 docs/*
 !docs/readme/

@@ -19,11 +19,8 @@ const HEIGHT = 900;
 
 const n = (value: number): string => String(Number(value.toFixed(2)));
 
-/** The length of the loop. Every animation runs on this one clock. */
 export const BANNER_SECONDS = 12;
-/** The moment a renderer without SMIL shows: every tile at its last stage, before the launch. */
 const POSTER = 7;
-/** The shortest step between two key frames: a jump that still keeps the key times rising. */
 const JUMP = 0.02;
 
 type Value = number | readonly number[];
@@ -46,11 +43,6 @@ function valueAt(frames: readonly Frame[], at: number): Value {
   return a.map((value, index) => mix(value, b[index] ?? value));
 }
 
-/**
- * An attribute animated through key frames in seconds, held before the first
- * and after the last. Returns the attribute set to its value at POSTER, for
- * renderers that ignore SMIL, and the SMIL element that animates it.
- */
 function animated(
   attribute: "opacity" | "y" | "transform",
   frames: readonly Frame[],
@@ -78,7 +70,6 @@ function animated(
       };
 }
 
-/** Frames easing from one value to another with the renderer's smoothstep. */
 function eased(from: number, to: number, start: Value, end: Value, samples = 8): Frame[] {
   return Array.from({ length: samples + 1 }, (_, index): Frame => {
     const k = smoothstep(0, 1, index / samples);
@@ -91,20 +82,15 @@ function eased(from: number, to: number, start: Value, end: Value, samples = 8):
   });
 }
 
-/** A moss stage a tile reaches, and when in the loop, in seconds. */
 export interface Stage {
   at: number;
   step: LevelStep;
 }
 
 export interface BannerTile {
-  /** The tile's art in a 100-unit square, or the app icon's stone. */
   glyph: string | "stone";
-  /** Its moss stages in order; none for an app in daily use. */
   stages: readonly Stage[];
-  /** Running all loop long, with the dot under it. */
   running: boolean;
-  /** When the pointer opens it: it bounces, gets its dot, and its moss shrivels. */
   launchesAt?: number;
 }
 
@@ -141,12 +127,6 @@ const MUSIC = `<g fill="#FFFFFF"><ellipse cx="36" cy="70" rx="10" ry="7.5" trans
 const PHOTOS = `<circle cx="67" cy="34" r="10" fill="#F6C445"/>
 <path d="M14 80L38 46L52 64L64 52L88 80Z" fill="#9FB6D6"/><path d="M14 80L38 46L48 60L36 80Z" fill="#DDE7F3"/>`;
 
-/**
- * The Dock, left to right. Files is in daily use and stays clean. The rest go
- * unused at staggered times, so they reach their stages out of step; Notes
- * grows all the way to Overgrown before the pointer opens it, and the stone
- * stops at the app icon's step 16.
- */
 export const BANNER_TILES: readonly BannerTile[] = [
   { glyph: `${tileBase("#5B9BE0", "#2F6FB8", "tile-0")}${tileRect("tile-0")}${FILES}`, stages: [], running: true },
   {
@@ -173,7 +153,6 @@ export const BANNER_TILES: readonly BannerTile[] = [
   { glyph: "stone", stages: [stage(1, 6), stage(3.4, 12), stage(5.8, 16)], running: false },
 ];
 
-/** The laptop's screen, and the Dock on it: one tile per item, side by side, as AX reports them. */
 const SCREEN = { x: 300, y: 106, width: 1000, height: 625 } as const;
 const TILE = 140;
 const DOCK_PADDING = 12;
@@ -185,20 +164,16 @@ function tileRectAt(index: number): LogicalRect {
   return { x: DOCK_X + DOCK_PADDING + index * TILE, y: DOCK_Y + 1, width: TILE, height: TILE - 2 };
 }
 
-/** A stage fades in over this long, as the next bake replaces the last. */
 const GROW = 0.4;
-/** The app window closes and the moss clears, ready for the loop to start bare. */
 const RESET = 10.9;
 const RESET_END = 11.5;
 
 const LAUNCH_INDEX = BANNER_TILES.findIndex(({ launchesAt }) => launchesAt !== undefined);
 const LAUNCH = BANNER_TILES[LAUNCH_INDEX]?.launchesAt ?? 0;
-/** The overlay hears of the launch a beat after the click. */
 const SHRIVEL_START = LAUNCH + 0.1;
 const SHRIVEL_SECONDS = SHRIVEL_MS / 1000;
 const LAUNCH_MOSS = "launch-moss";
 
-/** The pages of the wall calendar. Each moss stage lands on a page turn. */
 const CALENDAR_PAGES: readonly (readonly [at: number, day: number])[] = [
   [0, 1],
   [1, 5],
@@ -216,7 +191,6 @@ function mossAt(index: number, step: LevelStep): string {
   return sceneSvg(scene, "shared");
 }
 
-/** Shown from `at`, faded in over GROW; hidden once the next stage has faded in, or at the reset. */
 function stageFrames(stages: readonly Stage[], index: number): Frame[] {
   const { at } = stages[index];
   const next = stages[index + 1];
@@ -233,20 +207,13 @@ function stageFrames(stages: readonly Stage[], index: number): Frame[] {
   return [[at, 0], [at + GROW, 1], ...end];
 }
 
-/** Samples of the shrivel's progress, from 0 at its start to 1 SHRIVEL_MS later. */
 const SHRIVEL_SAMPLES = Array.from({ length: 13 }, (_, index) => index / 12);
 
-/**
- * The shader's shrivel: the moss browns over the first SHRIVEL_WITHER_END of
- * it, while a front with a soft edge SHRIVEL_FRONT_WIDTH deep sweeps down the
- * bake box from the top. In moss units the bake box is the whole tile.
- */
 const BAKE_TOP = -OVERHANG_UNITS;
 const BAKE_BOTTOM = ICON_UNITS + OVERHANG_UNITS;
 const FRONT_DEPTH = SHRIVEL_FRONT_WIDTH * TILE_UNITS;
 const MASK_HEIGHT = TILE_UNITS + 2 * FRONT_DEPTH;
 
-/** The top of the mask's soft edge; the moss is whole below it plus FRONT_DEPTH. */
 function frontTop(progress: number): number {
   const remaining = 1 - smoothstep(0, 1, progress);
   return BAKE_BOTTOM - remaining * (1 + SHRIVEL_FRONT_WIDTH) * TILE_UNITS;
@@ -267,7 +234,6 @@ const WITHERING = animated("opacity", [
   [RESET_END + 2 * JUMP, 0],
 ]);
 
-/** The shader's luma weights, read from the shader so the two can't drift. */
 const LUMA = (() => {
   const weights = /const vec3 REC709_LUMA = vec3\(([^)]+)\);/.exec(fragmentSource)?.[1];
   if (weights === undefined) {
@@ -287,7 +253,6 @@ const SHRIVEL_DEFS = `<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2=
 <mask id="shrivel" maskUnits="userSpaceOnUse" x="${n(BAKE_TOP - FRONT_DEPTH)}" y="${n(BAKE_TOP - FRONT_DEPTH)}" width="${n(TILE_UNITS + 2 * FRONT_DEPTH)}" height="${n(TILE_UNITS + 2 * FRONT_DEPTH)}"><rect x="${n(BAKE_TOP - FRONT_DEPTH)}" ${SHRIVEL_FRONT.attribute} width="${n(TILE_UNITS + 2 * FRONT_DEPTH)}" height="${n(MASK_HEIGHT)}" fill="url(#shrivel-edge)">${SHRIVEL_FRONT.animation}</rect></mask>
 <filter id="wither" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="${WITHER_MATRIX}"/></filter>`;
 
-/** Two hops, as the Dock bounces an app while it opens. */
 function bounceFrames(at: number): Frame[] {
   const hop = (start: number, seconds: number, height: number, from: number): Frame[] =>
     Array.from({ length: 9 - from }, (_, index): Frame => {
@@ -339,7 +304,6 @@ function tileSvg(tile: BannerTile, index: number): string {
 const LAUNCH_ART = artBox(tileRectAt(LAUNCH_INDEX));
 const LAUNCH_CENTRE: readonly number[] = [LAUNCH_ART.x + LAUNCH_ART.width / 2, LAUNCH_ART.y + LAUNCH_ART.height / 2];
 
-/** The pointer rests on the desktop, opens Notes, then moves off the window. */
 const POINTER_REST: readonly number[] = [1130, 430];
 const POINTER_AWAY: readonly number[] = [1170, 540];
 const POINTER_PATH = animated(
@@ -362,7 +326,6 @@ const POINTER_PRESS = animated(
 );
 const POINTER = `<g ${POINTER_PATH.attribute}>${POINTER_PATH.animation}<g ${POINTER_PRESS.attribute}>${POINTER_PRESS.animation}<path d="M0 0V34L8.5 26L14 38.5L20 36L14.6 23.6H26.5Z" fill="#111111" stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round"/></g></g>`;
 
-/** The Notes window zooms out of its tile once the app is up, and back in at the reset. */
 const WINDOW_CENTRE: readonly number[] = [800, 360];
 const WINDOW_SIZE = { width: 580, height: 320 } as const;
 const OPEN = LAUNCH + 0.7;
@@ -413,7 +376,6 @@ const COUNTER = `<rect y="716" width="${WIDTH}" height="110" fill="#D4A66F"/>
 <g fill="#334D40"><rect x="397" y="856" width="6" height="44"/><rect x="797" y="856" width="6" height="44"/><rect x="1197" y="856" width="6" height="44"/></g>
 <g fill="#C9A24A"><rect x="330" y="868" width="44" height="7" rx="3.5"/><rect x="426" y="868" width="44" height="7" rx="3.5"/><rect x="1130" y="868" width="44" height="7" rx="3.5"/><rect x="1226" y="868" width="44" height="7" rx="3.5"/></g>`;
 
-/** Basil: broad leaves in pairs up three stems, darker low down, lighter at the tips. */
 const LEAVES: readonly (readonly [x: number, y: number, rx: number, ry: number, turn: number, color: string])[] = [
   [122, 664, 30, 17, -20, "#3D7030"],
   [212, 662, 30, 17, 22, "#3D7030"],

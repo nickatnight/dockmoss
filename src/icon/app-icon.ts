@@ -8,7 +8,6 @@ export const APP_ICON_MOSS: SceneInput = {
   overgrown: false,
 };
 
-/** The side of the square the stone tile is drawn in: a whole Dock tile, overhang included. */
 export const SIDE = 1024;
 const scale = SIDE / TILE_UNITS;
 const inset = OVERHANG_UNITS * scale;
@@ -20,7 +19,6 @@ const STONE_SIDE = 824;
 const STONE_END = STONE_ORIGIN + STONE_SIDE;
 const STONE_RADIUS = 185;
 
-/** The stone tile, laid out as the overlay lays an icon's art in a SIDE-wide Dock tile. Uses STONE_DEFS. */
 export const STONE_TILE = `<g transform="translate(${px(inset)} ${px(inset)}) scale(${px(iconSide / STONE_SIDE)}) translate(-${STONE_ORIGIN} -${STONE_ORIGIN})">
 <rect x="${STONE_ORIGIN}" y="${STONE_ORIGIN}" width="${STONE_SIDE}" height="${STONE_SIDE}" rx="${STONE_RADIUS}" fill="url(#stone)" filter="url(#drop)"/>
 <g clip-path="url(#tile)">
@@ -36,7 +34,6 @@ export const STONE_TILE = `<g transform="translate(${px(inset)} ${px(inset)}) sc
 </g>
 </g>`;
 
-/** The gradients, clip and shadow STONE_TILE uses: ids stone, sheen, tile and drop. */
 export const STONE_DEFS = `<linearGradient id="stone" x1="0" y1="${STONE_ORIGIN}" x2="0" y2="${STONE_END}" gradientUnits="userSpaceOnUse">
 <stop offset="0" stop-color="#7C8994"/>
 <stop offset="1" stop-color="#5B6873"/>

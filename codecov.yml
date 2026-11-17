@@ -1,5 +1,3 @@
-# The Codecov badge reports Rust line coverage; it gates nothing (CONSTRAINTS.md:
-# coverage has no threshold). No status checks, no PR comments.
 coverage:
   status:
     project: off

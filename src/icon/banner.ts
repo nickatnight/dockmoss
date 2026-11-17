@@ -2,6 +2,7 @@ import type { LogicalRect } from "../ipc";
 import { ICON_UNITS, LEVEL_STEPS, type LevelStep, mossScene, OVERHANG_UNITS, TILE_UNITS } from "../render/generator";
 import {
   artBox,
+  bakeBox,
   CORNER_RADIUS_PER_SIDE,
   fnv1a32,
   REC709_LUMA,
@@ -34,8 +35,10 @@ function mix(from: Value, to: Value, k: number): Value {
   if (typeof from === "number" && typeof to === "number") {
     return lerp(from, to);
   }
-  const ends = [to].flat();
-  return [from].flat().map((a, index) => lerp(a, ends[index] ?? a));
+  if (typeof from === "number" || typeof to === "number" || from.length !== to.length) {
+    throw new Error(`can't mix ${formatValue(from)} with ${formatValue(to)}`);
+  }
+  return from.map((a, index) => lerp(a, to[index]));
 }
 
 function valueAt(frames: readonly Frame[], at: number): Value {
@@ -124,6 +127,9 @@ function stage(day: number, step: number): Stage {
   if (page === undefined) {
     throw new Error(`the calendar never shows May ${day}`);
   }
+  if (!Number.isInteger(step) || step < 1 || step > LEVEL_STEPS) {
+    throw new Error(`moss step ${step} is not one of 1 to ${LEVEL_STEPS}`);
+  }
   return { at: page[0], step: step as LevelStep };
 }
 
@@ -146,13 +152,13 @@ const headerBand = (height: number, color: string): string =>
 const FILES = `<path d="M20 30H40L46 36H78Q82 36 82 40V72Q82 76 78 76H22Q18 76 18 72V34Q18 30 22 30Z" fill="#BFD9F6"/>
 <rect x="18" y="44" width="64" height="32" rx="4" fill="#F4F8FD"/>`;
 
-const CALENDAR_DAYS = Array.from({ length: 12 }, (_, day) => {
+const CALENDAR_GLYPH_CELLS = Array.from({ length: 12 }, (_, day) => {
   const [column, row] = [day % 4, Math.floor(day / 4)];
   const today = day === 6;
   return `<rect x="${21 + column * 15}" y="${41 + row * 14}" width="10" height="9" rx="2" fill="${today ? "#E5533D" : "#C9CED6"}"/>`;
 }).join("");
 
-const CALENDAR = `${headerBand(28, "#E5533D")}${CALENDAR_DAYS}`;
+const CALENDAR_GLYPH = `${headerBand(28, "#E5533D")}${CALENDAR_GLYPH_CELLS}`;
 
 const NOTES = `${headerBand(24, "#F0B32E")}
 <g fill="#A97A12" fill-opacity="0.45"><rect x="20" y="38" width="60" height="5" rx="2.5"/><rect x="20" y="51" width="60" height="5" rx="2.5"/><rect x="20" y="64" width="60" height="5" rx="2.5"/><rect x="20" y="77" width="38" height="5" rx="2.5"/></g>`;
@@ -172,7 +178,7 @@ const NOTES_TILE: BannerTile = {
 export const BANNER_TILES: readonly BannerTile[] = [
   { face: drawn("tile-0", "#5B9BE0", "#2F6FB8", FILES), stages: [], running: true },
   {
-    face: drawn("tile-1", "#FFFFFF", "#E6E9ED", CALENDAR),
+    face: drawn("tile-1", "#FFFFFF", "#E6E9ED", CALENDAR_GLYPH),
     stages: [stage(8, 6), stage(15, 12)],
     running: false,
   },
@@ -209,6 +215,9 @@ const RESET_END = 11.5;
 export const BANNER_LAUNCH = { tile: NOTES_TILE, at: 7.9 } as const;
 const LAUNCH = BANNER_LAUNCH.at;
 const LAUNCH_INDEX = BANNER_TILES.indexOf(BANNER_LAUNCH.tile);
+if (LAUNCH_INDEX < 0) {
+  throw new Error("the launching tile is not in the Dock");
+}
 const POINTER_SETS_OFF = LAUNCH - 1;
 
 /** What a renderer without SMIL shows: every stage grown, the pointer still at rest. */
@@ -277,7 +286,18 @@ const WITHER_MATRIX = [
   .map((value) => String(Number(value.toFixed(5))))
   .join(" ");
 
-const SHRIVEL_DEFS = `<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000"/><stop offset="${n(FRONT_DEPTH / MASK_SIDE)}" stop-color="#FFFFFF"/></linearGradient>
+/**
+ * The shader's soft edge, 1 - smoothstep(front - SHRIVEL_FRONT_WIDTH, front, row), sampled at five stops
+ * down its depth. White at a stop's opacity masks the same in any colour space the browser masks in.
+ */
+const EDGE_STOPS = [0, 0.25, 0.5, 0.75, 1]
+  .map(
+    (t) =>
+      `<stop offset="${Number(((t * FRONT_DEPTH) / MASK_SIDE).toFixed(4))}" stop-color="#FFFFFF" stop-opacity="${n(smoothstep(0, 1, t))}"/>`,
+  )
+  .join("");
+
+const SHRIVEL_DEFS = `<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1">${EDGE_STOPS}</linearGradient>
 <mask id="shrivel" maskUnits="userSpaceOnUse" x="${n(MASK_ORIGIN)}" y="${n(MASK_ORIGIN)}" width="${n(MASK_SIDE)}" height="${n(MASK_SIDE)}"><rect x="${n(MASK_ORIGIN)}" ${SHRIVEL_FRONT.attribute} width="${n(MASK_SIDE)}" height="${n(MASK_SIDE)}" fill="url(#shrivel-edge)">${SHRIVEL_FRONT.animation}</rect></mask>
 <filter id="wither" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="${WITHER_MATRIX}"/></filter>`;
 
@@ -312,9 +332,10 @@ function tileSvg(tile: BannerTile, index: number): string {
   const launches = tile === BANNER_LAUNCH.tile;
   const rect = tileRectAt(index);
   const art = artBox(rect);
+  const bake = bakeBox(rect);
   const face =
     tile.face.kind === "stone"
-      ? `<g transform="translate(${n(rect.x)} ${n(art.y - (TILE - art.width) / 2)}) scale(${n(TILE / STONE_TILE.side)})">${STONE_TILE.svg}</g>`
+      ? `<g transform="translate(${n(bake.x)} ${n(bake.y)}) scale(${n(bake.width / STONE_TILE.side)})">${STONE_TILE.svg}</g>`
       : `<g transform="translate(${n(art.x)} ${n(art.y)}) scale(${n(art.width / 100)})">${tile.face.svg}</g>`;
   const stages = tile.stages.map(({ step }, stageIndex) => {
     const shown = animatedAttribute("opacity", stageFrames(tile.stages, stageIndex));

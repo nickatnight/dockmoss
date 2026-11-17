@@ -18,7 +18,7 @@
 <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.3"/>
 </filter>
 <clipPath id="icon"><rect width="112" height="112" rx="25.2"/></clipPath>
-<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000"/><stop offset="0.05" stop-color="#FFFFFF"/></linearGradient>
+<linearGradient id="shrivel-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/><stop offset="0.0134" stop-color="#FFFFFF" stop-opacity="0.16"/><stop offset="0.0268" stop-color="#FFFFFF" stop-opacity="0.5"/><stop offset="0.0402" stop-color="#FFFFFF" stop-opacity="0.84"/><stop offset="0.0536" stop-color="#FFFFFF" stop-opacity="1"/></linearGradient>
 <mask id="shrivel" maskUnits="userSpaceOnUse" x="-23.39" y="-23.39" width="158.78" height="158.78"><rect x="-23.39" y="-23.39" width="158.78" height="158.78" fill="url(#shrivel-edge)"><animate attributeName="y" dur="12s" repeatCount="indefinite" keyTimes="0;0.6667;0.6708;0.675;0.6792;0.6833;0.6875;0.6917;0.6958;0.7;0.7042;0.7083;0.7125;0.7167;0.96;0.9617;1" values="-23.39;-23.39;-20.44;-12.26;0.09;15.57;33.14;51.75;70.36;87.92;103.41;115.75;123.93;126.89;126.89;-23.39;-23.39"/></rect></mask>
 <filter id="wither" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.2126 0.7152 0.0722 0 0 0.15732 0.52925 0.05343 0 0 0.08929 0.30038 0.03032 0 0 0 0 0 1 0"/></filter>
 <clipPath id="screen"><rect x="300" y="106" width="1000" height="625" rx="6"/></clipPath>

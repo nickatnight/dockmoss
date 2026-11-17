@@ -30,7 +30,7 @@ xmllint --noout src-tauri/icons/source/app-icon.svg
 
 ## Banner
 
-`docs/readme/banner.svg`, the animation at the top of the repo's README, is generated too, so don't edit it by hand. `bannerMaster()` in `src/icon/banner.ts` writes it. Every tile's moss is the generator's output, seeded from `fnv1a32("banner#<i>")` for the tile at Dock position `i`, and the Dock's last tile is the app icon's stone (`STONE_TILE` from `app-icon.ts`). The shrivel uses the renderer's own curves and constants from `src/render/model.ts` (`shrivelRemaining`, `shrivelWither`, `shrivelFront`, `SHRIVEL_MS`, `SHRIVEL_FRONT_WIDTH`, `WITHER_TINT`, `REC709_LUMA`), the same ones `moss.frag.glsl` gets at `#pragma moss_constants`. The animation is SMIL on one 12 s clock. GitHub plays SMIL inside an `<img>` but strips `<script>`, `<foreignObject>` and external references, and the tests refuse all three.
+`docs/readme/banner.svg`, the animation at the top of the repo's README, is generated too, so don't edit it by hand. `bannerMaster()` in `src/icon/banner.ts` writes it. Every tile's moss is the generator's output, seeded from `fnv1a32("banner#<i>")` for the tile at Dock position `i`, and the Dock's last tile is the app icon's stone (`STONE_TILE` from `app-icon.ts`). The shrivel uses what the overlay uses, all from `src/render/model.ts`. `shrivelRemaining`, `shrivelWither` and `SHRIVEL_MS` are the curves and length `shrivelInstance` hands the shader. `SHRIVEL_FRONT_WIDTH`, `SHRIVEL_FRONT_REACH`, `WITHER_TINT` and `REC709_LUMA` are the constants `moss.frag.glsl` gets at `#pragma moss_constants`. `shrivelFront` places the front; the shader repeats its product per pixel, and a test in `src/render/model.test.ts` holds the shader's text to it. The front's soft edge is the shader's `smoothstep`, sampled at five gradient stops. The animation is SMIL on one 12 s clock. GitHub plays SMIL inside an `<img>` but strips `<script>`, `<foreignObject>` and external references, and the tests refuse all three.
 
 A vitest file snapshot fails `pnpm test` when the banner is stale, and a pinned SHA-256 fails it on any change to the art or the generator. After a deliberate change:
 
@@ -40,7 +40,7 @@ pnpm test src/icon -u    # rewrite banner.svg (and app-icon.svg); the filter goe
 xmllint --noout docs/readme/banner.svg
 ```
 
-A test keeps the file under 1 MB; it is about 610 KB. Look at the result in a browser before you commit it: open `docs/readme/banner.svg` in Safari and in Chrome and watch a whole loop. Each animated attribute's static value is its value as the pointer sets off for Notes (6.9 s), so a viewer that ignores SMIL shows the grown Dock with the pointer at rest, not a bare one. Quick Look does play SMIL: its thumbnail is the bare first frame.
+A test keeps the file under 1 MB; it is about 610 KB. Look at the result in a browser before you commit it: open `docs/readme/banner.svg` in Safari and in Chrome and watch a whole loop. Each animated attribute's static value is its value as the pointer sets off for Notes (6.9 s), so a viewer that ignores SMIL shows the grown Dock with the pointer at rest, not a bare one. Quick Look does run the SMIL: its thumbnail (`qlmanage -t`) shows the bare first frame, not the grown Dock.
 
 ## Tray glyph
 

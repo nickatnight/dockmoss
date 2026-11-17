@@ -20,7 +20,7 @@ cargo build
 
 Frontend: `pnpm test` (vitest), and `pnpm check:task`, which also fails if `dist/` carries the debug layer. The package manager is **pnpm** only.
 
-CI (`.github/workflows/ci.yml`) runs `pnpm check:task`, `cargo build` and `pnpm tauri build --no-bundle` on every PR to `main` and every push to `main`, on Rust 1.99.1. The release build fails on any warning.
+CI (`.github/workflows/ci.yml`) runs on every PR to `main` and every push to `main`, on Rust 1.99.1, as parallel jobs. Lint, Web, and Deps and secrets each run named parts of `check:task` (`check:fast`; `check:web`; `check:deps` and `check:secrets`). Rust tests and coverage runs the Rust tests once under `pnpm coverage:lcov` in place of `cargo test`, then, except on fork PRs, uploads to Codecov. Release build runs `cargo build` and `pnpm tauri build --no-bundle`, and fails on any warning. The `CI` job passes only when all of them pass. Add a new check to `check:fast`, `check:web`, `check:deps` or `check:secrets`, so `check:task` and CI both run it. CI does not run `check:rust-test`.
 
 Run the app with `pnpm tauri dev`. Quit any other DockMoss first: every copy shares the bundle identifier, so a second copy exits at once.
 

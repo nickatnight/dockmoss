@@ -28,6 +28,20 @@ xmllint --noout src-tauri/icons/source/app-icon.svg
 
 `pnpm tauri icon` writes the chunks of `icon.icns` in a different order on each run, so a regenerated `icon.icns` differs byte-for-byte even when the artwork is identical. Commit it only when `app-icon.svg` changed.
 
+## Banner
+
+`docs/readme/banner.svg`, the animation at the top of the repo's README, is generated too, so don't edit it by hand. `bannerMaster()` in `src/icon/banner.ts` writes it. Every tile's moss is the generator's output, seeded from `fnv1a32("banner#<i>")` for the tile at Dock position `i`, and the Dock's last tile is the app icon's stone (`STONE_TILE` from `app-icon.ts`). The shrivel uses the renderer's `SHRIVEL_MS`, `SHRIVEL_WITHER_END`, `SHRIVEL_FRONT_WIDTH` and `WITHER_TINT`, and the luma weights it reads from `moss.frag.glsl`. The animation is SMIL on one 12 s clock. GitHub plays SMIL inside an `<img>` but strips `<script>`, `<foreignObject>` and external references, and the tests refuse all three.
+
+A vitest file snapshot fails `pnpm test` when the banner is stale, and a pinned SHA-256 fails it on any change to the art or the generator. After a deliberate change:
+
+```sh
+pnpm test src/icon -u    # rewrite banner.svg (and app-icon.svg); the filter goes before -u
+# re-pin BANNER_SHA256 in src/icon/banner.test.ts (the failing test prints the new value)
+xmllint --noout docs/readme/banner.svg
+```
+
+A test keeps the file under 1 MB; it is about 610 KB. Look at the result in a browser before you commit it: open `docs/readme/banner.svg` in Safari and in Chrome and watch a whole loop. Each animated attribute's static value is its value at 7 s, so a viewer that ignores SMIL shows the grown Dock, not a bare one. Quick Look does play SMIL: its thumbnail is the bare first frame.
+
 ## Tray glyph
 
 ```sh

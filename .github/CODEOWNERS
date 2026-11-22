@@ -1,0 +1,22 @@
+# The ruleset on main requires a code owner's approval on every PR.
+* @nickatnight
+
+# Paths that can reach the build, the release or the user's Mac. They stay
+# with the owner even when other people own the rest of the tree.
+/.github/                    @nickatnight
+/scripts/                    @nickatnight
+/package.json                @nickatnight
+/pnpm-lock.yaml              @nickatnight
+/src-tauri/Cargo.toml        @nickatnight
+/src-tauri/Cargo.lock        @nickatnight
+/src-tauri/build.rs          @nickatnight
+/src-tauri/deny.toml         @nickatnight
+/src-tauri/clippy.toml       @nickatnight
+/src-tauri/tauri.conf.json   @nickatnight
+/src-tauri/capabilities/     @nickatnight
+/src-tauri/permissions/      @nickatnight
+/src-tauri/src/macos/        @nickatnight
+
+# Rules that people and agents follow when they change the code.
+/CLAUDE.md                   @nickatnight
+/CONSTRAINTS.md              @nickatnight

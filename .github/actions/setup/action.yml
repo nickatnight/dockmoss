@@ -14,6 +14,9 @@ inputs:
   cache:
     description: Restore and save the pnpm store and Rust caches ('true' or 'false').
     default: 'true'
+  ignore-scripts:
+    description: Install with --ignore-scripts, so no package's install script runs ('true' or 'false').
+    default: 'false'
 
 runs:
   using: composite
@@ -44,5 +47,5 @@ runs:
       with:
         workspaces: src-tauri
 
-    - run: pnpm install --frozen-lockfile
+    - run: pnpm install --frozen-lockfile ${{ inputs.ignore-scripts == 'true' && '--ignore-scripts' || '' }}
       shell: bash

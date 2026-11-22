@@ -16,8 +16,8 @@ defaults:
 
 # Each job runs on its own runner. Only build runs the project's and its
 # dependencies' build code, and it gets no secret and a read-only token. sign
-# holds the certificate and the API key but compiles nothing. Only draft gets a
-# write token.
+# holds the certificate, the API key and the write token but compiles nothing,
+# and the signed DMG leaves it only as the draft release's asset.
 jobs:
   build:
     name: Build
@@ -68,7 +68,7 @@ jobs:
     timeout-minutes: 60
     environment: release
     permissions:
-      contents: read
+      contents: write
     env:
       # The Team ID is public in every signed copy, so it is a variable. The
       # certificate's name is a secret (DEVELOPER_NAME, below) only so that
@@ -98,20 +98,42 @@ jobs:
             exit 1
           fi
 
-      # pnpm install runs no dependency scripts here, and tauri bundle only
-      # packages the binary that build made.
+      # Before setup, so a re-run fails before it spends a notarization.
+      # gh release create would add a second draft beside an existing one.
+      - name: No release exists for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')"
+          if grep -qxF "$GITHUB_REF_NAME" <<< "$tags"; then
+            echo "::error::a release for $GITHUB_REF_NAME already exists, drafts included; delete it, then re-run"
+            exit 1
+          fi
+
+      # No install script runs here, and tauri bundle only packages the binary
+      # that build made.
       - uses: ./.github/actions/setup
         with:
           cache: 'false'
+          ignore-scripts: 'true'
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dockmoss-binary
-          path: src-tauri/target/release
+          path: ${{ runner.temp }}/binary
 
-      # The artifact zip drops the mode bits.
-      - name: Make the binary executable
-        run: chmod +x src-tauri/target/release/dockmoss
+      # Take only the one regular file build uploaded. The artifact zip drops
+      # the mode bits, so install sets them.
+      - name: Install the binary
+        run: |
+          bin="$RUNNER_TEMP/binary/dockmoss"
+          entries="$(find "$RUNNER_TEMP/binary" -mindepth 1 | wc -l | tr -d ' ')"
+          if [[ "$entries" -ne 1 || ! -f "$bin" || -L "$bin" ]]; then
+            echo "::error::the binary artifact must hold exactly one regular file, dockmoss"
+            exit 1
+          fi
+          mkdir -p src-tauri/target/release
+          install -m 0755 "$bin" src-tauri/target/release/dockmoss
 
       # Given APPLE_CERTIFICATE, Tauri would import it and sign at once. Importing
       # it here lets this step refuse the wrong certificate before anything is
@@ -148,14 +170,16 @@ jobs:
           # it, never print it.
           expected="Developer ID Application: $DEVELOPER_NAME ($TEAM_ID)"
           found="$(security find-identity -v -p codesigning "$kc" \
-            | sed -n 's/^ *[0-9][0-9]*) [0-9A-F]* "\(.*\)"$/\1/p')"
-          if [[ "$found" != "$expected" ]]; then
-            count=0
-            [[ -z "$found" ]] || count="$(grep -c '' <<< "$found")"
+            | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) "\(.*\)"$/\1 \2/p')"
+          count=0
+          [[ -z "$found" ]] || count="$(grep -c '' <<< "$found")"
+          if [[ $count -ne 1 || "${found#* }" != "$expected" ]]; then
             echo "::error::found $count valid signing identities; the certificate must hold exactly one, Developer ID Application, matching secrets.APPLE_DEVELOPER_NAME and vars.APPLE_TEAM_ID"
             exit 1
           fi
-          echo "APPLE_SIGNING_IDENTITY=$expected" >> "$GITHUB_ENV"
+          # Sign by the certificate's SHA-1: codesign then uses exactly this
+          # certificate, and Tauri's "Signing with identity" lines show the hash.
+          echo "APPLE_SIGNING_IDENTITY=${found%% *}" >> "$GITHUB_ENV"
 
       - name: Write the App Store Connect API key
         env:
@@ -244,51 +268,19 @@ jobs:
           gatekeeper app --type execute "$app"
           gatekeeper DMG --type open --context context:primary-signature "$RELEASE_DMG"
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: dockmoss-dmg
-          path: ${{ env.RELEASE_DMG }}
-          if-no-files-found: error
-          retention-days: 1
+      - name: Draft the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=()
+          [[ "$version" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "$RELEASE_DMG" ${prerelease[@]+"${prerelease[@]}"} \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
+            --title "DockMoss $version"
 
       - name: Remove the keychain and the API key
         if: always()
         run: |
           [[ -n "${RELEASE_KEYCHAIN:-}" ]] && security delete-keychain "$RELEASE_KEYCHAIN" || true
           [[ -n "${APPLE_API_KEY_PATH:-}" ]] && rm -f "$APPLE_API_KEY_PATH" || true
-
-  draft:
-    name: Draft the release
-    needs: sign
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: dockmoss-dmg
-          path: dmg
-
-      # gh release create would add a second draft beside an existing one.
-      - name: Draft the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')"
-          if grep -qxF "$GITHUB_REF_NAME" <<< "$tags"; then
-            echo "::error::a release for $GITHUB_REF_NAME already exists, drafts included; delete it, then re-run"
-            exit 1
-          fi
-          shopt -s nullglob
-          dmgs=(dmg/*.dmg)
-          if [[ ${#dmgs[@]} -ne 1 ]]; then
-            echo "::error::expected one DMG, found ${#dmgs[@]}"
-            exit 1
-          fi
-          version="${GITHUB_REF_NAME#v}"
-          prerelease=()
-          [[ "$version" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "${dmgs[0]}" "${prerelease[@]}" \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
-            --title "DockMoss $version"

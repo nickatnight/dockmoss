@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Checks the signature, notarization and Gatekeeper's verdict on the app and
-# the DMG. The designated requirement must name the bundle identifier and the
-# Team ID, not a cdhash: that is what lets the Accessibility grant and the
-# login item survive an update.
+# The designated requirement must name the bundle identifier and the Team ID,
+# not a cdhash: that is what lets the Accessibility grant and the login item
+# survive an update.
 identifier="$(jq -r .identifier src-tauri/tauri.conf.json)"
 app="src-tauri/target/release/bundle/macos/$(jq -r .productName src-tauri/tauri.conf.json).app"
 fail() { echo "::error::$1"; exit 1; }
@@ -32,7 +31,7 @@ grep -qF "identifier \"$identifier\"" <<< "$requirement" \
 xcrun stapler validate "$app"
 xcrun stapler validate "$RELEASE_DMG"
 
-gatekeeper() { # <what> <spctl arguments...>
+gatekeeper() {
   local what="$1" out="$RUNNER_TEMP/spctl-$1.txt" rc=0
   shift
   spctl --assess -vv "$@" > "$out" 2>&1 || rc=$?

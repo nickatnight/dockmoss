@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Drafts the release with the checked DMG, if the tag still points at the
-# commit this run built.
 tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$GITHUB_REF_NAME" --jq .sha)"
 if [[ "$tagged" != "$GITHUB_SHA" ]]; then
   echo "::error::$GITHUB_REF_NAME no longer points at the commit this run built"

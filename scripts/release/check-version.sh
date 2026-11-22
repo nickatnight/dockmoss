@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The tag must be "v" followed by the version in all three version files, and
-# it must be on a commit on main.
 conf="$(jq -r .version src-tauri/tauri.conf.json)"
 pkg="$(jq -r .version package.json)"
 cargo="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"

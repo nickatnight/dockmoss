@@ -11,7 +11,6 @@ if [[ ${#dmgs[@]} -ne 1 ]]; then
 fi
 dmg="${dmgs[0]}"
 auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
-# Fetch the log whatever notarytool's exit status, so a rejection shows why.
 result="$(xcrun notarytool submit "$dmg" --wait --output-format json "${auth[@]}")" || true
 status="$(jq -r '.status // empty' <<< "$result" 2> /dev/null)" || true
 if [[ "$status" != "Accepted" ]]; then

@@ -53,8 +53,9 @@ jobs:
     name: Sign and notarize
     needs: build
     runs-on: macos-26
-    # A team's first notarization can take hours. The keychain lock below
-    # matches, because Tauri signs the DMG only after the app is notarized.
+    # A team's first notarization can take hours. The keychain lock in
+    # import-certificate.sh matches, because Tauri signs the DMG only after the
+    # app is notarized.
     timeout-minutes: 180
     environment: release
     permissions:
@@ -79,14 +80,11 @@ jobs:
           DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
         run: scripts/release/check-secrets.sh
 
-      # Before setup, so a re-run fails before it spends a notarization.
       - name: No release exists for this tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/release/check-no-release.sh
 
-      # No install script runs here, and tauri bundle only packages the binary
-      # that build made.
       - uses: ./.github/actions/setup
         with:
           cache: 'false'

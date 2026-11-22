@@ -4,10 +4,6 @@ set -euo pipefail
 # Given APPLE_CERTIFICATE, Tauri would import it and sign at once. Importing
 # it here lets this step refuse the wrong certificate before anything is
 # signed; Tauri then finds the identity through the keychain search list.
-if [[ ! "${SIGN_TIMEOUT_MINUTES:-}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "::error::SIGN_TIMEOUT_MINUTES must be the sign job's timeout in whole minutes"
-  exit 1
-fi
 umask 077
 kc="$RUNNER_TEMP/release.keychain-db"
 p12="$RUNNER_TEMP/certificate.p12"
@@ -16,7 +12,10 @@ kc_password="$(openssl rand -hex 32)"
 echo "RELEASE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
 printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$p12"
 security create-keychain -p "$kc_password" "$kc"
-security set-keychain-settings -lut "$((SIGN_TIMEOUT_MINUTES * 60))" "$kc"
+# No timeout (a new keychain locks after 300 s idle): the keychain lives in
+# RUNNER_TEMP on a VM used once and cleanup deletes it, so a timer could only
+# lock it during a long notarization, before Tauri signs the DMG.
+security set-keychain-settings "$kc"
 security unlock-keychain -p "$kc_password" "$kc"
 security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
 rm -f "$p12"

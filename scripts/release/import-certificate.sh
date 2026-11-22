@@ -15,8 +15,7 @@ security create-keychain -p "$kc_password" "$kc"
 # No lock timer, where a new keychain would otherwise lock after an idle
 # timeout: the keychain lives in RUNNER_TEMP on a VM used once and cleanup
 # deletes it, so a timer could only lock it during a long notarization, before
-# Tauri signs the DMG. show-keychain-info logs the result: the keychain's
-# runner path and its settings.
+# Tauri signs the DMG.
 security set-keychain-settings "$kc"
 security show-keychain-info "$kc"
 security unlock-keychain -p "$kc_password" "$kc"

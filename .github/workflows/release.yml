@@ -14,25 +14,24 @@ defaults:
   run:
     shell: bash
 
+# Each job runs on its own runner. Only build runs the project's and its
+# dependencies' build code, and it gets no secret and a read-only token. sign
+# holds the certificate and the API key but compiles nothing. Only draft gets a
+# write token.
 jobs:
-  release:
-    name: Signed release
+  build:
+    name: Build
     runs-on: macos-26
-    timeout-minutes: 60
-    environment: release
+    timeout-minutes: 45
     permissions:
-      contents: write
-    env:
-      # The Team ID is public in every signed copy, so it is a variable. The
-      # certificate's name is a secret (DEVELOPER_NAME, below) only so that
-      # GitHub masks it: Actions prints each step's env, and this log is public.
-      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Tag matches the app version
+      - name: Tag matches the app version and is on main
         run: |
           conf="$(jq -r .version src-tauri/tauri.conf.json)"
           pkg="$(jq -r .version package.json)"
@@ -42,7 +41,43 @@ jobs:
             echo "::error::the tag and the three version fields must all match"
             exit 1
           fi
-          echo "RELEASE_VERSION=$conf" >> "$GITHUB_ENV"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::the tagged commit is not on main"
+            exit 1
+          fi
+
+      # No caches: a signed build contains nothing another run wrote.
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+
+      - name: Build the app binary
+        run: pnpm tauri build --no-bundle -- --locked
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dockmoss-binary
+          path: src-tauri/target/release/dockmoss
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign and notarize
+    needs: build
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: read
+    env:
+      # The Team ID is public in every signed copy, so it is a variable. The
+      # certificate's name is a secret (DEVELOPER_NAME, below) only so that
+      # GitHub masks it: Actions prints each step's env, and this log is public.
+      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Release secrets are set
         env:
@@ -63,11 +98,20 @@ jobs:
             exit 1
           fi
 
-      # No caches: a signed build restores nothing another run wrote.
-      # Dependencies install before any secret is on disk.
+      # pnpm install runs no dependency scripts here, and tauri bundle only
+      # packages the binary that build made.
       - uses: ./.github/actions/setup
         with:
           cache: 'false'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dockmoss-binary
+          path: src-tauri/target/release
+
+      # The artifact zip drops the mode bits.
+      - name: Make the binary executable
+        run: chmod +x src-tauri/target/release/dockmoss
 
       # Given APPLE_CERTIFICATE, Tauri would import it and sign at once. Importing
       # it here lets this step refuse the wrong certificate before anything is
@@ -84,13 +128,14 @@ jobs:
           umask 077
           kc="$RUNNER_TEMP/release.keychain-db"
           p12="$RUNNER_TEMP/certificate.p12"
+          trap 'rm -f "$p12"' EXIT
           kc_password="$(openssl rand -hex 32)"
           echo "RELEASE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
           printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$p12"
           security create-keychain -p "$kc_password" "$kc"
           security set-keychain-settings -lut 3600 "$kc"
           security unlock-keychain -p "$kc_password" "$kc"
-          security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
           rm -f "$p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_password" "$kc" > /dev/null
           keychains=()
@@ -120,13 +165,13 @@ jobs:
           printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
           echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
 
-      - name: Build, sign and notarize the app
+      - name: Bundle, sign and notarize the app
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: pnpm tauri build --bundles app,dmg
+        run: pnpm tauri bundle --bundles app,dmg
 
-      # tauri build has already signed the DMG with APPLE_SIGNING_IDENTITY, and
+      # tauri bundle has already signed the DMG with APPLE_SIGNING_IDENTITY, and
       # codesign gives a Developer ID signature a secure timestamp by default.
       - name: Notarize and staple the DMG
         env:
@@ -165,6 +210,8 @@ jobs:
           grep -qxF "Identifier=$identifier" <<< "$info" || fail "the app's identifier is not $identifier"
           grep -qxF "TeamIdentifier=$TEAM_ID" <<< "$info" || fail "the app is not signed by team $TEAM_ID"
           grep -qE '^CodeDirectory .*flags=.*runtime' <<< "$info" || fail "the app lacks the hardened runtime"
+          dmg_info="$(codesign -dv --verbose=2 "$RELEASE_DMG" 2>&1)"
+          grep -qxF "TeamIdentifier=$TEAM_ID" <<< "$dmg_info" || fail "the DMG is not signed by team $TEAM_ID"
 
           requirement="$(codesign -d -r- "$app" 2>&1)"
           grep -qF "identifier \"$identifier\"" <<< "$requirement" \
@@ -178,18 +225,51 @@ jobs:
           spctl --assess --type open --context context:primary-signature -vv "$RELEASE_DMG" 2>&1 | tee "$RUNNER_TEMP/spctl-dmg.txt"
           grep -qx 'source=Notarized Developer ID' "$RUNNER_TEMP/spctl-dmg.txt" || fail "Gatekeeper does not accept the DMG as notarized"
 
-      - name: Draft the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          prerelease=()
-          [[ "$RELEASE_VERSION" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "$RELEASE_DMG" "${prerelease[@]}" \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
-            --title "DockMoss $RELEASE_VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dockmoss-dmg
+          path: ${{ env.RELEASE_DMG }}
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Remove the keychain and the API key
         if: always()
         run: |
           [[ -n "${RELEASE_KEYCHAIN:-}" ]] && security delete-keychain "$RELEASE_KEYCHAIN" || true
           [[ -n "${APPLE_API_KEY_PATH:-}" ]] && rm -f "$APPLE_API_KEY_PATH" || true
+
+  draft:
+    name: Draft the release
+    needs: sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dockmoss-dmg
+          path: dmg
+
+      # gh release create would add a second draft beside an existing one.
+      - name: Draft the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')"
+          if grep -qxF "$GITHUB_REF_NAME" <<< "$tags"; then
+            echo "::error::a release for $GITHUB_REF_NAME already exists, drafts included; delete it, then re-run"
+            exit 1
+          fi
+          shopt -s nullglob
+          dmgs=(dmg/*.dmg)
+          if [[ ${#dmgs[@]} -ne 1 ]]; then
+            echo "::error::expected one DMG, found ${#dmgs[@]}"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=()
+          [[ "$version" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${dmgs[0]}" "${prerelease[@]}" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
+            --title "DockMoss $version"

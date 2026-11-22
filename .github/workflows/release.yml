@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+# Each job runs on its own runner. Only build runs the project's and its
+# dependencies' build code, and it gets no secret and a read-only token. sign
+# holds the certificate, the API key and the write token but compiles nothing,
+# and the signed DMG leaves it only as the draft release's asset.
+jobs:
+  build:
+    name: Build
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Tag matches the app version and is on main
+        run: scripts/release/check-version.sh
+
+      # No caches: a signed build contains nothing another run wrote.
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+
+      - name: Build the app binary
+        run: pnpm tauri build --no-bundle -- --locked
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dockmoss-binary
+          path: src-tauri/target/release/dockmoss
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    name: Sign and notarize
+    needs: build
+    runs-on: macos-26
+    # A team's first notarization can take hours.
+    timeout-minutes: 180
+    environment: release
+    permissions:
+      contents: write
+    env:
+      # The Team ID is public in every signed copy, so it is a variable. The
+      # certificate's name is a secret (DEVELOPER_NAME, below) only so that
+      # GitHub masks it: Actions prints each step's env, and this log is public.
+      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Release secrets are set
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
+        run: scripts/release/check-secrets.sh
+
+      - name: No release exists for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release/check-no-release.sh
+
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+          ignore-scripts: 'true'
+          hoist: 'false'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dockmoss-binary
+          path: ${{ runner.temp }}/binary
+
+      - name: Install the binary
+        run: scripts/release/install-binary.sh
+
+      - name: Import the Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
+        run: scripts/release/import-certificate.sh
+
+      - name: Write the App Store Connect API key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: scripts/release/write-api-key.sh
+
+      - name: Bundle, sign and notarize the app
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: scripts/release/bundle.sh
+
+      - name: Notarize and staple the DMG
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: scripts/release/notarize-dmg.sh
+
+      - name: Check the signature, notarization and Gatekeeper
+        run: scripts/release/verify.sh
+
+      - name: Draft the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release/draft.sh
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: scripts/release/cleanup.sh

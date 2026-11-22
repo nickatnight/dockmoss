@@ -9,3 +9,8 @@ dist
 
 docs/*
 !docs/readme/
+
+.env
+.env.*
+*.p12
+*.p8

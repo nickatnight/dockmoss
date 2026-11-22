@@ -13,7 +13,7 @@
   <p><img src="docs/readme/banner.svg" width="900" alt="Animated illustration: a laptop on a kitchen counter with six app tiles in its Dock. As a wall calendar turns from May 1 to May 30, moss creeps over the tiles of unused apps, stage by stage, until the Notes tile is overgrown with a mushroom and a flower. The pointer opens Notes: its tile bounces, the moss browns and shrivels away, and the Notes window opens."></p>
 </div>
 
-**Status:** MVP complete (slice 13 of 13). Builds are unsigned; signing, notarization and a DMG are milestone 7.
+**Status:** MVP complete (slice 13 of 13). Builds are unsigned. The workflow that signs, notarizes and drafts a DMG release is written ([Releases](#releases)) but has not run yet: it waits for the organization's Apple Developer account (milestone 7).
 
 ## Requirements
 
@@ -104,6 +104,37 @@ Dev builds also outline each Dock icon and label it with its overgrowth and stag
 A failed Codecov upload never fails the run. The Codecov CLI is checked against a sha256 kept in `ci.yml`. To update it, change the version and the hash together, and take the hash from both Codecov's `SHA256SUM` and the GitHub release asset.
 
 `tauri dev` skips the Content Security Policy. To test with it, run `pnpm tauri build --debug --no-bundle` and start `src-tauri/target/debug/dockmoss`. That build has the Web Inspector on, so keep it to your own machine.
+
+### Releases
+
+[Release](.github/workflows/release.yml) runs when a `v*` tag is pushed. It builds the app and a DMG signed with the Developer ID, has both notarized and stapled, checks them with `codesign`, `stapler` and `spctl`, and opens a draft GitHub release to publish by hand. The build runs in a job with no secrets and a read-only token. Signing runs in a separate job that holds the certificate, the API key and the token that creates the draft. It compiles nothing. It starts the Tauri CLI with `node` rather than `pnpm` and names Tauri's own native binding, so no other package's code runs while the keychain is unlocked. The signed DMG leaves that job only as the draft's asset. The job stops before signing until everything below is set, so nothing ships unsigned.
+
+The steps' shell code is in [`scripts/release/`](scripts/release/), one script per step. Each script reads its inputs from the environment the workflow gives that step.
+
+To cut one, set the same version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, merge, then push the tag `v<version>` on a commit on `main`. A version with a `-` (such as `1.0.0-rc.1`) becomes a pre-release.
+
+The run reads these from the repository's `release` environment:
+
+| Name | Kind | Value |
+|---|---|---|
+| `APPLE_CERTIFICATE` | secret | The Developer ID Application certificate and key, and no other identity, exported as `.p12`, base64 (`base64 -i cert.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | secret | The `.p12` export password |
+| `APPLE_API_KEY` | secret | App Store Connect API key ID (Users and Access → Integrations, Developer access) |
+| `APPLE_API_ISSUER` | secret | That page's issuer ID |
+| `APPLE_API_PRIVATE_KEY` | secret | The contents of the key's `AuthKey_<id>.p8` |
+| `APPLE_DEVELOPER_NAME` | secret | The LLC's legal name, exactly as it appears in the organization's certificate, between `Developer ID Application: ` and ` (<Team ID>)`. Never a person's name, and never upload a certificate that shows one |
+| `APPLE_TEAM_ID` | variable | The Team ID |
+
+The run refuses a certificate whose name or Team ID differs from these. The name is a secret only so that GitHub masks it in the public logs.
+
+Before the first tag:
+
+- Create the `release` environment yourself. A run that names a missing environment creates one with no protection. Allow only the tag pattern `v*` to deploy to it, make yourself a required reviewer, and turn off the administrator bypass.
+- Store the six secrets and the variable on that environment only, never as repository or organization secrets.
+- Add a tag ruleset on `v*` that lets only you create, move or delete those tags.
+- Run releases on GitHub-hosted runners only, and don't register self-hosted runners on this repository or its organization. The signing keychain has no lock timer, so it is safe only on a machine that is thrown away after the job.
+
+The build's binary stays available to the sign job for 7 days. If sign starts later than that, for example while it waits for your approval or for the secrets, use "Re-run all jobs", not "Re-run failed jobs", so the build runs again.
 
 ## Docs
 

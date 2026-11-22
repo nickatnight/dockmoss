@@ -142,6 +142,7 @@ src/
   settings.ts, settings/ the Settings form and its pure model
   debug.ts               dev-only outlines and labels
   icon/                  dev-only generators for the app icon and the README banner (src-tauri/icons/README.md)
+scripts/release/         one script per step of the release workflow (README, Releases)
 ```
 
 The boundary that matters is `macos/`. Everything outside it is plain Rust with no `tauri` or `objc2`, so it can be unit-tested. `macos/` returns plain Rust types and holds every `unsafe` block.

@@ -9,3 +9,9 @@ dist
 
 docs/*
 !docs/readme/
+
+# Signing credentials never enter the repo (the release workflow reads them from secrets)
+.env
+.env.*
+*.p12
+*.p8

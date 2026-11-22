@@ -90,7 +90,11 @@ jobs:
           security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm -f "$p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_password" "$kc" > /dev/null
-          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          keychains=()
+          while IFS= read -r line; do
+            keychains+=("$line")
+          done < <(security list-keychains -d user | sed 's/^ *"//; s/"$//')
+          security list-keychains -d user -s "$kc" "${keychains[@]}"
 
           # The identity names the developer, and this log is public: compare
           # it, never print it.

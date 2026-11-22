@@ -32,23 +32,7 @@ jobs:
           persist-credentials: false
 
       - name: Tag matches the app version and is on main
-        run: |
-          conf="$(jq -r .version src-tauri/tauri.conf.json)"
-          pkg="$(jq -r .version package.json)"
-          cargo="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"
-          echo "tag $GITHUB_REF_NAME, tauri.conf.json $conf, package.json $pkg, Cargo.toml $cargo"
-          if [[ "$GITHUB_REF_NAME" != "v$conf" || "$pkg" != "$conf" || "$cargo" != "$conf" ]]; then
-            echo "::error::the tag and the three version fields must all match"
-            exit 1
-          fi
-          if ! git rev-parse --verify --quiet origin/main > /dev/null; then
-            echo "::error::origin/main is missing; the checkout needs fetch-depth: 0"
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::the tagged commit is not on main"
-            exit 1
-          fi
+        run: scripts/release/check-version.sh
 
       # No caches: a signed build contains nothing another run wrote.
       - uses: ./.github/actions/setup
@@ -93,28 +77,13 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
           DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
-        run: |
-          missing=""
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_KEY \
-                      APPLE_API_ISSUER APPLE_API_PRIVATE_KEY TEAM_ID DEVELOPER_NAME; do
-            [[ -n "${!name}" ]] || missing="$missing $name"
-          done
-          if [[ -n "$missing" ]]; then
-            echo "::error::not set in the release environment:$missing (TEAM_ID is vars.APPLE_TEAM_ID, DEVELOPER_NAME is secrets.APPLE_DEVELOPER_NAME)"
-            exit 1
-          fi
+        run: scripts/release/check-secrets.sh
 
       # Before setup, so a re-run fails before it spends a notarization.
-      # gh release create would add a second draft beside an existing one.
       - name: No release exists for this tag
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')"
-          if grep -qxF "$GITHUB_REF_NAME" <<< "$tags"; then
-            echo "::error::a release for $GITHUB_REF_NAME already exists, drafts included; delete it, then re-run"
-            exit 1
-          fi
+        run: scripts/release/check-no-release.sh
 
       # No install script runs here, and tauri bundle only packages the binary
       # that build made.
@@ -128,83 +97,21 @@ jobs:
           name: dockmoss-binary
           path: ${{ runner.temp }}/binary
 
-      # Take only the one regular file build uploaded. The artifact zip drops
-      # the mode bits, so install sets them.
       - name: Install the binary
-        run: |
-          bin="$RUNNER_TEMP/binary/dockmoss"
-          entries="$(find "$RUNNER_TEMP/binary" -mindepth 1 | wc -l | tr -d ' ')"
-          if [[ "$entries" -ne 1 || ! -f "$bin" || -L "$bin" ]]; then
-            echo "::error::the binary artifact must hold exactly one regular file, dockmoss"
-            exit 1
-          fi
-          mkdir -p src-tauri/target/release
-          install -m 0755 "$bin" src-tauri/target/release/dockmoss
+        run: scripts/release/install-binary.sh
 
-      # Given APPLE_CERTIFICATE, Tauri would import it and sign at once. Importing
-      # it here lets this step refuse the wrong certificate before anything is
-      # signed; Tauri then finds the identity through the keychain search list.
       - name: Import the Developer ID certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # The Team ID survives the move from an individual to an
-          # organization membership, so only the name refuses a certificate
-          # from the wrong one.
           DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
-        run: |
-          umask 077
-          kc="$RUNNER_TEMP/release.keychain-db"
-          p12="$RUNNER_TEMP/certificate.p12"
-          trap 'rm -f "$p12"' EXIT
-          kc_password="$(openssl rand -hex 32)"
-          echo "RELEASE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
-          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$p12"
-          security create-keychain -p "$kc_password" "$kc"
-          security set-keychain-settings -lut 10800 "$kc"
-          security unlock-keychain -p "$kc_password" "$kc"
-          security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
-          rm -f "$p12"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_password" "$kc" > /dev/null
-          keychains=()
-          while IFS= read -r line; do
-            keychains+=("$line")
-          done < <(security list-keychains -d user | sed 's/^ *"//; s/"$//')
-          security list-keychains -d user -s "$kc" "${keychains[@]}"
-
-          # The identity names the developer, and this log is public: compare
-          # it, never print it.
-          expected="Developer ID Application: $DEVELOPER_NAME ($TEAM_ID)"
-          found="$(security find-identity -v -p codesigning "$kc" \
-            | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) "\(.*\)"$/\1 \2/p')"
-          count=0
-          [[ -z "$found" ]] || count="$(grep -c '' <<< "$found")"
-          if [[ $count -ne 1 ]]; then
-            echo "::error::found $count valid signing identities; the certificate must hold exactly one, Developer ID Application, matching secrets.APPLE_DEVELOPER_NAME and vars.APPLE_TEAM_ID"
-            exit 1
-          fi
-          name="${found#* }"
-          if [[ "$name" != "$expected" ]]; then
-            reasons=""
-            [[ "$name" == "Developer ID Application: "* ]] || reasons="$reasons; it is not a Developer ID Application identity"
-            [[ "$name" == *" ($TEAM_ID)" ]] || reasons="$reasons; its Team ID is not vars.APPLE_TEAM_ID"
-            [[ -n "$reasons" ]] || reasons="; its name differs from secrets.APPLE_DEVELOPER_NAME"
-            echo "::error::the certificate's one valid signing identity does not match${reasons/#;/:}"
-            exit 1
-          fi
-          # Sign by the certificate's SHA-1: codesign then uses exactly this
-          # certificate, and Tauri's "Signing with identity" lines show the hash.
-          echo "APPLE_SIGNING_IDENTITY=${found%% *}" >> "$GITHUB_ENV"
+        run: scripts/release/import-certificate.sh
 
       - name: Write the App Store Connect API key
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
-        run: |
-          umask 077
-          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
-          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
-          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+        run: scripts/release/write-api-key.sh
 
       - name: Bundle, sign and notarize the app
         env:
@@ -212,102 +119,20 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: pnpm tauri bundle --bundles app,dmg
 
-      # tauri bundle has already signed the DMG with APPLE_SIGNING_IDENTITY, and
-      # codesign gives a Developer ID signature a secure timestamp by default.
       - name: Notarize and staple the DMG
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          shopt -s nullglob
-          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
-          if [[ ${#dmgs[@]} -ne 1 ]]; then
-            echo "::error::expected one DMG, found ${#dmgs[@]}"
-            exit 1
-          fi
-          dmg="${dmgs[0]}"
-          auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
-          # Fetch the log whatever notarytool's exit status, so a rejection
-          # shows why.
-          result="$(xcrun notarytool submit "$dmg" --wait --output-format json "${auth[@]}")" || true
-          status="$(jq -r '.status // empty' <<< "$result" 2> /dev/null)" || true
-          if [[ "$status" != "Accepted" ]]; then
-            echo "::error::notarization of the DMG ended as ${status:-no result}"
-            id="$(jq -r '.id // empty' <<< "$result" 2> /dev/null)" || true
-            [[ -z "$id" ]] || xcrun notarytool log "$id" "${auth[@]}" || true
-            exit 1
-          fi
-          # The ticket can take a moment to reach Apple's CDN after Accepted.
-          for attempt in 1 2 3; do
-            xcrun stapler staple "$dmg" && break
-            [[ $attempt -lt 3 ]] || exit 1
-            sleep 30
-          done
-          echo "RELEASE_DMG=$dmg" >> "$GITHUB_ENV"
+        run: scripts/release/notarize-dmg.sh
 
-      # The designated requirement must name the bundle identifier and the
-      # Team ID, not a cdhash: that is what lets the Accessibility grant and
-      # the login item survive an update.
       - name: Check the signature, notarization and Gatekeeper
-        run: |
-          identifier="$(jq -r .identifier src-tauri/tauri.conf.json)"
-          app="src-tauri/target/release/bundle/macos/$(jq -r .productName src-tauri/tauri.conf.json).app"
-          fail() { echo "::error::$1"; exit 1; }
-
-          # Neither codesign nor spctl refuses a main executable that can't
-          # run, and the binary crossed from build in a zip.
-          exe="$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" \
-            || fail "the app's Info.plist names no CFBundleExecutable"
-          [[ -f "$app/Contents/MacOS/$exe" && -x "$app/Contents/MacOS/$exe" ]] \
-            || fail "the app's main executable is not an executable file"
-
-          codesign --verify --deep --strict --verbose=2 "$app"
-          info="$(codesign -dv --verbose=2 "$app" 2>&1)"
-          grep -qxF "Identifier=$identifier" <<< "$info" || fail "the app's identifier is not $identifier"
-          grep -qxF "TeamIdentifier=$TEAM_ID" <<< "$info" || fail "the app is not signed by team $TEAM_ID"
-          grep -qE '^CodeDirectory .*flags=.*runtime' <<< "$info" || fail "the app lacks the hardened runtime"
-          dmg_info="$(codesign -dv --verbose=2 "$RELEASE_DMG" 2>&1)"
-          grep -qxF "TeamIdentifier=$TEAM_ID" <<< "$dmg_info" || fail "the DMG is not signed by team $TEAM_ID"
-
-          requirement="$(codesign -d -r- "$app" 2>&1)"
-          grep -qF "identifier \"$identifier\"" <<< "$requirement" \
-            && grep -qE "certificate leaf\[subject\.OU\] = \"?$TEAM_ID\"?( |\)|$)" <<< "$requirement" \
-            || fail "the designated requirement does not name the identifier and the Team ID"
-
-          xcrun stapler validate "$app"
-          xcrun stapler validate "$RELEASE_DMG"
-
-          gatekeeper() { # <what> <spctl arguments...>
-            local what="$1" out="$RUNNER_TEMP/spctl-$1.txt" rc=0
-            shift
-            spctl --assess -vv "$@" > "$out" 2>&1 || rc=$?
-            # spctl's origin= line names the developer: print only the verdict
-            # and the source.
-            grep -E ': (accepted|rejected)$|^source=' "$out" || true
-            [[ $rc -eq 0 ]] && grep -qx 'source=Notarized Developer ID' "$out" \
-              || fail "Gatekeeper does not accept the $what as notarized"
-          }
-          gatekeeper app --type execute "$app"
-          gatekeeper DMG --type open --context context:primary-signature "$RELEASE_DMG"
+        run: scripts/release/verify.sh
 
       - name: Draft the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$GITHUB_REF_NAME" --jq .sha)"
-          if [[ "$tagged" != "$GITHUB_SHA" ]]; then
-            echo "::error::$GITHUB_REF_NAME no longer points at the commit this run built"
-            exit 1
-          fi
-          version="${GITHUB_REF_NAME#v}"
-          prerelease=()
-          [[ "$version" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "$RELEASE_DMG" ${prerelease[@]+"${prerelease[@]}"} \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
-            --title "DockMoss $version"
+        run: scripts/release/draft.sh
 
       - name: Remove the keychain and the API key
         if: always()
-        run: |
-          [[ -n "${RELEASE_KEYCHAIN:-}" ]] && security delete-keychain "$RELEASE_KEYCHAIN" || true
-          [[ -n "${APPLE_API_KEY_PATH:-}" ]] && rm -f "$APPLE_API_KEY_PATH" || true
+        run: scripts/release/cleanup.sh

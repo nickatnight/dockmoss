@@ -109,6 +109,8 @@ A failed Codecov upload never fails the run. The Codecov CLI is checked against 
 
 [Release](.github/workflows/release.yml) runs when a `v*` tag is pushed. It builds the app and a DMG signed with the Developer ID, has both notarized and stapled, checks them with `codesign`, `stapler` and `spctl`, and opens a draft GitHub release to publish by hand. The build runs in a job with no secrets and a read-only token. Signing runs in a separate job that holds the certificate, the API key and the token that creates the draft, and compiles nothing. The signed DMG leaves that job only as the draft's asset. The job stops before signing until everything below is set, so nothing ships unsigned.
 
+The steps' shell code is in [`scripts/release/`](scripts/release/), one script per step. Each script reads its inputs from the environment the workflow gives that step.
+
 To cut one, set the same version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, merge, then push the tag `v<version>` on a commit on `main`. A version with a `-` (such as `1.0.0-rc.1`) becomes a pre-release.
 
 The run reads these from the repository's `release` environment:

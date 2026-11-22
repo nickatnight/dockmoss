@@ -12,10 +12,13 @@ kc_password="$(openssl rand -hex 32)"
 echo "RELEASE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
 printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$p12"
 security create-keychain -p "$kc_password" "$kc"
-# No timeout (a new keychain locks after 300 s idle): the keychain lives in
-# RUNNER_TEMP on a VM used once and cleanup deletes it, so a timer could only
-# lock it during a long notarization, before Tauri signs the DMG.
+# No lock timer, where a new keychain would otherwise lock after an idle
+# timeout: the keychain lives in RUNNER_TEMP on a VM used once and cleanup
+# deletes it, so a timer could only lock it during a long notarization, before
+# Tauri signs the DMG. show-keychain-info logs the result: the keychain's
+# runner path and its settings.
 security set-keychain-settings "$kc"
+security show-keychain-info "$kc"
 security unlock-keychain -p "$kc_password" "$kc"
 security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
 rm -f "$p12"

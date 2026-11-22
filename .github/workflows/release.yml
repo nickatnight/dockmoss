@@ -140,13 +140,12 @@ jobs:
             exit 1
           fi
           dmg="${dmgs[0]}"
-          result="$(xcrun notarytool submit "$dmg" --wait --output-format json \
-            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")"
+          auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+          result="$(xcrun notarytool submit "$dmg" --wait --output-format json "${auth[@]}")"
           status="$(jq -r .status <<< "$result")"
           if [[ "$status" != "Accepted" ]]; then
             echo "::error::notarization of the DMG ended as $status"
-            xcrun notarytool log "$(jq -r .id <<< "$result")" \
-              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" || true
+            xcrun notarytool log "$(jq -r .id <<< "$result")" "${auth[@]}" || true
             exit 1
           fi
           xcrun stapler staple "$dmg"

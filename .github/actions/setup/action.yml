@@ -1,9 +1,8 @@
 name: Setup
 description: >-
-  pnpm, Node 22 with the pnpm store cached, Rust 1.99.1 with rust-cache
-  (unless rust is 'false'), then pnpm install. Run it after actions/checkout.
-  The release workflow passes cache 'false', so a signed build never restores
-  a cache another run wrote.
+  pnpm, Node 22, Rust 1.99.1 (unless rust is 'false'), then pnpm install, with
+  the pnpm store and rust-cache unless cache is 'false'. Run it after
+  actions/checkout.
 
 inputs:
   rust:

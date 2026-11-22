@@ -1,13 +1,5 @@
 name: Release
 
-# Pushing a tag such as v1.0.0 builds DockMoss signed with the Developer ID,
-# notarizes and staples the app and the DMG, checks the result, and opens a
-# draft GitHub release. Publish the draft by hand.
-#
-# Until the `release` environment has the Apple secrets and the variable that
-# README's "Releases" lists, the run stops at "Release secrets are set".
-# Nothing is ever released unsigned.
-
 on:
   push:
     tags: ['v*']
@@ -77,16 +69,11 @@ jobs:
         with:
           cache: 'false'
 
-      # Tauri can import APPLE_CERTIFICATE itself, but it deletes that keychain
-      # when the build ends, and the DMG still needs signing after it. So the
-      # certificate goes into a keychain of our own, and Tauri gets only the
-      # identity's name.
       - name: Import the Developer ID certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # The part of the identity between "Developer ID Application: " and
-          # " (TEAMID)". The Team ID survives the move from an individual to an
+          # The Team ID survives the move from an individual to an
           # organization membership, so only the name refuses a certificate
           # from the wrong one.
           DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
@@ -103,7 +90,6 @@ jobs:
           security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm -f "$p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_password" "$kc" > /dev/null
-          # shellcheck disable=SC2046 # one keychain path per word
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
 
           # The identity names the developer, and this log is public: compare
@@ -127,8 +113,6 @@ jobs:
           printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
           echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
 
-      # Tauri signs the app with the hardened runtime, notarizes it and
-      # staples the ticket, then builds the DMG around the stapled app.
       - name: Build, sign and notarize the app
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}

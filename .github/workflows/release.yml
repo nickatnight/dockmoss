@@ -53,10 +53,14 @@ jobs:
     name: Sign and notarize
     needs: build
     runs-on: macos-26
-    # A team's first notarization can take hours. The keychain lock in
-    # import-certificate.sh matches, because Tauri signs the DMG only after the
-    # app is notarized.
-    timeout-minutes: 180
+    # A team's first notarization can take hours, and Tauri signs the DMG only
+    # after the app is notarized, so the keychain must stay unlocked as long as
+    # the job may run. A one-entry matrix is the only job-level value that both
+    # timeout-minutes and env can read.
+    strategy:
+      matrix:
+        timeout-minutes: [180]
+    timeout-minutes: ${{ matrix.timeout-minutes }}
     environment: release
     permissions:
       contents: write
@@ -65,6 +69,7 @@ jobs:
       # certificate's name is a secret (DEVELOPER_NAME, below) only so that
       # GitHub masks it: Actions prints each step's env, and this log is public.
       TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      SIGN_TIMEOUT_MINUTES: ${{ matrix.timeout-minutes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

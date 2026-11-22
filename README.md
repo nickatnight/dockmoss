@@ -13,7 +13,7 @@
   <p><img src="docs/readme/banner.svg" width="900" alt="Animated illustration: a laptop on a kitchen counter with six app tiles in its Dock. As a wall calendar turns from May 1 to May 30, moss creeps over the tiles of unused apps, stage by stage, until the Notes tile is overgrown with a mushroom and a flower. The pointer opens Notes: its tile bounces, the moss browns and shrivels away, and the Notes window opens."></p>
 </div>
 
-**Status:** MVP complete (slice 13 of 13). Builds are unsigned; signing, notarization and a DMG are milestone 7.
+**Status:** MVP complete (slice 13 of 13). Builds are unsigned. The workflow that signs, notarizes and drafts a DMG release is written ([Releases](#releases)) but has not run yet: it waits for the organization's Apple Developer account (milestone 7).
 
 ## Requirements
 

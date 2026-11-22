@@ -41,6 +41,10 @@ jobs:
             echo "::error::the tag and the three version fields must all match"
             exit 1
           fi
+          if ! git rev-parse --verify --quiet origin/main > /dev/null; then
+            echo "::error::origin/main is missing; the checkout needs fetch-depth: 0"
+            exit 1
+          fi
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "::error::the tagged commit is not on main"
             exit 1
@@ -239,6 +243,13 @@ jobs:
           app="src-tauri/target/release/bundle/macos/$(jq -r .productName src-tauri/tauri.conf.json).app"
           fail() { echo "::error::$1"; exit 1; }
 
+          # Neither codesign nor spctl refuses a main executable that can't
+          # run, and the binary crossed from build in a zip.
+          exe="$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" \
+            || fail "the app's Info.plist names no CFBundleExecutable"
+          [[ -f "$app/Contents/MacOS/$exe" && -x "$app/Contents/MacOS/$exe" ]] \
+            || fail "the app's main executable is not an executable file"
+
           codesign --verify --deep --strict --verbose=2 "$app"
           info="$(codesign -dv --verbose=2 "$app" 2>&1)"
           grep -qxF "Identifier=$identifier" <<< "$info" || fail "the app's identifier is not $identifier"
@@ -261,7 +272,7 @@ jobs:
             spctl --assess -vv "$@" > "$out" 2>&1 || rc=$?
             # spctl's origin= line names the developer: print only the verdict
             # and the source.
-            grep -E ': (accepted|rejected)|^source=' "$out" || true
+            grep -E ': (accepted|rejected)$|^source=' "$out" || true
             [[ $rc -eq 0 ]] && grep -qx 'source=Notarized Developer ID' "$out" \
               || fail "Gatekeeper does not accept the $what as notarized"
           }

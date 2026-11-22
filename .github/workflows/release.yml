@@ -120,7 +120,7 @@ jobs:
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: pnpm tauri bundle --bundles app,dmg
+        run: scripts/release/bundle.sh
 
       - name: Notarize and staple the DMG
         env:

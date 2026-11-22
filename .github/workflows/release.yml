@@ -1,0 +1,204 @@
+name: Release
+
+# Pushing a tag such as v1.0.0 builds DockMoss signed with the Developer ID,
+# notarizes and staples the app and the DMG, checks the result, and opens a
+# draft GitHub release. Publish the draft by hand.
+#
+# Until the `release` environment has the Apple secrets and the variable that
+# README's "Releases" lists, the run stops at "Release secrets are set".
+# Nothing is ever released unsigned.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Signed release
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: write
+    env:
+      # The Team ID is public in every signed copy, so it is a variable. The
+      # certificate's name is a secret (DEVELOPER_NAME, below) only so that
+      # GitHub masks it: Actions prints each step's env, and this log is public.
+      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tag matches the app version
+        run: |
+          conf="$(jq -r .version src-tauri/tauri.conf.json)"
+          pkg="$(jq -r .version package.json)"
+          cargo="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          echo "tag $GITHUB_REF_NAME, tauri.conf.json $conf, package.json $pkg, Cargo.toml $cargo"
+          if [[ "$GITHUB_REF_NAME" != "v$conf" || "$pkg" != "$conf" || "$cargo" != "$conf" ]]; then
+            echo "::error::the tag and the three version fields must all match"
+            exit 1
+          fi
+          echo "RELEASE_VERSION=$conf" >> "$GITHUB_ENV"
+
+      - name: Release secrets are set
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
+        run: |
+          missing=""
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_KEY \
+                      APPLE_API_ISSUER APPLE_API_PRIVATE_KEY TEAM_ID DEVELOPER_NAME; do
+            [[ -n "${!name}" ]] || missing="$missing $name"
+          done
+          if [[ -n "$missing" ]]; then
+            echo "::error::not set in the release environment:$missing (TEAM_ID is vars.APPLE_TEAM_ID, DEVELOPER_NAME is secrets.APPLE_DEVELOPER_NAME)"
+            exit 1
+          fi
+
+      # No caches: a signed build restores nothing another run wrote.
+      # Dependencies install before any secret is on disk.
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+
+      # Tauri can import APPLE_CERTIFICATE itself, but it deletes that keychain
+      # when the build ends, and the DMG still needs signing after it. So the
+      # certificate goes into a keychain of our own, and Tauri gets only the
+      # identity's name.
+      - name: Import the Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # The part of the identity between "Developer ID Application: " and
+          # " (TEAMID)". The Team ID survives the move from an individual to an
+          # organization membership, so only the name refuses a certificate
+          # from the wrong one.
+          DEVELOPER_NAME: ${{ secrets.APPLE_DEVELOPER_NAME }}
+        run: |
+          umask 077
+          kc="$RUNNER_TEMP/release.keychain-db"
+          p12="$RUNNER_TEMP/certificate.p12"
+          kc_password="$(openssl rand -hex 32)"
+          echo "RELEASE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$p12"
+          security create-keychain -p "$kc_password" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$kc_password" "$kc"
+          security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_password" "$kc" > /dev/null
+          # shellcheck disable=SC2046 # one keychain path per word
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+
+          # The identity names the developer, and this log is public: compare
+          # it, never print it.
+          expected="Developer ID Application: $DEVELOPER_NAME ($TEAM_ID)"
+          found="$(security find-identity -v -p codesigning "$kc" \
+            | sed -n 's/^ *[0-9][0-9]*) [0-9A-F]* "\(.*\)"$/\1/p')"
+          if [[ "$found" != "$expected" ]]; then
+            echo "::error::the certificate must hold exactly one signing identity, Developer ID Application, matching secrets.APPLE_DEVELOPER_NAME and vars.APPLE_TEAM_ID"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$expected" >> "$GITHUB_ENV"
+
+      - name: Write the App Store Connect API key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          umask 077
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
+          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+
+      # Tauri signs the app with the hardened runtime, notarizes it and
+      # staples the ticket, then builds the DMG around the stapled app.
+      - name: Build, sign and notarize the app
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: pnpm tauri build --bundles app,dmg
+
+      - name: Sign, notarize and staple the DMG
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          shopt -s nullglob
+          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
+          if [[ ${#dmgs[@]} -ne 1 ]]; then
+            echo "::error::expected one DMG, found ${#dmgs[@]}"
+            exit 1
+          fi
+          dmg="${dmgs[0]}"
+          codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$dmg"
+          result="$(xcrun notarytool submit "$dmg" --wait --output-format json \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")"
+          status="$(jq -r .status <<< "$result")"
+          if [[ "$status" != "Accepted" ]]; then
+            echo "::error::notarization of the DMG ended as $status"
+            xcrun notarytool log "$(jq -r .id <<< "$result")" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" || true
+            exit 1
+          fi
+          xcrun stapler staple "$dmg"
+          echo "RELEASE_DMG=$dmg" >> "$GITHUB_ENV"
+
+      # The designated requirement must name the bundle identifier and the
+      # Team ID, not a cdhash: that is what lets the Accessibility grant and
+      # the login item survive an update.
+      - name: Check the signature, notarization and Gatekeeper
+        run: |
+          identifier="$(jq -r .identifier src-tauri/tauri.conf.json)"
+          app="src-tauri/target/release/bundle/macos/$(jq -r .productName src-tauri/tauri.conf.json).app"
+          fail() { echo "::error::$1"; exit 1; }
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          info="$(codesign -dv --verbose=2 "$app" 2>&1)"
+          grep -qxF "Identifier=$identifier" <<< "$info" || fail "the app's identifier is not $identifier"
+          grep -qxF "TeamIdentifier=$TEAM_ID" <<< "$info" || fail "the app is not signed by team $TEAM_ID"
+          grep -qE '^CodeDirectory .*flags=.*runtime' <<< "$info" || fail "the app lacks the hardened runtime"
+
+          requirement="$(codesign -d -r- "$app" 2>&1)"
+          grep -qF "identifier \"$identifier\"" <<< "$requirement" \
+            && grep -qE "certificate leaf\[subject\.OU\] = \"?$TEAM_ID\"?( |\)|$)" <<< "$requirement" \
+            || fail "the designated requirement does not name the identifier and the Team ID"
+
+          xcrun stapler validate "$app"
+          xcrun stapler validate "$RELEASE_DMG"
+          spctl --assess --type execute -vv "$app" 2>&1 | tee "$RUNNER_TEMP/spctl-app.txt"
+          grep -qx 'source=Notarized Developer ID' "$RUNNER_TEMP/spctl-app.txt" || fail "Gatekeeper does not accept the app as notarized"
+          spctl --assess --type open --context context:primary-signature -vv "$RELEASE_DMG" 2>&1 | tee "$RUNNER_TEMP/spctl-dmg.txt"
+          grep -qx 'source=Notarized Developer ID' "$RUNNER_TEMP/spctl-dmg.txt" || fail "Gatekeeper does not accept the DMG as notarized"
+
+      - name: Draft the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          [[ "$RELEASE_VERSION" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "$RELEASE_DMG" "${prerelease[@]}" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
+            --title "DockMoss $RELEASE_VERSION"
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: |
+          [[ -n "${RELEASE_KEYCHAIN:-}" ]] && security delete-keychain "$RELEASE_KEYCHAIN" || true
+          [[ -n "${APPLE_API_KEY_PATH:-}" ]] && rm -f "$APPLE_API_KEY_PATH" || true

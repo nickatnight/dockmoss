@@ -17,6 +17,9 @@ inputs:
   ignore-scripts:
     description: Install with --ignore-scripts, so no package's install script runs ('true' or 'false').
     default: 'false'
+  hoist:
+    description: Hoist dependencies into node_modules/.pnpm/node_modules ('true' or 'false'). With 'false', no package lands there under a name it chose.
+    default: 'true'
 
 runs:
   using: composite
@@ -47,5 +50,5 @@ runs:
       with:
         workspaces: src-tauri
 
-    - run: pnpm install --frozen-lockfile ${{ inputs.ignore-scripts == 'true' && '--ignore-scripts' || '' }}
+    - run: pnpm install --frozen-lockfile ${{ inputs.ignore-scripts == 'true' && '--ignore-scripts' || '' }} ${{ inputs.hoist == 'false' && '--config.hoist=false' || '' }}
       shell: bash

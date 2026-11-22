@@ -42,11 +42,11 @@ if [[ $count -ne 1 ]]; then
 fi
 name="${found#* }"
 if [[ "$name" != "$expected" ]]; then
-  reasons=""
-  [[ "$name" == "Developer ID Application: "* ]] || reasons="$reasons; it is not a Developer ID Application identity"
-  [[ "$name" == *" ($TEAM_ID)" ]] || reasons="$reasons; its Team ID is not vars.APPLE_TEAM_ID"
-  [[ -n "$reasons" ]] || reasons="; its name differs from secrets.APPLE_DEVELOPER_NAME"
-  echo "::error::the certificate's one valid signing identity does not match${reasons/#;/:}"
+  reason=""
+  [[ "$name" == "Developer ID Application: "* ]] || reason="it is not a Developer ID Application identity"
+  [[ "$name" == *" ($TEAM_ID)" ]] || reason="${reason:+$reason; }its Team ID is not vars.APPLE_TEAM_ID"
+  [[ -n "$reason" ]] || reason="its name differs from secrets.APPLE_DEVELOPER_NAME"
+  echo "::error::the certificate's one valid signing identity does not match: $reason"
   exit 1
 fi
 # Sign by the certificate's SHA-1: codesign then uses exactly this

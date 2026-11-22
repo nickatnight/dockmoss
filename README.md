@@ -105,6 +105,26 @@ A failed Codecov upload never fails the run. The Codecov CLI is checked against 
 
 `tauri dev` skips the Content Security Policy. To test with it, run `pnpm tauri build --debug --no-bundle` and start `src-tauri/target/debug/dockmoss`. That build has the Web Inspector on, so keep it to your own machine.
 
+### Releases
+
+[Release](.github/workflows/release.yml) runs when a `v*` tag is pushed. It builds the app and a DMG signed with the Developer ID, has both notarized and stapled, checks them with `codesign`, `stapler` and `spctl`, and opens a draft GitHub release to publish by hand. Until everything below is set, it stops before building, so nothing ships unsigned.
+
+To cut one, set the same version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, merge, then push the tag `v<version>`. A version with a `-` (such as `1.0.0-rc.1`) becomes a pre-release.
+
+The run reads these from the repository's `release` environment:
+
+| Name | Kind | Value |
+|---|---|---|
+| `APPLE_CERTIFICATE` | secret | The Developer ID Application certificate and key, and no other identity, exported as `.p12`, base64 (`base64 -i cert.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | secret | The `.p12` export password |
+| `APPLE_API_KEY` | secret | App Store Connect API key ID (Users and Access → Integrations, Developer access) |
+| `APPLE_API_ISSUER` | secret | That page's issuer ID |
+| `APPLE_API_PRIVATE_KEY` | secret | The contents of the key's `AuthKey_<id>.p8` |
+| `APPLE_DEVELOPER_NAME` | secret | The name in the certificate, between `Developer ID Application: ` and ` (<Team ID>)` |
+| `APPLE_TEAM_ID` | variable | The Team ID |
+
+The run refuses a certificate whose name or Team ID differs from these. The name is a secret only so that GitHub masks it in the public logs.
+
 ## Docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): how it works, threads, data files, source layout

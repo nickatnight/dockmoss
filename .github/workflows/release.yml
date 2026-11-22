@@ -150,7 +150,9 @@ jobs:
           found="$(security find-identity -v -p codesigning "$kc" \
             | sed -n 's/^ *[0-9][0-9]*) [0-9A-F]* "\(.*\)"$/\1/p')"
           if [[ "$found" != "$expected" ]]; then
-            echo "::error::the certificate must hold exactly one signing identity, Developer ID Application, matching secrets.APPLE_DEVELOPER_NAME and vars.APPLE_TEAM_ID"
+            count=0
+            [[ -z "$found" ]] || count="$(grep -c '' <<< "$found")"
+            echo "::error::found $count valid signing identities; the certificate must hold exactly one, Developer ID Application, matching secrets.APPLE_DEVELOPER_NAME and vars.APPLE_TEAM_ID"
             exit 1
           fi
           echo "APPLE_SIGNING_IDENTITY=$expected" >> "$GITHUB_ENV"
@@ -186,11 +188,14 @@ jobs:
           fi
           dmg="${dmgs[0]}"
           auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
-          result="$(xcrun notarytool submit "$dmg" --wait --output-format json "${auth[@]}")"
-          status="$(jq -r .status <<< "$result")"
+          # Fetch the log whatever notarytool's exit status, so a rejection
+          # shows why.
+          result="$(xcrun notarytool submit "$dmg" --wait --output-format json "${auth[@]}")" || true
+          status="$(jq -r '.status // empty' <<< "$result" 2> /dev/null)" || true
           if [[ "$status" != "Accepted" ]]; then
-            echo "::error::notarization of the DMG ended as $status"
-            xcrun notarytool log "$(jq -r .id <<< "$result")" "${auth[@]}" || true
+            echo "::error::notarization of the DMG ended as ${status:-no result}"
+            id="$(jq -r '.id // empty' <<< "$result" 2> /dev/null)" || true
+            [[ -z "$id" ]] || xcrun notarytool log "$id" "${auth[@]}" || true
             exit 1
           fi
           xcrun stapler staple "$dmg"
@@ -220,10 +225,19 @@ jobs:
 
           xcrun stapler validate "$app"
           xcrun stapler validate "$RELEASE_DMG"
-          spctl --assess --type execute -vv "$app" 2>&1 | tee "$RUNNER_TEMP/spctl-app.txt"
-          grep -qx 'source=Notarized Developer ID' "$RUNNER_TEMP/spctl-app.txt" || fail "Gatekeeper does not accept the app as notarized"
-          spctl --assess --type open --context context:primary-signature -vv "$RELEASE_DMG" 2>&1 | tee "$RUNNER_TEMP/spctl-dmg.txt"
-          grep -qx 'source=Notarized Developer ID' "$RUNNER_TEMP/spctl-dmg.txt" || fail "Gatekeeper does not accept the DMG as notarized"
+
+          gatekeeper() { # <what> <spctl arguments...>
+            local what="$1" out="$RUNNER_TEMP/spctl-$1.txt" rc=0
+            shift
+            spctl --assess -vv "$@" > "$out" 2>&1 || rc=$?
+            # spctl's origin= line names the developer: print only the verdict
+            # and the source.
+            grep -E ': (accepted|rejected)|^source=' "$out" || true
+            [[ $rc -eq 0 ]] && grep -qx 'source=Notarized Developer ID' "$out" \
+              || fail "Gatekeeper does not accept the $what as notarized"
+          }
+          gatekeeper app --type execute "$app"
+          gatekeeper DMG --type open --context context:primary-signature "$RELEASE_DMG"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

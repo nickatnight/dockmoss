@@ -131,6 +131,8 @@ Before the first tag:
 - Store the six secrets and the variable on that environment only, never as repository or organization secrets.
 - Add a tag ruleset on `v*` that lets only you create, move or delete those tags.
 
+The build's binary stays available to the sign job for 7 days. If sign starts later than that, for example while it waits for your approval or for the secrets, use "Re-run all jobs", not "Re-run failed jobs", so the build runs again.
+
 ## Docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): how it works, threads, data files, source layout

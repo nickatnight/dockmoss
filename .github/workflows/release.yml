@@ -63,13 +63,15 @@ jobs:
           name: dockmoss-binary
           path: src-tauri/target/release/dockmoss
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   sign:
     name: Sign and notarize
     needs: build
     runs-on: macos-26
-    timeout-minutes: 60
+    # A team's first notarization can take hours. The keychain lock below
+    # matches, because Tauri signs the DMG only after the app is notarized.
+    timeout-minutes: 180
     environment: release
     permissions:
       contents: write
@@ -159,7 +161,7 @@ jobs:
           echo "RELEASE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
           printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$p12"
           security create-keychain -p "$kc_password" "$kc"
-          security set-keychain-settings -lut 3600 "$kc"
+          security set-keychain-settings -lut 10800 "$kc"
           security unlock-keychain -p "$kc_password" "$kc"
           security import "$p12" -k "$kc" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
           rm -f "$p12"
@@ -177,8 +179,17 @@ jobs:
             | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) "\(.*\)"$/\1 \2/p')"
           count=0
           [[ -z "$found" ]] || count="$(grep -c '' <<< "$found")"
-          if [[ $count -ne 1 || "${found#* }" != "$expected" ]]; then
+          if [[ $count -ne 1 ]]; then
             echo "::error::found $count valid signing identities; the certificate must hold exactly one, Developer ID Application, matching secrets.APPLE_DEVELOPER_NAME and vars.APPLE_TEAM_ID"
+            exit 1
+          fi
+          name="${found#* }"
+          if [[ "$name" != "$expected" ]]; then
+            reasons=""
+            [[ "$name" == "Developer ID Application: "* ]] || reasons="$reasons; it is not a Developer ID Application identity"
+            [[ "$name" == *" ($TEAM_ID)" ]] || reasons="$reasons; its Team ID is not vars.APPLE_TEAM_ID"
+            [[ -n "$reasons" ]] || reasons="; its name differs from secrets.APPLE_DEVELOPER_NAME"
+            echo "::error::the certificate's one valid signing identity does not match${reasons/#;/:}"
             exit 1
           fi
           # Sign by the certificate's SHA-1: codesign then uses exactly this
@@ -283,6 +294,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$GITHUB_REF_NAME" --jq .sha)"
+          if [[ "$tagged" != "$GITHUB_SHA" ]]; then
+            echo "::error::$GITHUB_REF_NAME no longer points at the commit this run built"
+            exit 1
+          fi
           version="${GITHUB_REF_NAME#v}"
           prerelease=()
           [[ "$version" == *-* ]] && prerelease=(--prerelease)

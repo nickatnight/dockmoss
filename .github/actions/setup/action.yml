@@ -6,7 +6,7 @@ description: >-
 
 inputs:
   rust:
-    description: Install Rust and restore its cache ('true' or 'false').
+    description: Install Rust ('true' or 'false'). Its cache runs only when cache is also 'true'.
     default: 'true'
   rust-components:
     description: Comma-separated rustup components, such as rustfmt,clippy.

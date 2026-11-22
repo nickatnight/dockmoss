@@ -32,7 +32,8 @@ xcrun stapler validate "$app"
 xcrun stapler validate "$RELEASE_DMG"
 
 gatekeeper() {
-  local what="$1" out="$RUNNER_TEMP/spctl-$1.txt" rc=0
+  local what="$1"
+  local out="$RUNNER_TEMP/spctl-$what.txt" rc=0
   shift
   spctl --assess -vv "$@" > "$out" 2>&1 || rc=$?
   # spctl's origin= line names the developer: print only the verdict
